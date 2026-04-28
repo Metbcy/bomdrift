@@ -8,17 +8,28 @@
 //! produce byte-identical renders, which is what `peter-evans/create-or-update-comment`
 //! relies on for upsert behavior in CI.
 //!
-//! # Limitation (v0)
+//! # Multi-version components
 //!
 //! When an SBOM contains multiple instances of the same component at different
-//! versions (legitimate in ecosystems with non-flat dep trees), only the
-//! last-inserted entry is kept by the BTreeMap collector. Proper handling needs
-//! the dependency-graph relationships (CDX `dependencies`, SPDX `relationships`)
-//! which are deferred to a follow-up PR.
+//! versions (legitimate in ecosystems with non-flat dep trees, e.g. npm), per-key
+//! grouping is preserved and the diff is computed pair-by-version. For each
+//! `ComponentKey` K with `B = before[K]` and `A = after[K]`:
+//!
+//! - Versions in `A \ B` → [`ChangeSet::added`].
+//! - Versions in `B \ A` → [`ChangeSet::removed`].
+//! - Versions in `A ∩ B` with differing license sets → [`ChangeSet::license_changed`].
+//! - The legacy single-version case (`|B| = |A| = 1`, versions differ) collapses
+//!   into [`ChangeSet::version_changed`] for backward-compatible rendering.
+//!
+//! When both sides have multi-version sets, no `version_changed` pair is
+//! synthesized — pair-by-version assignment is ambiguous without the dep graph
+//! (`dependencies` / `relationships`), so all changes route through `added` /
+//! `removed`. A reviewer reading the comment still sees every relevant version
+//! transition; correlating them is unambiguous when both sides are visible.
 
 pub mod key;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
@@ -48,37 +59,81 @@ impl ChangeSet {
 }
 
 pub fn diff(before: &Sbom, after: &Sbom) -> ChangeSet {
-    let bmap: BTreeMap<ComponentKey, &Component> =
-        before.components.iter().map(|c| (key(c), c)).collect();
-    let amap: BTreeMap<ComponentKey, &Component> =
-        after.components.iter().map(|c| (key(c), c)).collect();
+    let bmap = group_by_key(&before.components);
+    let amap = group_by_key(&after.components);
 
     let mut changeset = ChangeSet::default();
 
-    for (k, &acomp) in &amap {
-        match bmap.get(k) {
-            None => changeset.added.push(acomp.clone()),
-            Some(&bcomp) => {
-                if bcomp.version != acomp.version {
-                    changeset
-                        .version_changed
-                        .push((bcomp.clone(), acomp.clone()));
-                } else if bcomp.licenses != acomp.licenses {
-                    changeset
-                        .license_changed
-                        .push((bcomp.clone(), acomp.clone()));
+    let all_keys: BTreeSet<&ComponentKey> = bmap.keys().chain(amap.keys()).collect();
+    for k in all_keys {
+        let bs = bmap.get(k).map(Vec::as_slice).unwrap_or(&[]);
+        let as_ = amap.get(k).map(Vec::as_slice).unwrap_or(&[]);
+        diff_one_key(bs, as_, &mut changeset);
+    }
+
+    changeset
+}
+
+/// Group components by [`ComponentKey`], preserving every distinct version that
+/// shares a key. The returned `BTreeMap` is the basis for deterministic
+/// per-key iteration in [`diff`].
+fn group_by_key(comps: &[Component]) -> BTreeMap<ComponentKey, Vec<&Component>> {
+    let mut out: BTreeMap<ComponentKey, Vec<&Component>> = BTreeMap::new();
+    for c in comps {
+        out.entry(key(c)).or_default().push(c);
+    }
+    out
+}
+
+/// Reconcile a single component key's `before` and `after` versions against the
+/// changeset. The legacy 1-vs-1 case is preserved as a `version_changed` pair so
+/// existing renderers and the JSON contract don't see a behavior shift; every
+/// other shape is reported as a combination of added / removed / license-changed
+/// entries (see module-level "Multi-version components" notes).
+fn diff_one_key(bs: &[&Component], as_: &[&Component], cs: &mut ChangeSet) {
+    match (bs, as_) {
+        ([], []) => {}
+        ([], a) => {
+            for c in a {
+                cs.added.push((*c).clone());
+            }
+        }
+        (b, []) => {
+            for c in b {
+                cs.removed.push((*c).clone());
+            }
+        }
+        ([b], [a]) => {
+            if b.version != a.version {
+                cs.version_changed.push(((*b).clone(), (*a).clone()));
+            } else if b.licenses != a.licenses {
+                cs.license_changed.push(((*b).clone(), (*a).clone()));
+            }
+        }
+        (b, a) => {
+            // Multi-version on at least one side: pair by exact version match.
+            // The BTreeMap-by-version below preserves deterministic iteration.
+            let by_version_b: BTreeMap<&str, &Component> =
+                b.iter().map(|c| (c.version.as_str(), *c)).collect();
+            let by_version_a: BTreeMap<&str, &Component> =
+                a.iter().map(|c| (c.version.as_str(), *c)).collect();
+
+            for (v, &acomp) in &by_version_a {
+                match by_version_b.get(v) {
+                    None => cs.added.push(acomp.clone()),
+                    Some(&bcomp) if bcomp.licenses != acomp.licenses => {
+                        cs.license_changed.push((bcomp.clone(), acomp.clone()));
+                    }
+                    Some(_) => {}
+                }
+            }
+            for (v, &bcomp) in &by_version_b {
+                if !by_version_a.contains_key(v) {
+                    cs.removed.push(bcomp.clone());
                 }
             }
         }
     }
-
-    for (k, &bcomp) in &bmap {
-        if !amap.contains_key(k) {
-            changeset.removed.push(bcomp.clone());
-        }
-    }
-
-    changeset
 }
 
 #[cfg(test)]
@@ -272,6 +327,130 @@ mod tests {
             1,
             "name+ecosystem keying should match across SBOMs"
         );
+    }
+
+    #[test]
+    fn multi_version_same_component_does_not_collapse() {
+        // Pre-fix behavior: BTreeMap keyed by ComponentKey silently dropped the
+        // duplicate at axios@2.0, so `before` would look like `{axios@2.0}`
+        // and the diff would produce a single version_changed pair instead of
+        // surfacing both the removal of @1.0 and the additions of @3.0/@4.0.
+        let before = sbom(vec![
+            comp(
+                "axios",
+                "1.0.0",
+                Ecosystem::Npm,
+                Some("pkg:npm/axios@1.0.0"),
+            ),
+            comp(
+                "axios",
+                "2.0.0",
+                Ecosystem::Npm,
+                Some("pkg:npm/axios@2.0.0"),
+            ),
+        ]);
+        let after = sbom(vec![
+            comp(
+                "axios",
+                "2.0.0",
+                Ecosystem::Npm,
+                Some("pkg:npm/axios@2.0.0"),
+            ),
+            comp(
+                "axios",
+                "3.0.0",
+                Ecosystem::Npm,
+                Some("pkg:npm/axios@3.0.0"),
+            ),
+            comp(
+                "axios",
+                "4.0.0",
+                Ecosystem::Npm,
+                Some("pkg:npm/axios@4.0.0"),
+            ),
+        ]);
+
+        let cs = diff(&before, &after);
+
+        // Both new versions must appear in `added`.
+        let added_versions: Vec<&str> = cs.added.iter().map(|c| c.version.as_str()).collect();
+        assert_eq!(added_versions, vec!["3.0.0", "4.0.0"]);
+
+        // The dropped version must appear in `removed`.
+        let removed_versions: Vec<&str> = cs.removed.iter().map(|c| c.version.as_str()).collect();
+        assert_eq!(removed_versions, vec!["1.0.0"]);
+
+        // No `version_changed` synthesized — pair-by-version assignment is
+        // ambiguous when both sides have multiple versions, so the diff stays
+        // honest and routes everything through added/removed.
+        assert!(cs.version_changed.is_empty());
+        assert!(cs.license_changed.is_empty());
+    }
+
+    #[test]
+    fn multi_version_intersecting_license_changes_route_to_license_changed() {
+        // Both sides ship axios@2.0; only the license differs at that exact
+        // version. The intersecting same-version-different-license case is the
+        // suspicious one and must still surface.
+        let mut b1 = comp(
+            "axios",
+            "1.0.0",
+            Ecosystem::Npm,
+            Some("pkg:npm/axios@1.0.0"),
+        );
+        b1.licenses = vec!["MIT".to_string()];
+        let mut b2 = comp(
+            "axios",
+            "2.0.0",
+            Ecosystem::Npm,
+            Some("pkg:npm/axios@2.0.0"),
+        );
+        b2.licenses = vec!["MIT".to_string()];
+        let mut a2 = comp(
+            "axios",
+            "2.0.0",
+            Ecosystem::Npm,
+            Some("pkg:npm/axios@2.0.0"),
+        );
+        a2.licenses = vec!["GPL-3.0".to_string()];
+
+        let cs = diff(&sbom(vec![b1, b2]), &sbom(vec![a2]));
+        assert_eq!(cs.license_changed.len(), 1);
+        assert_eq!(cs.license_changed[0].1.version, "2.0.0");
+        assert_eq!(cs.removed.len(), 1);
+        assert_eq!(cs.removed[0].version, "1.0.0");
+        assert!(cs.added.is_empty());
+        assert!(cs.version_changed.is_empty());
+    }
+
+    #[test]
+    fn single_to_multi_version_does_not_synthesize_version_changed() {
+        // before: axios@1.0 (single); after: axios@2.0, axios@3.0 (two).
+        // No clear "before-vs-after pair" — surface as removal + two adds.
+        let before = sbom(vec![comp(
+            "axios",
+            "1.0.0",
+            Ecosystem::Npm,
+            Some("pkg:npm/axios@1.0.0"),
+        )]);
+        let after = sbom(vec![
+            comp(
+                "axios",
+                "2.0.0",
+                Ecosystem::Npm,
+                Some("pkg:npm/axios@2.0.0"),
+            ),
+            comp(
+                "axios",
+                "3.0.0",
+                Ecosystem::Npm,
+                Some("pkg:npm/axios@3.0.0"),
+            ),
+        ]);
+        let cs = diff(&before, &after);
+        assert_eq!(cs.added.len(), 2);
+        assert_eq!(cs.removed.len(), 1);
+        assert!(cs.version_changed.is_empty());
     }
 
     #[test]
