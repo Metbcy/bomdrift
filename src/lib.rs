@@ -10,7 +10,7 @@ use std::fs;
 use std::io::IsTerminal;
 use std::path::Path;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 
 use crate::cli::{Cli, Command, DiffArgs, OutputFormat};
 
@@ -77,7 +77,7 @@ fn run_diff(args: DiffArgs) -> Result<()> {
         }
         OutputFormat::Markdown => render::markdown::render(&cs, &enrichment),
         OutputFormat::Json => render::json::render(&cs, &enrichment),
-        OutputFormat::Sarif => bail!("--output sarif is not implemented yet (planned for v0.2)"),
+        OutputFormat::Sarif => render::sarif::render(&cs, &enrichment),
     };
 
     print!("{rendered}");
