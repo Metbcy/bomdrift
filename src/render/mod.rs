@@ -4,3 +4,4 @@
 //! a hard requirement for `peter-evans/create-or-update-comment` upsert behavior.
 
 pub mod markdown;
+pub mod term;

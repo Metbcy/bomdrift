@@ -172,3 +172,39 @@ fn diff_axios_fixture_pair_renders_typosquat_section() {
         "wording must be 'similar to', never 'is a typosquat'"
     );
 }
+
+#[test]
+fn diff_terminal_output_in_non_tty_falls_back_to_markdown() {
+    // When the binary is invoked under `Command::output()`, stdout is captured
+    // (a pipe, not a TTY). The terminal renderer must therefore fall back to
+    // plain markdown so PR-comment workflows that pipe `bomdrift` output stay
+    // safe regardless of the user's chosen format flag.
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--output",
+            "terminal",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(
+        out.status.success(),
+        "exit code: {}\nstderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    assert!(
+        stdout.starts_with("## SBOM diff"),
+        "non-TTY terminal output must fall back to markdown headline; got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("\x1b["),
+        "non-TTY output must contain no ANSI escapes; got:\n{stdout}"
+    );
+}
