@@ -45,6 +45,10 @@ fn run_diff(args: DiffArgs) -> Result<()> {
     // runs, regardless of `--no-osv`. Findings are informational.
     enrichment.typosquats = enrich::typosquat::enrich(&cs);
 
+    // Multi-major version-jump detection is pure-compute and also always runs.
+    // Findings are informational.
+    enrichment.version_jumps = enrich::version_jump::enrich(&cs);
+
     let rendered = match args.output {
         OutputFormat::Terminal | OutputFormat::Markdown => {
             render::markdown::render(&cs, &enrichment)
