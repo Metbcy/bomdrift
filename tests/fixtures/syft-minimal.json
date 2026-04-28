@@ -1,0 +1,39 @@
+{
+  "schema": {
+    "version": "16.0.0",
+    "url": "https://raw.githubusercontent.com/anchore/syft/main/internal/jsonschema/anchore.io/schema/syft/json/16.0.0/document.json"
+  },
+  "source": {
+    "id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "name": "github.com/Metbcy/bomdrift",
+    "type": "directory"
+  },
+  "artifacts": [
+    {
+      "id": "axios-1.14.0-syft-id",
+      "name": "axios",
+      "version": "1.14.0",
+      "type": "npm",
+      "purl": "pkg:npm/axios@1.14.0",
+      "licenses": [
+        {"value": "MIT", "spdxExpression": "MIT", "type": "declared"}
+      ]
+    },
+    {
+      "id": "requests-2.31.0-syft-id",
+      "name": "requests",
+      "version": "2.31.0",
+      "type": "python",
+      "purl": "pkg:pypi/requests@2.31.0",
+      "licenses": [
+        "Apache-2.0"
+      ]
+    },
+    {
+      "id": "no-purl-syft",
+      "name": "no-purl-component",
+      "version": "0.1.0",
+      "type": "rust-crate"
+    }
+  ]
+}

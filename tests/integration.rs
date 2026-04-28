@@ -109,3 +109,40 @@ fn spdx_minimal_parses() {
     assert!(no_purl.purl.is_none());
     assert!(no_purl.licenses.is_empty());
 }
+
+#[test]
+fn syft_minimal_parses() {
+    let raw = fixture("syft-minimal.json");
+    let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let sbom = parse::parse(value).expect("parse syft fixture");
+
+    assert_eq!(sbom.format, SbomFormat::Syft);
+    assert_eq!(
+        sbom.serial.as_deref(),
+        Some("sha256:1111111111111111111111111111111111111111111111111111111111111111"),
+        "Syft `source.id` should map to Sbom.serial"
+    );
+    assert_eq!(sbom.components.len(), 3);
+
+    let axios = &sbom.components[0];
+    assert_eq!(axios.name, "axios");
+    assert_eq!(axios.ecosystem, Ecosystem::Npm);
+    assert_eq!(axios.licenses, vec!["MIT".to_string()]);
+    assert_eq!(axios.bom_ref.as_deref(), Some("axios-1.14.0-syft-id"));
+
+    let requests = &sbom.components[1];
+    assert_eq!(requests.ecosystem, Ecosystem::PyPI);
+    assert_eq!(
+        requests.licenses,
+        vec!["Apache-2.0".to_string()],
+        "plain-string license entry should also be supported"
+    );
+
+    let no_purl = &sbom.components[2];
+    assert_eq!(
+        no_purl.ecosystem,
+        Ecosystem::Cargo,
+        "Syft `type: rust-crate` should map to Cargo when purl is absent"
+    );
+    assert!(no_purl.purl.is_none());
+}
