@@ -1,9 +1,16 @@
 //! Risk-signal enrichers. Each runs over a [`crate::diff::ChangeSet`] and produces
 //! data that the renderers can pair back to the changed components.
 //!
+//! Risk-signal enrichers. Each runs over a [`crate::diff::ChangeSet`] and produces
+//! data that the renderers can pair back to the changed components.
+//!
 //! v0 ships [`osv`] (CVE lookup via OSV.dev), [`typosquat`] (similarity to
 //! popular npm packages), and [`version_jump`] (multi-major upgrades).
-//! Maintainer-age enricher lands in a subsequent PR.
+//! [`maintainer`] (young-maintainer / xz-pattern signal) lands alongside.
+//!
+//! New `Enrichment` fields must derive `serde::Serialize` to appear in JSON
+//! output (see `crate::render::json`). Every finding type added here MUST
+//! keep that contract or the JSON renderer will fail to compile.
 
 pub mod osv;
 pub mod typosquat;
@@ -11,13 +18,15 @@ pub mod version_jump;
 
 use std::collections::HashMap;
 
+use serde::Serialize;
+
 use typosquat::TyposquatFinding;
 use version_jump::VersionJumpFinding;
 
 /// Aggregated enrichment data attached to a diff. Keyed by the component's
 /// purl-with-version (e.g. `pkg:npm/axios@1.14.1`) so renderers can look up
 /// per-component findings without re-iterating over the changeset.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Enrichment {
     /// Map of `purl@version` → list of advisory IDs (e.g. GHSA-..., CVE-...).
     /// Components with no findings are absent from the map (never present with

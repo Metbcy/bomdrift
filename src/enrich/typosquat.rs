@@ -37,6 +37,7 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
+use serde::Serialize;
 use strsim::jaro_winkler;
 
 use crate::diff::ChangeSet;
@@ -64,7 +65,7 @@ const MIN_LEGIT_LEN_FOR_STRUCTURAL_RULES: usize = 5;
 /// handles, or intentional pluralizations (`react` vs `reacts`).
 const SUFFIX_BOOST_MIN_DELTA: usize = 3;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TyposquatFinding {
     pub component: Component,
     pub closest: String,

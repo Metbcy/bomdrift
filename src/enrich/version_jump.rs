@@ -41,6 +41,8 @@
 //! - leading-zero numbers (`01.2.3`) — ambiguous and almost always a sign of
 //!   a non-SemVer scheme; safer to skip than misinterpret.
 
+use serde::Serialize;
+
 use crate::diff::ChangeSet;
 use crate::model::Component;
 
@@ -49,7 +51,7 @@ use crate::model::Component;
 /// delta `>= 2` is unusual enough to warrant explicit review.
 pub const MIN_MAJOR_DELTA: u32 = 2;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct VersionJumpFinding {
     pub before: Component,
     pub after: Component,

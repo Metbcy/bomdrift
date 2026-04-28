@@ -20,10 +20,12 @@ pub mod key;
 
 use std::collections::BTreeMap;
 
+use serde::Serialize;
+
 use crate::model::{Component, Sbom};
 use key::{ComponentKey, key};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ChangeSet {
     pub added: Vec<Component>,
     pub removed: Vec<Component>,

@@ -1,9 +1,23 @@
 //! Unified component model. Every SBOM input format normalizes into `Component` so the
 //! diff and enrichment passes only ever see one shape.
+//!
+//! ## JSON serialization
+//!
+//! All public types in this module derive [`serde::Serialize`] so the diff result
+//! graph round-trips through `--output json`. Field names are kept as-is
+//! (snake_case) to match Rust convention and avoid any rename indirection.
+//!
+//! Enums with an `Other(String)` escape hatch ([`Ecosystem`], [`HashAlg`])
+//! serialize as plain JSON strings via hand-rolled [`serde::Serialize`] impls so
+//! `Ecosystem::Other("library")` becomes `"library"` (not
+//! `{"Other": "library"}`), keeping downstream JSON consumers from having to
+//! special-case the variant tagging.
 
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Component {
     pub name: String,
     pub version: String,
@@ -47,7 +61,13 @@ impl fmt::Display for Ecosystem {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl Serialize for Ecosystem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Hash {
     pub alg: HashAlg,
     pub value: String,
@@ -62,7 +82,26 @@ pub enum HashAlg {
     Other(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl HashAlg {
+    fn as_str(&self) -> &str {
+        match self {
+            Self::Sha1 => "sha1",
+            Self::Sha256 => "sha256",
+            Self::Sha512 => "sha512",
+            Self::Md5 => "md5",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+}
+
+impl Serialize for HashAlg {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Relationship {
     Direct,
     Transitive,

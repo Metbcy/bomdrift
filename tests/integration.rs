@@ -259,6 +259,41 @@ fn typosquat_enricher_flags_plain_crypto_js_on_axios_fixture() {
     assert!(findings[0].score >= bomdrift::enrich::typosquat::SIMILARITY_THRESHOLD);
 }
 
+#[test]
+fn json_render_full_pipeline() {
+    // Full pipeline: parse two CycloneDX fixtures → diff → typosquat enrich
+    // (offline, pure compute) → JSON render → parse the JSON back out and
+    // assert the typosquat finding survives the round-trip. This is the
+    // contract `--output json` exposes to downstream tooling.
+    let before = parse_fixture("cdx-minimal.json");
+    let after = parse_fixture("cdx-after.json");
+    let cs = diff::diff(&before, &after);
+
+    let enrichment = bomdrift::enrich::Enrichment {
+        typosquats: bomdrift::enrich::typosquat::enrich(&cs),
+        ..Default::default()
+    };
+
+    let rendered = render::json::render(&cs, &enrichment);
+    let v: serde_json::Value =
+        serde_json::from_str(&rendered).expect("render::json output must parse back");
+
+    assert!(v.get("changes").is_some());
+    assert!(v.get("enrichment").is_some());
+    assert_eq!(v["changes"]["added"][0]["name"], "plain-crypto-js");
+    assert_eq!(v["changes"]["version_changed"][0][0]["name"], "axios");
+    assert_eq!(v["changes"]["version_changed"][0][0]["version"], "1.14.0");
+    assert_eq!(v["changes"]["version_changed"][0][1]["version"], "1.14.1");
+
+    let typosquats = v["enrichment"]["typosquats"]
+        .as_array()
+        .expect("typosquats array");
+    assert_eq!(typosquats.len(), 1, "expected one typosquat finding");
+    assert_eq!(typosquats[0]["component"]["name"], "plain-crypto-js");
+    assert_eq!(typosquats[0]["closest"], "crypto-js");
+    assert!(typosquats[0]["score"].as_f64().unwrap() >= 0.9);
+}
+
 fn parse_fixture(name: &str) -> bomdrift::model::Sbom {
     let raw = fixture(name);
     let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
