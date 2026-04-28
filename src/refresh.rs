@@ -19,13 +19,14 @@
 //! application names are intentionally identical (we own the namespace) and
 //! the qualifier `dev` is a stable bucket for tools without a domain.
 //!
-//! ## v0 scope
+//! ## v0.2 scope
 //!
-//! Only `npm` is wired up. PyPI, Cargo, and Maven are accepted on the
-//! `--ecosystem` flag but currently emit a "not yet wired" warning rather
-//! than failing — the contract is that `refresh-typosquat --ecosystem all`
-//! should keep working as new ecosystems are added without users having to
-//! change their invocation.
+//! Wired ecosystems: `npm`, `pypi`, `cargo`. Each fetches from its canonical
+//! upstream source and writes a refreshed list under `<cache>/typosquat/`.
+//! `maven` is accepted on the `--ecosystem` flag but emits an informational
+//! notice rather than fetching anything: Maven Central has no canonical
+//! "top N" feed, so the curated `data/maven-top100.txt` shipped in the
+//! binary is the source of truth.
 //!
 //! ## Atomicity
 //!
@@ -58,6 +59,26 @@ use crate::cli::{RefreshArgs, RefreshEcosystem};
 pub const NPM_SOURCE_URL: &str =
     "https://gist.githubusercontent.com/anvaka/8e8fa57c7ee1350e3491/raw/01.most-dependent-upon.md";
 
+/// Source URL for the PyPI top-N list. Returns a JSON object with a `rows`
+/// array of `{download_count, project}`; we take the first 200.
+pub const PYPI_SOURCE_URL: &str =
+    "https://hugovk.github.io/top-pypi-packages/top-pypi-packages.min.json";
+
+/// Pageable source URL for the crates.io top-N list. We fetch pages 1 and 2
+/// (100 names per page) for a total of 200, with a 1 req/sec sleep between
+/// pages to respect crates.io's rate limit.
+pub const CARGO_SOURCE_URL_TEMPLATE: &str =
+    "https://crates.io/api/v1/crates?sort=downloads&per_page=100&page=";
+
+/// How many crates.io pages to walk on a refresh. 2 pages * 100/page = 200
+/// names, matching `data/cargo-top200.txt`.
+const CARGO_PAGES: u32 = 2;
+
+/// Sleep between paginated crates.io requests. Crates.io's rate-limit
+/// guidance is "1 request per second", so a 1.0s gap is the conservative
+/// floor. Tests inject a no-op sleeper to keep the suite fast.
+const CARGO_PAGE_DELAY: Duration = Duration::from_secs(1);
+
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Public entry point used by `bomdrift refresh-typosquat`. Resolves the cache
@@ -77,14 +98,23 @@ where
     let mut any_failure = false;
 
     for eco in selected_ecosystems(args.ecosystem) {
-        match eco {
-            RefreshEcosystem::Npm => {
-                if let Err(err) = refresh_npm(&fetcher, cache_root) {
-                    eprintln!("error: failed to refresh npm list: {err:#}");
-                    any_failure = true;
-                }
+        let result = match eco {
+            RefreshEcosystem::Npm => refresh_npm(&fetcher, cache_root),
+            RefreshEcosystem::PyPI => refresh_pypi(&fetcher, cache_root),
+            RefreshEcosystem::Cargo => refresh_cargo(&fetcher, cache_root, std::thread::sleep),
+            RefreshEcosystem::Maven => {
+                eprintln!(
+                    "skipping maven: no canonical upstream feed exists. The maven \
+                     typosquat list is curated and shipped embedded; edit \
+                     data/maven-top100.txt and rebuild bomdrift to update it."
+                );
+                Ok(())
             }
             RefreshEcosystem::All => unreachable!("`All` is expanded by selected_ecosystems"),
+        };
+        if let Err(err) = result {
+            eprintln!("error: failed to refresh {eco:?} list: {err:#}");
+            any_failure = true;
         }
     }
 
@@ -98,8 +128,13 @@ where
 /// new ecosystem only requires extending this match arm.
 fn selected_ecosystems(eco: RefreshEcosystem) -> Vec<RefreshEcosystem> {
     match eco {
-        RefreshEcosystem::All => vec![RefreshEcosystem::Npm],
-        RefreshEcosystem::Npm => vec![RefreshEcosystem::Npm],
+        RefreshEcosystem::All => vec![
+            RefreshEcosystem::Npm,
+            RefreshEcosystem::PyPI,
+            RefreshEcosystem::Cargo,
+            RefreshEcosystem::Maven,
+        ],
+        single => vec![single],
     }
 }
 
@@ -112,24 +147,108 @@ where
     let body_str =
         std::str::from_utf8(&body).context("npm top-list source was not valid UTF-8 markdown")?;
     let names = parse_anvaka_markdown(body_str);
+    persist_list(cache_root, "npm.txt", "npm", &names)
+}
+
+/// Refresh PyPI: GET the hugovk JSON, take the first 200 project names. The
+/// upstream document is sorted by descending download count, so a simple
+/// truncation is the right "top N" semantics.
+fn refresh_pypi<F>(fetcher: &F, cache_root: &Path) -> Result<()>
+where
+    F: Fn(&str) -> Result<Vec<u8>>,
+{
+    eprintln!("refreshing pypi from {PYPI_SOURCE_URL}...");
+    let body = fetcher(PYPI_SOURCE_URL).context("fetching pypi top-list source")?;
+    let names = parse_pypi_json(&body)?;
+    persist_list(cache_root, "pypi.txt", "pypi", &names)
+}
+
+/// Refresh Cargo: paginate the crates.io API. Two pages of 100 is the
+/// matching `data/cargo-top200.txt` size; the polite-pause sleeper is
+/// dependency-injected so tests can run instantly.
+fn refresh_cargo<F, S>(fetcher: &F, cache_root: &Path, sleep: S) -> Result<()>
+where
+    F: Fn(&str) -> Result<Vec<u8>>,
+    S: Fn(Duration),
+{
+    let mut all_names: Vec<String> = Vec::new();
+    for page in 1..=CARGO_PAGES {
+        let url = format!("{CARGO_SOURCE_URL_TEMPLATE}{page}");
+        eprintln!("refreshing cargo: page {page}/{CARGO_PAGES} from {url}...");
+        let body = fetcher(&url).with_context(|| format!("fetching cargo page {page}"))?;
+        let mut page_names =
+            parse_cargo_json(&body).with_context(|| format!("parsing cargo page {page}"))?;
+        all_names.append(&mut page_names);
+        if page < CARGO_PAGES {
+            sleep(CARGO_PAGE_DELAY);
+        }
+    }
+    persist_list(cache_root, "cargo.txt", "cargo", &all_names)
+}
+
+/// Shared cache-write tail for all per-ecosystem refresh paths. Refuses to
+/// overwrite the cache with an empty list (so a transient upstream parse
+/// regression doesn't silently neuter the typosquat enricher).
+fn persist_list(cache_root: &Path, filename: &str, label: &str, names: &[String]) -> Result<()> {
     if names.is_empty() {
         bail!(
-            "parsed zero package names from {NPM_SOURCE_URL} — refusing to overwrite cache with empty list"
+            "parsed zero {label} package names from upstream — refusing to overwrite cache with empty list"
         );
     }
-
     let target_dir = cache_root.join("typosquat");
     fs::create_dir_all(&target_dir)
         .with_context(|| format!("creating cache directory {}", target_dir.display()))?;
-    let target = target_dir.join("npm.txt");
-    write_list_atomically(&target, &names)
+    let target = target_dir.join(filename);
+    write_list_atomically(&target, names)
         .with_context(|| format!("writing {}", target.display()))?;
     eprintln!(
-        "refreshing npm... wrote {} names to {}",
+        "refreshing {label}... wrote {} names to {}",
         names.len(),
         target.display()
     );
     Ok(())
+}
+
+/// Parse the hugovk top-pypi-packages JSON. Shape:
+/// `{"rows": [{"download_count": <int>, "project": "<name>"}, ...]}`.
+/// Returns the first [`PYPI_TOP_N`] project names in upstream (descending
+/// download-count) order.
+pub(crate) fn parse_pypi_json(body: &[u8]) -> Result<Vec<String>> {
+    #[derive(serde::Deserialize)]
+    struct Row {
+        project: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct Top {
+        rows: Vec<Row>,
+    }
+    let parsed: Top = serde_json::from_slice(body).context("decoding pypi JSON")?;
+    Ok(parsed
+        .rows
+        .into_iter()
+        .take(PYPI_TOP_N)
+        .map(|r| r.project)
+        .collect())
+}
+
+/// How many PyPI names to take from the upstream JSON. Matches the size of
+/// the embedded `data/pypi-top200.txt` snapshot.
+const PYPI_TOP_N: usize = 200;
+
+/// Parse one page of crates.io API JSON. Shape:
+/// `{"crates": [{"name": "<name>", ...}, ...], ...}`. Returns the names in
+/// the upstream (descending download-count) order.
+pub(crate) fn parse_cargo_json(body: &[u8]) -> Result<Vec<String>> {
+    #[derive(serde::Deserialize)]
+    struct Crate {
+        name: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct Page {
+        crates: Vec<Crate>,
+    }
+    let parsed: Page = serde_json::from_slice(body).context("decoding cargo JSON")?;
+    Ok(parsed.crates.into_iter().map(|c| c.name).collect())
 }
 
 /// Extract package names from the anvaka most-depended-upon markdown gist.
@@ -279,9 +398,121 @@ not a package line at all
     }
 
     #[test]
-    fn refresh_all_currently_only_includes_npm() {
+    fn refresh_all_includes_npm_pypi_cargo_maven() {
         let ecos = selected_ecosystems(RefreshEcosystem::All);
-        assert_eq!(ecos, vec![RefreshEcosystem::Npm]);
+        assert_eq!(
+            ecos,
+            vec![
+                RefreshEcosystem::Npm,
+                RefreshEcosystem::PyPI,
+                RefreshEcosystem::Cargo,
+                RefreshEcosystem::Maven
+            ]
+        );
+    }
+
+    // ---- PyPI -------------------------------------------------------------
+
+    const SAMPLE_PYPI_JSON: &[u8] = br#"{
+        "last_update": "2026-04-01",
+        "rows": [
+            {"download_count": 999, "project": "boto3"},
+            {"download_count": 888, "project": "requests"},
+            {"download_count": 777, "project": "numpy"}
+        ]
+    }"#;
+
+    #[test]
+    fn parse_pypi_json_extracts_names_in_order() {
+        let names = parse_pypi_json(SAMPLE_PYPI_JSON).expect("parses");
+        assert_eq!(names, vec!["boto3", "requests", "numpy"]);
+    }
+
+    #[test]
+    fn parse_pypi_json_rejects_non_json() {
+        assert!(parse_pypi_json(b"<html>not json</html>").is_err());
+    }
+
+    #[test]
+    fn refresh_writes_parsed_pypi_list_to_cache_dir() {
+        let tmp = tempdir();
+        let cache_root = tmp.path().to_path_buf();
+        let fetcher = |url: &str| -> Result<Vec<u8>> {
+            assert_eq!(url, PYPI_SOURCE_URL);
+            Ok(SAMPLE_PYPI_JSON.to_vec())
+        };
+        run_with(
+            RefreshArgs {
+                ecosystem: RefreshEcosystem::PyPI,
+            },
+            fetcher,
+            &cache_root,
+        )
+        .expect("refresh should succeed");
+        let target = cache_root.join("typosquat").join("pypi.txt");
+        let body = fs::read_to_string(&target).expect("pypi cache file must exist");
+        assert_eq!(body, "boto3\nrequests\nnumpy\n");
+    }
+
+    // ---- Cargo ------------------------------------------------------------
+
+    const SAMPLE_CARGO_JSON: &[u8] = br#"{
+        "crates": [
+            {"name": "syn"},
+            {"name": "serde"},
+            {"name": "tokio"}
+        ],
+        "meta": {"total": 3}
+    }"#;
+
+    #[test]
+    fn parse_cargo_json_extracts_names_in_order() {
+        let names = parse_cargo_json(SAMPLE_CARGO_JSON).expect("parses");
+        assert_eq!(names, vec!["syn", "serde", "tokio"]);
+    }
+
+    #[test]
+    fn refresh_cargo_concatenates_pages_and_writes_cache() {
+        let tmp = tempdir();
+        let cache_root = tmp.path().to_path_buf();
+        let fetcher = |url: &str| -> Result<Vec<u8>> {
+            assert!(
+                url.starts_with(CARGO_SOURCE_URL_TEMPLATE),
+                "unexpected URL: {url}"
+            );
+            Ok(SAMPLE_CARGO_JSON.to_vec())
+        };
+        // Inject no-op sleep so the test stays fast even though the production
+        // path waits 1s between pages.
+        let no_sleep = |_: Duration| {};
+        refresh_cargo(&fetcher, &cache_root, no_sleep).expect("cargo refresh succeeds");
+        let body = fs::read_to_string(cache_root.join("typosquat").join("cargo.txt"))
+            .expect("cargo cache file must exist");
+        // 2 pages of the sample = 6 names, in order.
+        assert_eq!(body, "syn\nserde\ntokio\nsyn\nserde\ntokio\n");
+    }
+
+    // ---- Maven (no-op path) ----------------------------------------------
+
+    #[test]
+    fn refresh_maven_is_a_noop_no_cache_file_written() {
+        let tmp = tempdir();
+        let cache_root = tmp.path().to_path_buf();
+        // Fetcher must NOT be called for the Maven path.
+        let fetcher = |url: &str| -> Result<Vec<u8>> {
+            panic!("Maven refresh must not call fetcher; got URL: {url}")
+        };
+        run_with(
+            RefreshArgs {
+                ecosystem: RefreshEcosystem::Maven,
+            },
+            fetcher,
+            &cache_root,
+        )
+        .expect("Maven path must succeed (no-op)");
+        // Confirm no cache file was created — the embedded list stays the
+        // source of truth.
+        assert!(!cache_root.join("typosquat").join("maven.txt").exists());
     }
 
     #[test]
