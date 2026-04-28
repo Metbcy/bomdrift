@@ -27,7 +27,7 @@ fn run_diff(args: DiffArgs) -> Result<()> {
 
     let cs = diff::diff(&before, &after);
 
-    let enrichment = if args.no_osv {
+    let mut enrichment = if args.no_osv {
         enrich::Enrichment::default()
     } else {
         // OSV enrichment is best-effort. Network failures must not block the diff
@@ -40,6 +40,10 @@ fn run_diff(args: DiffArgs) -> Result<()> {
             }
         }
     };
+
+    // Typosquat detection is pure-compute (embedded reference list) and always
+    // runs, regardless of `--no-osv`. Findings are informational.
+    enrichment.typosquats = enrich::typosquat::enrich(&cs);
 
     let rendered = match args.output {
         OutputFormat::Terminal | OutputFormat::Markdown => {

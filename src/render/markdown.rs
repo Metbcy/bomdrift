@@ -4,18 +4,23 @@
 //! - `## SBOM diff` headline (always present so the comment-tag upsert lands on a
 //!   stable selector).
 //! - Summary table of counts per change category, plus a "Vulnerabilities" row
-//!   when OSV enrichment found any.
+//!   when OSV enrichment found any and a "Possible typosquats" row when the
+//!   typosquat enricher fires.
 //! - Per-category tables. Sections with zero entries are omitted entirely so the
 //!   PR comment stays scannable.
 //! - License-changed section is prefaced with an investigation note since same-
 //!   version-different-license is the suspicious case.
 //! - Vulnerabilities section lists components from `added` + `version_changed`
 //!   that have known advisories per OSV.dev, with hyperlinks to osv.dev.
+//! - Possible typosquats section lists added components whose name resembles a
+//!   popular package. Wording is "is similar to {legit}" — never "is a
+//!   typosquat" — to avoid impugning the author of an innocent package.
 
 use std::fmt::Write as _;
 
 use crate::diff::ChangeSet;
 use crate::enrich::Enrichment;
+use crate::enrich::typosquat::TyposquatFinding;
 use crate::model::Component;
 
 pub fn render(cs: &ChangeSet, enrichment: &Enrichment) -> String {
@@ -32,11 +37,18 @@ pub fn render(cs: &ChangeSet, enrichment: &Enrichment) -> String {
     let _ = writeln!(out, "| Removed | {} |", cs.removed.len());
     let _ = writeln!(out, "| Version changed | {} |", cs.version_changed.len());
     let _ = writeln!(out, "| License changed | {} |", cs.license_changed.len());
-    if enrichment.has_findings() {
+    if !enrichment.vulns.is_empty() {
         let _ = writeln!(
             out,
             "| Vulnerabilities | {} |",
             enrichment.vulns.values().map(Vec::len).sum::<usize>()
+        );
+    }
+    if !enrichment.typosquats.is_empty() {
+        let _ = writeln!(
+            out,
+            "| Possible typosquats | {} |",
+            enrichment.typosquats.len()
         );
     }
     out.push('\n');
@@ -94,7 +106,7 @@ pub fn render(cs: &ChangeSet, enrichment: &Enrichment) -> String {
         out.push('\n');
     }
 
-    if enrichment.has_findings() {
+    if !enrichment.vulns.is_empty() {
         out.push_str("### Vulnerabilities (added/upgraded deps)\n\n");
         out.push_str(
             "Advisories per OSV.dev. Click each ID for details, fixed versions, and severity.\n\n",
@@ -107,7 +119,31 @@ pub fn render(cs: &ChangeSet, enrichment: &Enrichment) -> String {
         out.push('\n');
     }
 
+    if !enrichment.typosquats.is_empty() {
+        out.push_str("### Possible typosquats\n\n");
+        out.push_str(
+            "These newly added dependencies have names similar to popular packages. \
+             High similarity does not prove malicious intent — investigate the package \
+             source before merging.\n\n",
+        );
+        out.push_str(
+            "| Ecosystem | Name | Version | Similar to | Similarity |\n|---|---|---|---|---:|\n",
+        );
+        for f in &enrichment.typosquats {
+            write_typosquat_row(&mut out, f);
+        }
+        out.push('\n');
+    }
+
     out
+}
+
+fn write_typosquat_row(out: &mut String, f: &TyposquatFinding) {
+    let _ = writeln!(
+        out,
+        "| {} | {} | {} | {} | {:.2} |",
+        f.component.ecosystem, f.component.name, f.component.version, f.closest, f.score
+    );
 }
 
 fn write_vuln_rows(out: &mut String, components: &[Component], enrichment: &Enrichment) {
@@ -286,6 +322,66 @@ mod tests {
         };
         let md = render(&cs, &Enrichment::default());
         assert!(!md.contains("### Vulnerabilities"));
+        assert!(!md.contains("| Vulnerabilities |"));
+    }
+
+    #[test]
+    fn typosquat_section_renders_with_similarity_table() {
+        let cs = ChangeSet {
+            added: vec![comp(
+                "plain-crypto-js",
+                "4.2.1",
+                Ecosystem::Npm,
+                Some("pkg:npm/plain-crypto-js@4.2.1"),
+            )],
+            ..Default::default()
+        };
+        let mut e = Enrichment::default();
+        e.typosquats
+            .push(crate::enrich::typosquat::TyposquatFinding {
+                component: cs.added[0].clone(),
+                closest: "crypto-js".to_string(),
+                score: 0.95,
+            });
+        let md = render(&cs, &e);
+        assert!(md.contains("### Possible typosquats"));
+        assert!(md.contains("| Possible typosquats | 1 |"));
+        assert!(md.contains("similar to popular packages"));
+        assert!(
+            !md.contains("is a typosquat"),
+            "must use 'similar to' wording, not 'is a typosquat' (reputational care)"
+        );
+        assert!(md.contains("| npm | plain-crypto-js | 4.2.1 | crypto-js | 0.95 |"));
+    }
+
+    #[test]
+    fn typosquat_section_omitted_when_no_findings() {
+        let cs = ChangeSet {
+            added: vec![comp("safe", "1.0", Ecosystem::Npm, None)],
+            ..Default::default()
+        };
+        let md = render(&cs, &Enrichment::default());
+        assert!(!md.contains("### Possible typosquats"));
+        assert!(!md.contains("| Possible typosquats |"));
+    }
+
+    #[test]
+    fn typosquat_summary_row_only_when_typosquats_present() {
+        // Typosquats present but no vulns: only "Possible typosquats" row,
+        // no "Vulnerabilities | 0 |" noise.
+        let cs = ChangeSet {
+            added: vec![comp("plain-crypto-js", "4.2.1", Ecosystem::Npm, None)],
+            ..Default::default()
+        };
+        let mut e = Enrichment::default();
+        e.typosquats
+            .push(crate::enrich::typosquat::TyposquatFinding {
+                component: cs.added[0].clone(),
+                closest: "crypto-js".to_string(),
+                score: 0.95,
+            });
+        let md = render(&cs, &e);
+        assert!(md.contains("| Possible typosquats | 1 |"));
         assert!(!md.contains("| Vulnerabilities |"));
     }
 }

@@ -26,6 +26,7 @@ serde_json = "1"
 anyhow = "1"
 thiserror = "2"
 ureq = { version = "2", features = ["json"] }
+strsim = "0.11"
 
 [dev-dependencies]
 

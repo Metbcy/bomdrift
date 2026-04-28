@@ -56,7 +56,10 @@ fn enrich_with(purls: &[String], url: &str, timeout: Duration) -> Result<Enrichm
         let response = post_batch(chunk, url, timeout)?;
         merge(&mut vulns, chunk, response);
     }
-    Ok(Enrichment { vulns })
+    Ok(Enrichment {
+        vulns,
+        typosquats: Vec::new(),
+    })
 }
 
 fn post_batch(purls: &[String], url: &str, timeout: Duration) -> Result<OsvBatchResponse> {

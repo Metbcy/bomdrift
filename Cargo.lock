@@ -78,6 +78,7 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
+ "strsim",
  "thiserror",
  "ureq",
 ]

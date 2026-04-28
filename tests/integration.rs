@@ -238,6 +238,27 @@ fn render_is_deterministic_through_full_pipeline() {
     assert_eq!(a, b);
 }
 
+#[test]
+fn typosquat_enricher_flags_plain_crypto_js_on_axios_fixture() {
+    // The headline demo: the axios-incident "after" fixture introduces a
+    // newly-added `plain-crypto-js` dep, which the typosquat enricher must
+    // flag as similar to the popular `crypto-js`. Pure-compute, no network.
+    let before = parse_fixture("cdx-minimal.json");
+    let after = parse_fixture("cdx-after.json");
+    let cs = diff::diff(&before, &after);
+
+    let findings = bomdrift::enrich::typosquat::enrich(&cs);
+
+    assert_eq!(
+        findings.len(),
+        1,
+        "expected exactly one typosquat finding, got {findings:?}"
+    );
+    assert_eq!(findings[0].component.name, "plain-crypto-js");
+    assert_eq!(findings[0].closest, "crypto-js");
+    assert!(findings[0].score >= bomdrift::enrich::typosquat::SIMILARITY_THRESHOLD);
+}
+
 fn parse_fixture(name: &str) -> bomdrift::model::Sbom {
     let raw = fixture(name);
     let value: serde_json::Value = serde_json::from_str(&raw).unwrap();

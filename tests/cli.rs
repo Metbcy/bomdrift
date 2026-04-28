@@ -141,3 +141,34 @@ fn refresh_typosquat_returns_not_implemented_error() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("refresh-typosquat"));
 }
+
+#[test]
+fn diff_axios_fixture_pair_renders_typosquat_section() {
+    // End-to-end: typosquat enricher always runs (pure compute, no I/O), so
+    // even with `--no-osv` the "Possible typosquats" section appears for the
+    // axios-incident fixture pair.
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    assert!(
+        stdout.contains("### Possible typosquats"),
+        "expected typosquat section, got:\n{stdout}"
+    );
+    assert!(stdout.contains("| Possible typosquats | 1 |"));
+    assert!(stdout.contains("plain-crypto-js"));
+    assert!(stdout.contains("crypto-js"));
+    assert!(
+        !stdout.contains("is a typosquat"),
+        "wording must be 'similar to', never 'is a typosquat'"
+    );
+}
