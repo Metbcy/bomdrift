@@ -19,7 +19,30 @@ pub enum Command {
     /// Diff two SBOMs and surface supply-chain risk signals on changed components.
     Diff(DiffArgs),
     /// Refresh the bundled typosquat top-package lists from upstream sources.
-    RefreshTyposquat,
+    ///
+    /// Writes a fresh per-ecosystem list to the user's XDG cache directory
+    /// (`<XDG_CACHE_HOME>/bomdrift/typosquat/<ecosystem>.txt` on Linux). The
+    /// typosquat enricher will pick up the cache file in subsequent runs,
+    /// overlaying the snapshot baked into the binary at compile time.
+    RefreshTyposquat(RefreshArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct RefreshArgs {
+    /// Which ecosystem's list to refresh. Defaults to `all`. v0 only
+    /// implements `npm`; PyPI/Cargo/Maven will land in a follow-up release
+    /// (the value is accepted today and will start fetching transparently
+    /// once the per-ecosystem source URLs are wired up).
+    #[arg(long, value_enum, default_value_t = RefreshEcosystem::All)]
+    pub ecosystem: RefreshEcosystem,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RefreshEcosystem {
+    /// Refresh every ecosystem with a wired-up fetcher (currently: npm only).
+    All,
+    /// Refresh just the npm top-1000 list from the anvaka most-depended-upon gist.
+    Npm,
 }
 
 #[derive(Args, Debug)]

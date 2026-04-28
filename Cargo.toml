@@ -29,6 +29,7 @@ ureq = { version = "2", features = ["json"] }
 strsim = "0.11"
 owo-colors = { version = "4", features = ["supports-colors"] }
 supports-color = "3"
+directories = "6"
 
 [dev-dependencies]
 

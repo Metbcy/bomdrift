@@ -35,6 +35,7 @@
 //! PR is the analyst making the determination.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use serde::Serialize;
@@ -44,6 +45,11 @@ use crate::diff::ChangeSet;
 use crate::model::{Component, Ecosystem};
 
 const NPM_TOP_LIST: &str = include_str!("../../data/npm-top1k.txt");
+
+/// File name (under `<cache_root>/typosquat/`) that
+/// `bomdrift refresh-typosquat` writes for the npm list, and that this loader
+/// reads in preference to [`NPM_TOP_LIST`] when present and parseable.
+const NPM_CACHE_FILENAME: &str = "npm.txt";
 
 /// Minimum Jaro-Winkler score (or boosted score) for a pairing to be reported.
 pub const SIMILARITY_THRESHOLD: f64 = 0.92;
@@ -97,9 +103,10 @@ pub fn enrich(cs: &ChangeSet) -> Vec<TyposquatFinding> {
     out
 }
 
-fn best_match<'a>(candidate: &str, legit: &'a [&'a str]) -> Option<(&'a str, f64)> {
+fn best_match<'a>(candidate: &str, legit: &'a [String]) -> Option<(&'a str, f64)> {
     let mut best: Option<(&'a str, f64)> = None;
-    for &name in legit {
+    for name in legit {
+        let name = name.as_str();
         if name == candidate {
             continue;
         }
@@ -150,20 +157,58 @@ fn is_separator_byte(b: Option<u8>) -> bool {
     matches!(b, Some(b'-' | b'_' | b'.' | b'/'))
 }
 
-fn npm_legit_list() -> &'static [&'static str] {
-    static LIST: OnceLock<Vec<&'static str>> = OnceLock::new();
-    LIST.get_or_init(|| {
-        NPM_TOP_LIST
-            .lines()
-            .map(str::trim)
-            .filter(|s| !s.is_empty() && !s.starts_with('#'))
-            .collect()
-    })
+fn npm_legit_list() -> &'static [String] {
+    static LIST: OnceLock<Vec<String>> = OnceLock::new();
+    LIST.get_or_init(|| load_npm_legit_list(default_npm_cache_path().as_deref()))
 }
 
-fn npm_legit_set() -> &'static HashSet<&'static str> {
-    static SET: OnceLock<HashSet<&'static str>> = OnceLock::new();
-    SET.get_or_init(|| npm_legit_list().iter().copied().collect())
+fn npm_legit_set() -> &'static HashSet<String> {
+    static SET: OnceLock<HashSet<String>> = OnceLock::new();
+    SET.get_or_init(|| npm_legit_list().iter().cloned().collect())
+}
+
+/// Resolve the on-disk path the npm cache file would live at, if any. Returns
+/// `None` when no cache directory could be determined for this platform — the
+/// loader treats that the same as "no cache present" and falls back to the
+/// embedded snapshot.
+fn default_npm_cache_path() -> Option<PathBuf> {
+    crate::refresh::default_cache_root()
+        .ok()
+        .map(|root| root.join("typosquat").join(NPM_CACHE_FILENAME))
+}
+
+/// Load the npm reference list, preferring a cache file written by
+/// `bomdrift refresh-typosquat` over the snapshot embedded at compile time.
+///
+/// Defensive fallback semantics: if the cache file is missing, unreadable,
+/// or contains zero parseable lines, the embedded snapshot is used and no
+/// error surfaces to callers. A successful cache read logs ONCE to stderr
+/// (`using refreshed npm typosquat list from <path> (<n> names)`) so users
+/// can confirm a `refresh-typosquat` invocation actually took effect.
+pub(crate) fn load_npm_legit_list(cache_path: Option<&std::path::Path>) -> Vec<String> {
+    if let Some(path) = cache_path {
+        if let Ok(contents) = std::fs::read_to_string(path) {
+            let parsed = parse_list(&contents);
+            if !parsed.is_empty() {
+                eprintln!(
+                    "using refreshed npm typosquat list from {} ({} names)",
+                    path.display(),
+                    parsed.len()
+                );
+                return parsed;
+            }
+        }
+    }
+    parse_list(NPM_TOP_LIST)
+}
+
+fn parse_list(input: &str) -> Vec<String> {
+    input
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && !s.starts_with('#'))
+        .map(str::to_string)
+        .collect()
 }
 
 #[cfg(test)]
@@ -201,12 +246,13 @@ mod tests {
             "expected ~1000 npm names, got {}",
             list.len()
         );
-        assert!(list.contains(&"crypto-js"), "crypto-js must be in list");
-        assert!(list.contains(&"cross-env"), "cross-env must be in list");
-        assert!(list.contains(&"axios"), "axios must be in list");
-        assert!(list.contains(&"react"), "react must be in list");
+        let by_str: Vec<&str> = list.iter().map(String::as_str).collect();
+        assert!(by_str.contains(&"crypto-js"), "crypto-js must be in list");
+        assert!(by_str.contains(&"cross-env"), "cross-env must be in list");
+        assert!(by_str.contains(&"axios"), "axios must be in list");
+        assert!(by_str.contains(&"react"), "react must be in list");
         assert!(
-            list.contains(&"react-router"),
+            by_str.contains(&"react-router"),
             "react-router must be in list (covers the no-flag test)"
         );
     }
@@ -340,5 +386,76 @@ mod tests {
         // we do NOT spuriously flag arbitrary "*-fs" packages as squats of fs.
         assert!(!is_likely_legit_extension("my-fs-helper", "fs"));
         assert!(!has_suspicious_suffix_containment("super-cool-fs", "fs"));
+    }
+
+    #[test]
+    fn cache_file_overrides_embedded_snapshot_in_npm_legit_list() {
+        // Write a tiny cache file with names that are NOT in the embedded
+        // top-1000 list, then load via the cache-aware loader and confirm we
+        // see the cache contents (and only those).
+        let dir = std::env::temp_dir().join(format!(
+            "bomdrift-typosquat-cache-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cache_path = dir.join("npm.txt");
+        std::fs::write(
+            &cache_path,
+            "# header comment, ignored\nzzz-fake-cache-name\nzzz-other-cache-name\n\n",
+        )
+        .unwrap();
+
+        let loaded = load_npm_legit_list(Some(&cache_path));
+        assert_eq!(
+            loaded,
+            vec![
+                "zzz-fake-cache-name".to_string(),
+                "zzz-other-cache-name".to_string()
+            ],
+            "loader must return cache contents, not the embedded snapshot"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_cache_file_falls_back_to_embedded_snapshot() {
+        let nonexistent = std::path::PathBuf::from("/this/path/does/not/exist/npm.txt");
+        let loaded = load_npm_legit_list(Some(&nonexistent));
+        assert!(
+            loaded.len() >= 900,
+            "fallback must produce the embedded ~1000 names, got {}",
+            loaded.len()
+        );
+    }
+
+    #[test]
+    fn empty_cache_file_falls_back_to_embedded_snapshot() {
+        // Defensive: a malformed/empty cache file (zero parseable lines) must
+        // not produce an empty list — fall back so the enricher keeps working.
+        let dir = std::env::temp_dir().join(format!(
+            "bomdrift-typosquat-empty-cache-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cache_path = dir.join("npm.txt");
+        std::fs::write(&cache_path, "# only a comment\n\n   \n").unwrap();
+
+        let loaded = load_npm_legit_list(Some(&cache_path));
+        assert!(
+            loaded.len() >= 900,
+            "empty cache file must fall back to the embedded snapshot, got {}",
+            loaded.len()
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

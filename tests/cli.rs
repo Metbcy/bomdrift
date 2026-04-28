@@ -160,16 +160,34 @@ fn diff_json_output_produces_parseable_json() {
 }
 
 #[test]
-fn refresh_typosquat_returns_not_implemented_error() {
+fn refresh_typosquat_help_advertises_ecosystem_flag() {
+    // The full subcommand makes a network request and writes to disk, so its
+    // happy-path is covered by the in-process `run_with` tests in
+    // `src/refresh.rs::tests` (fake fetcher + tempdir cache root). Here we
+    // just verify the CLI surface — the subcommand exists, takes
+    // `--ecosystem`, and accepts `npm` / `all` — without actually firing
+    // either a real fetch or attempting to scribble in the user's `~/.cache`.
     let out = Command::new(bin())
         .current_dir(manifest_dir())
-        .args(["refresh-typosquat"])
+        .args(["refresh-typosquat", "--help"])
         .output()
         .expect("spawn bomdrift");
 
-    assert!(!out.status.success());
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("refresh-typosquat"));
+    assert!(
+        out.status.success(),
+        "exit code: {}\nstderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("--ecosystem"),
+        "refresh-typosquat --help must advertise --ecosystem; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("npm"),
+        "refresh-typosquat --help must list npm as a value; got:\n{stdout}"
+    );
 }
 
 #[test]

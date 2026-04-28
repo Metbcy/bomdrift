@@ -3,6 +3,7 @@ pub mod diff;
 pub mod enrich;
 pub mod model;
 pub mod parse;
+pub mod refresh;
 pub mod render;
 
 use std::fs;
@@ -16,9 +17,7 @@ use crate::cli::{Cli, Command, DiffArgs, OutputFormat};
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Diff(args) => run_diff(args),
-        Command::RefreshTyposquat => {
-            bail!("`refresh-typosquat` is not implemented yet (planned for v0.2)")
-        }
+        Command::RefreshTyposquat(args) => refresh::run(args),
     }
 }
 
