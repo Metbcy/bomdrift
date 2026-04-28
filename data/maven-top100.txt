@@ -1,0 +1,136 @@
+# Top ~100 Maven Central coordinates, hand-curated from public popularity
+# rankings (mvnrepository.com "Most Popular" + Sonatype Central download
+# stats). Snapshot date: 2026-04-28.
+#
+# Format: `groupId:artifactId`, one per line. The typosquat enricher extracts
+# the artifactId via `rsplit_once(':')` and matches Levenshtein <= 2 on the
+# artifactId only (the long shared groupId prefix inflates similarity past
+# anything useful).
+#
+# Provenance and refresh notes are in `data/README.md`. Maven has no
+# canonical "top N" feed analogous to npm/PyPI/crates.io, so this list is
+# curated rather than auto-generated. Adding a name here is an explicit
+# editorial decision; PRs welcome.
+#
+# Lines beginning with `#` and blank lines are ignored.
+
+# --- Apache Commons family ---
+org.apache.commons:commons-lang3
+org.apache.commons:commons-collections4
+org.apache.commons:commons-text
+org.apache.commons:commons-math3
+org.apache.commons:commons-io
+org.apache.commons:commons-compress
+org.apache.commons:commons-csv
+org.apache.commons:commons-pool2
+org.apache.commons:commons-dbcp2
+org.apache.commons:commons-codec
+commons-io:commons-io
+commons-codec:commons-codec
+commons-logging:commons-logging
+commons-cli:commons-cli
+commons-collections:commons-collections
+commons-beanutils:commons-beanutils
+commons-fileupload:commons-fileupload
+commons-validator:commons-validator
+
+# --- Google ---
+com.google.guava:guava
+com.google.code.gson:gson
+com.google.protobuf:protobuf-java
+com.google.protobuf:protobuf-java-util
+com.google.inject:guice
+com.google.errorprone:error_prone_annotations
+com.google.code.findbugs:jsr305
+
+# --- Jackson (FasterXML) ---
+com.fasterxml.jackson.core:jackson-core
+com.fasterxml.jackson.core:jackson-databind
+com.fasterxml.jackson.core:jackson-annotations
+com.fasterxml.jackson.dataformat:jackson-dataformat-yaml
+com.fasterxml.jackson.dataformat:jackson-dataformat-xml
+com.fasterxml.jackson.module:jackson-module-scala_2.13
+com.fasterxml.jackson.datatype:jackson-datatype-jsr310
+
+# --- Logging ---
+org.slf4j:slf4j-api
+org.slf4j:slf4j-simple
+org.slf4j:jul-to-slf4j
+org.slf4j:jcl-over-slf4j
+ch.qos.logback:logback-classic
+ch.qos.logback:logback-core
+org.apache.logging.log4j:log4j-api
+org.apache.logging.log4j:log4j-core
+org.apache.logging.log4j:log4j-slf4j2-impl
+
+# --- Spring ecosystem ---
+org.springframework:spring-core
+org.springframework:spring-context
+org.springframework:spring-beans
+org.springframework:spring-web
+org.springframework:spring-webmvc
+org.springframework:spring-tx
+org.springframework:spring-jdbc
+org.springframework:spring-test
+org.springframework.boot:spring-boot
+org.springframework.boot:spring-boot-starter
+org.springframework.boot:spring-boot-starter-web
+org.springframework.boot:spring-boot-starter-test
+org.springframework.boot:spring-boot-autoconfigure
+org.springframework.security:spring-security-core
+org.springframework.security:spring-security-web
+
+# --- Testing ---
+junit:junit
+org.junit.jupiter:junit-jupiter
+org.junit.jupiter:junit-jupiter-api
+org.junit.jupiter:junit-jupiter-engine
+org.junit.jupiter:junit-jupiter-params
+org.junit.platform:junit-platform-launcher
+org.mockito:mockito-core
+org.mockito:mockito-junit-jupiter
+org.assertj:assertj-core
+org.hamcrest:hamcrest
+org.hamcrest:hamcrest-core
+io.cucumber:cucumber-java
+io.cucumber:cucumber-junit
+
+# --- Database / ORM ---
+org.hibernate.orm:hibernate-core
+org.hibernate:hibernate-validator
+mysql:mysql-connector-java
+com.mysql:mysql-connector-j
+org.postgresql:postgresql
+com.h2database:h2
+com.zaxxer:HikariCP
+
+# --- HTTP / networking ---
+com.squareup.okhttp3:okhttp
+com.squareup.okhttp3:logging-interceptor
+com.squareup.retrofit2:retrofit
+com.squareup.retrofit2:converter-gson
+io.netty:netty-all
+io.netty:netty-buffer
+io.netty:netty-codec
+io.netty:netty-handler
+org.apache.httpcomponents.client5:httpclient5
+org.apache.httpcomponents:httpclient
+
+# --- Reactive / async ---
+io.projectreactor:reactor-core
+io.projectreactor.netty:reactor-netty-core
+io.reactivex.rxjava3:rxjava
+
+# --- Utility / misc ---
+org.projectlombok:lombok
+org.jetbrains.kotlin:kotlin-stdlib
+org.jetbrains.kotlin:kotlin-stdlib-jdk8
+org.jetbrains.kotlinx:kotlinx-coroutines-core
+org.scala-lang:scala-library
+io.micrometer:micrometer-core
+io.micrometer:micrometer-registry-prometheus
+io.swagger.core.v3:swagger-annotations
+javax.servlet:javax.servlet-api
+jakarta.servlet:jakarta.servlet-api
+jakarta.persistence:jakarta.persistence-api
+jakarta.validation:jakarta.validation-api
