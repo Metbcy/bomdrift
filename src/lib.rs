@@ -6,6 +6,7 @@ pub mod parse;
 pub mod render;
 
 use std::fs;
+use std::io::IsTerminal;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
@@ -46,9 +47,17 @@ fn run_diff(args: DiffArgs) -> Result<()> {
     enrichment.typosquats = enrich::typosquat::enrich(&cs);
 
     let rendered = match args.output {
-        OutputFormat::Terminal | OutputFormat::Markdown => {
-            render::markdown::render(&cs, &enrichment)
+        OutputFormat::Terminal => {
+            // ANSI escapes are only safe on a real TTY. Piped/redirected stdout
+            // (e.g. captured by a CI step that posts a PR comment) must stay
+            // plain markdown so it renders correctly in a comment body.
+            if std::io::stdout().is_terminal() {
+                render::term::render(&cs, &enrichment)
+            } else {
+                render::markdown::render(&cs, &enrichment)
+            }
         }
+        OutputFormat::Markdown => render::markdown::render(&cs, &enrichment),
         OutputFormat::Json => bail!("--output json is not implemented yet (planned for v0.2)"),
         OutputFormat::Sarif => bail!("--output sarif is not implemented yet (planned for v0.2)"),
     };
