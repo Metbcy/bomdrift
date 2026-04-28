@@ -6,9 +6,20 @@ pub struct Component {
     pub name: String,
     pub version: String,
     pub ecosystem: Ecosystem,
+    /// Package URL (purl) string. Stored as a validated string in v0; the typed wrapper
+    /// from the `packageurl` crate will be introduced when the diff core needs it for
+    /// canonical keying.
     pub purl: Option<String>,
+    /// SPDX license expressions, one per declared license. CycloneDX permits multiple.
     pub licenses: Vec<String>,
+    pub supplier: Option<String>,
+    pub hashes: Vec<Hash>,
+    pub relationship: Relationship,
+    /// VCS source URL when the SBOM provides one (CycloneDX `externalReferences[type=vcs]`,
+    /// SPDX `externalRefs`, Syft `metadata.source`).
     pub source_url: Option<String>,
+    /// Identifier preserved from the source SBOM for traceability back to the original record.
+    pub bom_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -19,4 +30,26 @@ pub enum Ecosystem {
     Maven,
     Go,
     Other(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hash {
+    pub alg: HashAlg,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HashAlg {
+    Sha1,
+    Sha256,
+    Sha512,
+    Md5,
+    Other(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Relationship {
+    Direct,
+    Transitive,
+    Unknown,
 }

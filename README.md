@@ -6,11 +6,18 @@
 
 ## Why?
 
-After Shai-Hulud (npm, Nov 2025), the xz-utils backdoor (Mar 2024), and continual PyPI typosquat campaigns, the most actionable supply-chain question on a PR is:
+The most actionable supply-chain question on a pull request is:
 
 > *What changed in this diff's dependencies that I should worry about?*
 
 — not *"what's in my SBOM?"*. Plenty of tools answer the second question. **bomdrift answers the first.**
+
+Recent incidents bomdrift would have surfaced:
+
+- **axios npm compromise (Mar 31, 2026)** — maintainer was socially engineered (fake Slack/Teams call, North Korean UNC1069), and `axios@1.14.1` + `axios@0.30.4` shipped with a malicious runtime dep `plain-crypto-js@4.2.1` that dropped the WAVESHAPER.V2 RAT on Windows/macOS/Linux. Three of bomdrift's signals would have fired in the diff: a **brand-new transitive dependency**, a **typosquat** (`plain-crypto-js` vs the legitimate `crypto-js` — Jaro-Winkler ≈ 0.96), and a **young-maintainer** flag on the new package's author. 70M+ weekly downloads of axios were exposed.
+- **Shai-Hulud worm (npm, Nov 2025)** — 700+ packages compromised by a self-replicating worm. Diff-time review of newly added transitive deps and version bumps was the only pre-merge defense.
+- **xz-utils backdoor (CVE-2024-3094, Mar 2024)** — 2.6-year social-engineering campaign culminating in a backdoor shipped in 5.6.0/5.6.1. The "Jia Tan" maintainer's first commit was recent relative to the release — exactly the maintainer-age heuristic bomdrift implements.
+- **Sustained PyPI typosquat campaigns (2024–2026)** — hundreds of malicious packages disguised by single-character substitutions (`sysaws` → `sisaws`, etc.) — Jaro-Winkler against PyPI's top-N catches these reliably.
 
 ## Features (planned for v0.1.0)
 

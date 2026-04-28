@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod model;
+pub mod parse;
 
 use anyhow::{Result, bail};
 
