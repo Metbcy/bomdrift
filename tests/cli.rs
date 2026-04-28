@@ -20,6 +20,7 @@ fn diff_axios_fixture_pair_prints_pr_comment_markdown() {
             "diff",
             "tests/fixtures/cdx-minimal.json",
             "tests/fixtures/cdx-after.json",
+            "--no-osv",
         ])
         .output()
         .expect("spawn bomdrift");
@@ -48,6 +49,7 @@ fn diff_self_against_self_reports_no_changes() {
             "diff",
             "tests/fixtures/cdx-minimal.json",
             "tests/fixtures/cdx-minimal.json",
+            "--no-osv",
         ])
         .output()
         .expect("spawn bomdrift");
@@ -65,6 +67,7 @@ fn diff_explicit_markdown_flag_is_identical_to_default() {
             "diff",
             "tests/fixtures/cdx-minimal.json",
             "tests/fixtures/cdx-after.json",
+            "--no-osv",
         ])
         .output()
         .expect("spawn bomdrift");
@@ -75,6 +78,7 @@ fn diff_explicit_markdown_flag_is_identical_to_default() {
             "diff",
             "tests/fixtures/cdx-minimal.json",
             "tests/fixtures/cdx-after.json",
+            "--no-osv",
             "--output",
             "markdown",
         ])
@@ -113,6 +117,7 @@ fn diff_json_output_returns_not_implemented_error() {
             "diff",
             "tests/fixtures/cdx-minimal.json",
             "tests/fixtures/cdx-after.json",
+            "--no-osv",
             "--output",
             "json",
         ])

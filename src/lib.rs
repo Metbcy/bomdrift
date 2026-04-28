@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod diff;
+pub mod enrich;
 pub mod model;
 pub mod parse;
 pub mod render;
@@ -26,12 +27,24 @@ fn run_diff(args: DiffArgs) -> Result<()> {
 
     let cs = diff::diff(&before, &after);
 
+    let enrichment = if args.no_osv {
+        enrich::Enrichment::default()
+    } else {
+        // OSV enrichment is best-effort. Network failures must not block the diff
+        // from rendering — a PR review is still useful without CVE data.
+        match enrich::osv::enrich(&cs) {
+            Ok(e) => e,
+            Err(err) => {
+                eprintln!("warning: OSV enrichment failed, continuing without it: {err:#}");
+                enrich::Enrichment::default()
+            }
+        }
+    };
+
     let rendered = match args.output {
-        // Terminal output reuses the Markdown renderer in v0. A colored,
-        // tty-aware renderer is a follow-up (planned for v0.2 alongside
-        // owo-colors + supports-color); the markdown table form is already
-        // legible in a plain terminal.
-        OutputFormat::Terminal | OutputFormat::Markdown => render::markdown::render(&cs),
+        OutputFormat::Terminal | OutputFormat::Markdown => {
+            render::markdown::render(&cs, &enrichment)
+        }
         OutputFormat::Json => bail!("--output json is not implemented yet (planned for v0.2)"),
         OutputFormat::Sarif => bail!("--output sarif is not implemented yet (planned for v0.2)"),
     };

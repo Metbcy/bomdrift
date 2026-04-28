@@ -34,6 +34,9 @@ pub struct DiffArgs {
     /// Force input format detection.
     #[arg(long, value_enum, default_value_t = InputFormat::Auto)]
     pub format: InputFormat,
+    /// Skip OSV.dev CVE enrichment (offline mode, faster, deterministic).
+    #[arg(long)]
+    pub no_osv: bool,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]

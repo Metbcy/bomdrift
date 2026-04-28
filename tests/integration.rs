@@ -202,7 +202,7 @@ fn axios_diff_renders_pr_comment_shape() {
     let after = parse_fixture("cdx-after.json");
     let cs = diff::diff(&before, &after);
 
-    let md = render::markdown::render(&cs);
+    let md = render::markdown::render(&cs, &bomdrift::enrich::Enrichment::default());
 
     assert!(md.starts_with("## SBOM diff\n"), "headline must be stable");
     assert!(
@@ -232,8 +232,9 @@ fn axios_diff_renders_pr_comment_shape() {
 fn render_is_deterministic_through_full_pipeline() {
     let before = parse_fixture("cdx-minimal.json");
     let after = parse_fixture("cdx-after.json");
-    let a = render::markdown::render(&diff::diff(&before, &after));
-    let b = render::markdown::render(&diff::diff(&before, &after));
+    let e = bomdrift::enrich::Enrichment::default();
+    let a = render::markdown::render(&diff::diff(&before, &after), &e);
+    let b = render::markdown::render(&diff::diff(&before, &after), &e);
     assert_eq!(a, b);
 }
 
