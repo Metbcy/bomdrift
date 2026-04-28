@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use bomdrift::diff;
 use bomdrift::model::{Ecosystem, HashAlg, SbomFormat};
 use bomdrift::parse;
+use bomdrift::render;
 
 fn fixture(name: &str) -> String {
     let path: PathBuf = [env!("CARGO_MANIFEST_DIR"), "tests", "fixtures", name]
@@ -190,6 +191,50 @@ fn diff_is_deterministic_across_runs() {
     let a = diff::diff(&before, &after);
     let b = diff::diff(&before, &after);
     assert_eq!(a, b, "diff output must be byte-identical for same inputs");
+}
+
+#[test]
+fn axios_diff_renders_pr_comment_shape() {
+    // Full pipeline: parse two CycloneDX fixtures → diff → render markdown.
+    // This is the shape that `peter-evans/create-or-update-comment` will upsert
+    // on every PR push when bomdrift's GitHub Action runs.
+    let before = parse_fixture("cdx-minimal.json");
+    let after = parse_fixture("cdx-after.json");
+    let cs = diff::diff(&before, &after);
+
+    let md = render::markdown::render(&cs);
+
+    assert!(md.starts_with("## SBOM diff\n"), "headline must be stable");
+    assert!(
+        md.contains("| Added | 1 |"),
+        "summary table must show counts"
+    );
+    assert!(md.contains("| Removed | 1 |"));
+    assert!(md.contains("| Version changed | 1 |"));
+    assert!(md.contains("| License changed | 0 |"));
+
+    assert!(md.contains("### Added"));
+    assert!(md.contains("| npm | plain-crypto-js | 4.2.1 |"));
+
+    assert!(md.contains("### Removed"));
+    assert!(md.contains("no-purl-component"));
+
+    assert!(md.contains("### Version changed"));
+    assert!(md.contains("| npm | axios | 1.14.0 | 1.14.1 |"));
+
+    assert!(
+        !md.contains("### License changed"),
+        "no license-only changes in this fixture pair"
+    );
+}
+
+#[test]
+fn render_is_deterministic_through_full_pipeline() {
+    let before = parse_fixture("cdx-minimal.json");
+    let after = parse_fixture("cdx-after.json");
+    let a = render::markdown::render(&diff::diff(&before, &after));
+    let b = render::markdown::render(&diff::diff(&before, &after));
+    assert_eq!(a, b);
 }
 
 fn parse_fixture(name: &str) -> bomdrift::model::Sbom {

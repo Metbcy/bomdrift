@@ -2,6 +2,7 @@ pub mod cli;
 pub mod diff;
 pub mod model;
 pub mod parse;
+pub mod render;
 
 use anyhow::{Result, bail};
 

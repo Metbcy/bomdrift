@@ -1,6 +1,8 @@
 //! Unified component model. Every SBOM input format normalizes into `Component` so the
 //! diff and enrichment passes only ever see one shape.
 
+use std::fmt;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Component {
     pub name: String,
@@ -30,6 +32,19 @@ pub enum Ecosystem {
     Maven,
     Go,
     Other(String),
+}
+
+impl fmt::Display for Ecosystem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Npm => f.write_str("npm"),
+            Self::PyPI => f.write_str("pypi"),
+            Self::Cargo => f.write_str("cargo"),
+            Self::Maven => f.write_str("maven"),
+            Self::Go => f.write_str("go"),
+            Self::Other(s) => f.write_str(s),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
