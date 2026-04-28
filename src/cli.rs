@@ -31,20 +31,32 @@ pub enum Command {
 
 #[derive(Args, Debug)]
 pub struct RefreshArgs {
-    /// Which ecosystem's list to refresh. Defaults to `all`. v0 only
-    /// implements `npm`; PyPI/Cargo/Maven will land in a follow-up release
-    /// (the value is accepted today and will start fetching transparently
-    /// once the per-ecosystem source URLs are wired up).
+    /// Which ecosystem's list to refresh. Defaults to `all`.
+    ///
+    /// `npm`, `pypi`, and `cargo` fetch fresh top-package lists from their
+    /// canonical upstream sources (anvaka gist, hugovk JSON, crates.io API).
+    /// `maven` is hand-curated — there is no canonical "top N" feed for
+    /// Maven Central, so the embedded list is the source of truth and
+    /// `--ecosystem maven` emits a notice rather than fetching anything.
     #[arg(long, value_enum, default_value_t = RefreshEcosystem::All)]
     pub ecosystem: RefreshEcosystem,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RefreshEcosystem {
-    /// Refresh every ecosystem with a wired-up fetcher (currently: npm only).
+    /// Refresh every ecosystem with a wired-up fetcher (npm, PyPI, Cargo).
     All,
     /// Refresh just the npm top-1000 list from the anvaka most-depended-upon gist.
     Npm,
+    /// Refresh the PyPI top-200 list from hugovk/top-pypi-packages.
+    #[value(name = "pypi")]
+    PyPI,
+    /// Refresh the Cargo (crates.io) top-200 list from the crates.io API.
+    Cargo,
+    /// Maven has no canonical upstream feed; the list is curated and shipped
+    /// embedded. This variant is accepted so `--ecosystem all` stays
+    /// stable, and emits an informational notice.
+    Maven,
 }
 
 #[derive(Args, Debug)]
