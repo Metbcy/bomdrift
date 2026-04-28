@@ -28,6 +28,15 @@ inputs:
       populated by OSV's /v1/querybatch in v0.2). The PR comment is still
       posted on a tripped exit so reviewers see the findings.
     default: none
+  verify-signatures:
+    description: |
+      Whether to install cosign and verify the bomdrift release archive's
+      Sigstore signature before running it. Defaults to `true`.
+      Set to `false` on trusted mirrors / cached runners to skip the
+      cosign-installer step (~15s) and the .sig/.pem download round-trips.
+      When `true` and cosign cannot be installed/found, the action fails
+      loudly rather than silently degrading.
+    default: 'true'
   github-token:
     description: Token used to post PR comments. Defaults to GITHUB_TOKEN.
     default: ${{ github.token }}
@@ -36,6 +45,7 @@ runs:
   using: composite
   steps:
     - name: Install cosign (for release signature verification)
+      if: inputs.verify-signatures == 'true'
       uses: sigstore/cosign-installer@v3
     - name: Run bomdrift
       shell: bash
@@ -47,4 +57,5 @@ runs:
         OUTPUT_FORMAT: ${{ inputs.output }}
         COMMENT_ON_PR: ${{ inputs.comment-on-pr }}
         FAIL_ON: ${{ inputs.fail-on }}
+        VERIFY_SIGNATURES: ${{ inputs.verify-signatures }}
         INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
