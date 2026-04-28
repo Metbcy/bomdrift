@@ -79,6 +79,39 @@ pub struct DiffArgs {
     /// rate limit (60/hr) is too low for the diff being analyzed.
     #[arg(long)]
     pub no_maintainer_age: bool,
+    /// Exit with code 2 when findings of the configured severity or higher
+    /// surface. Default `none` is informational-only (always exit 0 on a
+    /// successful run).
+    ///
+    /// `critical-cve` is accepted but treated as `cve` in v0.2 because OSV's
+    /// `/v1/querybatch` does not yet return severity. v0.3 will populate
+    /// per-advisory severity from `/v1/vulns/{id}` and the threshold will
+    /// start to differentiate.
+    #[arg(long, value_enum, default_value_t = FailOn::None)]
+    pub fail_on: FailOn,
+}
+
+/// Threshold for `--fail-on` exit-code-2 behavior.
+///
+/// Variants are intentionally ordered loosest-to-strictest in their
+/// declaration order, but the comparison logic in [`crate::tripped`] is
+/// per-variant rather than ordinal — adding a new variant later is safe.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FailOn {
+    /// Never trip. Default. The diff is informational-only.
+    None,
+    /// Trip when at least one CVE / advisory finding is present in
+    /// `enrichment.vulns`.
+    Cve,
+    /// In v0.2 this is treated as `cve` and emits a one-shot stderr warning
+    /// explaining that severity data is not yet available. v0.3 will narrow
+    /// this to advisories with CVSS >= 9.0.
+    CriticalCve,
+    /// Trip when at least one typosquat finding is present.
+    Typosquat,
+    /// Trip on ANY finding (CVE, typosquat, version-jump, young-maintainer)
+    /// OR any license-changed-without-version-bump pair (the suspicious case).
+    Any,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]

@@ -351,6 +351,105 @@ fn diff_axios_fixture_pair_renders_typosquat_section() {
 }
 
 #[test]
+fn diff_fail_on_typosquat_exits_2_but_still_prints_markdown_body() {
+    // The axios fixture pair always produces the plain-crypto-js typosquat
+    // (pure compute, no network). With --fail-on=typosquat we expect:
+    //   1. exit code 2 (the documented "fail-on tripped" code)
+    //   2. the full markdown body still on stdout — the action's tee+rc
+    //      wrapper relies on this so the PR comment posts even on exit-2.
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--no-maintainer-age",
+            "--output",
+            "markdown",
+            "--fail-on",
+            "typosquat",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "fail-on=typosquat with a typosquat finding must exit 2; got status: {} stderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    assert!(
+        stdout.contains("plain-crypto-js"),
+        "exit-2 path must still emit the markdown body for PR-comment posting; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("### Possible typosquats"),
+        "exit-2 path must still emit the typosquat section; got:\n{stdout}"
+    );
+}
+
+#[test]
+fn diff_fail_on_cve_with_no_findings_exits_0() {
+    // Self-diff has no findings of any kind. --fail-on=cve must NOT trip.
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-minimal.json",
+            "--no-osv",
+            "--no-maintainer-age",
+            "--fail-on",
+            "cve",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(
+        out.status.success(),
+        "self-diff with --fail-on=cve must exit 0; got status: {} stderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn diff_fail_on_critical_cve_with_no_cve_findings_does_not_warn() {
+    // critical-cve is treated as cve in v0.2 with a documented stderr warning
+    // explaining the limitation. The warning must fire ONLY when the threshold
+    // actually trips — pollutting every invocation that uses `critical-cve`
+    // would be obnoxious.
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--no-maintainer-age",
+            "--fail-on",
+            "critical-cve",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(
+        out.status.success(),
+        "critical-cve with no CVE findings must NOT trip; got status: {} stderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("critical-cve is treated as"),
+        "v0.2 critical-cve warning must only fire on trip, not on every invocation; stderr:\n{stderr}"
+    );
+}
+
+#[test]
 fn diff_terminal_output_in_non_tty_falls_back_to_markdown() {
     // When the binary is invoked under `Command::output()`, stdout is captured
     // (a pipe, not a TTY). The terminal renderer must therefore fall back to
