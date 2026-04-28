@@ -1,0 +1,247 @@
+name: release
+
+# Triggered when a SemVer tag (e.g. v0.1.0) is pushed. Builds release binaries
+# for every supported target, computes SHA-256 checksums, signs each binary
+# with cosign keyless (Sigstore via GitHub OIDC), and attaches everything to
+# the corresponding GitHub Release.
+#
+# Manual reruns: re-run the failed run from the GitHub Actions UI on the
+# original tag-push event. Manual workflow_dispatch is intentionally not
+# offered for v0.1.0 because it would weaken cosign provenance — the OIDC
+# identity for a manual dispatch is branch-based, not tag-based, and
+# verification instructions in CHANGELOG.md assume the tag-push identity.
+
+on:
+  push:
+    tags:
+      # Strict SemVer release tags only. Pre-release tags (v0.1.0-rc1) and
+      # arbitrary v* tags are deliberately excluded.
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write       # create release, upload assets
+  id-token: write       # cosign keyless OIDC
+
+# A second push of the same tag (rare; e.g. a force-push after a fixup) will
+# cancel the in-flight run rather than racing it. Different tags can release
+# concurrently.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+
+jobs:
+  preflight:
+    # Cheap validation up-front — fail before spending 4 cross-builds.
+    name: preflight
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Verify Cargo.toml version matches tag
+        shell: bash
+        run: |
+          cargo_version="$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)".*/\1/')"
+          if [ "$cargo_version" != "${{ steps.tag.outputs.version }}" ]; then
+            echo "Cargo.toml version ($cargo_version) does not match tag (${{ steps.tag.outputs.version }})" >&2
+            exit 1
+          fi
+
+      - name: Verify CHANGELOG.md has an entry for this version
+        shell: bash
+        run: |
+          version="${{ steps.tag.outputs.version }}"
+          if ! grep -qE "^## \[${version}\]" CHANGELOG.md; then
+            echo "CHANGELOG.md is missing a '## [${version}]' section" >&2
+            exit 1
+          fi
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: preflight
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+          # NOTE: aarch64-unknown-linux-gnu is intentionally NOT in v0.1.0.
+          # Cross-compiling ring (transitive via ureq -> rustls) from
+          # ubuntu-x86_64 needs CC/AR env vars and at least one validated
+          # dry run; planned for v0.1.1.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        shell: bash
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Stage archive contents
+        id: stage
+        shell: bash
+        run: |
+          tag="${{ needs.preflight.outputs.tag }}"
+          target="${{ matrix.target }}"
+          stem="bomdrift-${tag}-${target}"
+          stage="dist/${stem}"
+          mkdir -p "$stage"
+
+          if [[ "$target" == *windows* ]]; then
+            cp "target/${target}/release/bomdrift.exe" "$stage/"
+          else
+            cp "target/${target}/release/bomdrift" "$stage/"
+          fi
+          cp README.md LICENSE CHANGELOG.md "$stage/"
+
+          echo "stem=$stem" >> "$GITHUB_OUTPUT"
+
+      - name: Create archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          cd dist
+          tar -czf "${{ steps.stage.outputs.stem }}.tar.gz" "${{ steps.stage.outputs.stem }}"
+
+      - name: Create archive (zip)
+        if: matrix.archive == 'zip'
+        shell: bash
+        run: |
+          cd dist
+          7z a "${{ steps.stage.outputs.stem }}.zip" "${{ steps.stage.outputs.stem }}" >/dev/null
+
+      - name: Compute SHA-256
+        shell: bash
+        run: |
+          cd dist
+          archive="${{ steps.stage.outputs.stem }}.${{ matrix.archive }}"
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$archive" > "${archive}.sha256"
+          else
+            shasum -a 256 "$archive" > "${archive}.sha256"
+          fi
+          cat "${archive}.sha256"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign archive with cosign (keyless)
+        shell: bash
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cd dist
+          archive="${{ steps.stage.outputs.stem }}.${{ matrix.archive }}"
+          cosign sign-blob --yes \
+            --output-signature "${archive}.sig" \
+            --output-certificate "${archive}.pem" \
+            "$archive"
+
+      - name: Upload artifact (per-target)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.stage.outputs.stem }}
+          path: |
+            dist/${{ steps.stage.outputs.stem }}.${{ matrix.archive }}
+            dist/${{ steps.stage.outputs.stem }}.${{ matrix.archive }}.sha256
+            dist/${{ steps.stage.outputs.stem }}.${{ matrix.archive }}.sig
+            dist/${{ steps.stage.outputs.stem }}.${{ matrix.archive }}.pem
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: publish release
+    needs: [preflight, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List release assets
+        shell: bash
+        run: ls -la dist
+
+      - name: Extract release notes from CHANGELOG.md
+        shell: bash
+        run: |
+          version="${{ needs.preflight.outputs.version }}"
+          tag="${{ needs.preflight.outputs.tag }}"
+          # Print everything between "## [<version>]" and the next "## [" header.
+          awk -v ver="$version" '
+            $0 ~ "^## \\[" ver "\\]" { capturing = 1; print; next }
+            capturing && /^## \[/    { capturing = 0 }
+            capturing                { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "Release notes for $tag not found in CHANGELOG.md" >&2
+            exit 1
+          fi
+          echo "" >> release-notes.md
+          echo "---" >> release-notes.md
+          echo "" >> release-notes.md
+          echo "## Verifying signatures" >> release-notes.md
+          echo "" >> release-notes.md
+          echo 'Each archive is signed with cosign keyless (Sigstore via GitHub OIDC). To verify a download:' >> release-notes.md
+          echo "" >> release-notes.md
+          echo '```bash' >> release-notes.md
+          echo "cosign verify-blob \\" >> release-notes.md
+          echo "  --certificate-identity 'https://github.com/Metbcy/bomdrift/.github/workflows/release.yml@refs/tags/${tag}' \\" >> release-notes.md
+          echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com \\" >> release-notes.md
+          echo "  --certificate bomdrift-${tag}-<target>.<ext>.pem \\" >> release-notes.md
+          echo "  --signature bomdrift-${tag}-<target>.<ext>.sig \\" >> release-notes.md
+          echo "  bomdrift-${tag}-<target>.<ext>" >> release-notes.md
+          echo '```' >> release-notes.md
+          cat release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.preflight.outputs.tag }}
+          name: ${{ needs.preflight.outputs.tag }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+            dist/*.sig
+            dist/*.pem

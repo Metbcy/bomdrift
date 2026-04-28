@@ -1,5 +1,5 @@
 name: bomdrift
-description: SBOM diff with supply-chain risk signals (pre-release — not yet functional).
+description: SBOM diff with supply-chain risk signals — flags new CVEs, typosquats, multi-major version jumps, and young maintainers on changed dependencies, posted as a PR comment.
 branding:
   icon: shield
   color: blue
@@ -30,7 +30,10 @@ inputs:
 runs:
   using: composite
   steps:
-    - shell: bash
+    - name: Install cosign (for release signature verification)
+      uses: sigstore/cosign-installer@v3
+    - name: Run bomdrift
+      shell: bash
       run: ${{ github.action_path }}/entrypoint.sh
       env:
         BEFORE_SBOM: ${{ inputs.before-sbom }}
@@ -39,4 +42,4 @@ runs:
         OUTPUT_FORMAT: ${{ inputs.output }}
         COMMENT_ON_PR: ${{ inputs.comment-on-pr }}
         FAIL_ON: ${{ inputs.fail-on }}
-        GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
