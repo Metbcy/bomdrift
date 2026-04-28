@@ -1,0 +1,138 @@
+//! End-to-end CLI tests that spawn the actual binary via the path Cargo provides
+//! through the `CARGO_BIN_EXE_<name>` env var. These verify the user-visible
+//! behavior of `bomdrift diff <before> <after>` rather than internal API shape.
+
+use std::process::Command;
+
+fn bin() -> &'static str {
+    env!("CARGO_BIN_EXE_bomdrift")
+}
+
+fn manifest_dir() -> &'static str {
+    env!("CARGO_MANIFEST_DIR")
+}
+
+#[test]
+fn diff_axios_fixture_pair_prints_pr_comment_markdown() {
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(
+        out.status.success(),
+        "exit code: {}\nstderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    assert!(stdout.starts_with("## SBOM diff\n"));
+    assert!(stdout.contains("| Added | 1 |"));
+    assert!(stdout.contains("| Removed | 1 |"));
+    assert!(stdout.contains("| Version changed | 1 |"));
+    assert!(stdout.contains("| npm | plain-crypto-js | 4.2.1 |"));
+    assert!(stdout.contains("| npm | axios | 1.14.0 | 1.14.1 |"));
+}
+
+#[test]
+fn diff_self_against_self_reports_no_changes() {
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-minimal.json",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    assert!(stdout.contains("_No dependency changes._"));
+}
+
+#[test]
+fn diff_explicit_markdown_flag_is_identical_to_default() {
+    let default_out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    let explicit_out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--output",
+            "markdown",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert_eq!(default_out.stdout, explicit_out.stdout);
+}
+
+#[test]
+fn diff_missing_file_fails_with_useful_error() {
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/does-not-exist.json",
+            "tests/fixtures/cdx-after.json",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("does-not-exist.json"));
+    assert!(
+        stderr.contains("reading SBOM file") || stderr.contains("No such file"),
+        "stderr should mention the failing file or the reason: {stderr}"
+    );
+}
+
+#[test]
+fn diff_json_output_returns_not_implemented_error() {
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--output",
+            "json",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("json is not implemented"));
+}
+
+#[test]
+fn refresh_typosquat_returns_not_implemented_error() {
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args(["refresh-typosquat"])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("refresh-typosquat"));
+}
