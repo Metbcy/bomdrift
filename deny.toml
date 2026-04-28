@@ -24,6 +24,10 @@ allow = [
     "MPL-2.0",
     "CC0-1.0",
     "0BSD",
+    # Required by webpki-roots (transitive via ureq → rustls) which packages
+    # Mozilla's CA root trust store. CDLA-Permissive-2.0 is a permissive,
+    # OSI-/SPDX-recognized data license with no copyleft for derivative works.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
 
