@@ -1,0 +1,42 @@
+name: bomdrift
+description: SBOM diff with supply-chain risk signals (pre-release — not yet functional).
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  before-sbom:
+    description: Path to the "before" SBOM (CycloneDX, SPDX, or Syft JSON).
+    required: true
+  after-sbom:
+    description: Path to the "after" SBOM (CycloneDX, SPDX, or Syft JSON).
+    required: true
+  format:
+    description: Force input format detection (auto|cdx|spdx|syft).
+    default: auto
+  output:
+    description: Output format (terminal|markdown|json|sarif).
+    default: markdown
+  comment-on-pr:
+    description: Post the diff as a PR comment when run on a pull_request event.
+    default: 'true'
+  fail-on:
+    description: Threshold to fail the action (none|cve|critical-cve|typosquat|any).
+    default: none
+  github-token:
+    description: Token used to post PR comments. Defaults to GITHUB_TOKEN.
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: ${{ github.action_path }}/entrypoint.sh
+      env:
+        BEFORE_SBOM: ${{ inputs.before-sbom }}
+        AFTER_SBOM: ${{ inputs.after-sbom }}
+        INPUT_FORMAT: ${{ inputs.format }}
+        OUTPUT_FORMAT: ${{ inputs.output }}
+        COMMENT_ON_PR: ${{ inputs.comment-on-pr }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}

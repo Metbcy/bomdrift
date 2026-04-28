@@ -1,0 +1,34 @@
+[package]
+name = "bomdrift"
+version = "0.1.0-dev"
+edition = "2024"
+rust-version = "1.85"
+description = "SBOM diff with supply-chain risk signals (CVEs, typosquats, maintainer-age)."
+license = "Apache-2.0"
+repository = "https://github.com/Metbcy/bomdrift"
+homepage = "https://github.com/Metbcy/bomdrift"
+readme = "README.md"
+keywords = ["sbom", "security", "supply-chain", "cyclonedx", "spdx"]
+categories = ["command-line-utilities", "development-tools"]
+
+[lib]
+name = "bomdrift"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bomdrift"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+
+[dev-dependencies]
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1

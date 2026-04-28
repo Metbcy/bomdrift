@@ -1,0 +1,39 @@
+# cargo-deny policy. https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+all-features = true
+
+[advisories]
+yanked = "warn"
+ignore = []
+
+[licenses]
+# Permissive only. We ship Apache-2.0 binaries; mixing strong copyleft (GPL/AGPL/SSPL/BUSL)
+# in transitive deps creates user-distribution friction. MPL-2.0 is allowed (file-level
+# copyleft is fine for binary distribution).
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "MPL-2.0",
+    "CC0-1.0",
+    "0BSD",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Start permissive on duplicate versions; tighten to "deny" once the dep tree is audited.
+multiple-versions = "warn"
+deny = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
