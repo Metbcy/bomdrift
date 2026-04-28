@@ -264,6 +264,62 @@ fn refresh_typosquat_help_advertises_ecosystem_flag() {
 }
 
 #[test]
+fn diff_sarif_output_produces_valid_sarif_with_typosquat_finding() {
+    // End-to-end SARIF: feed the axios fixture pair, verify the output is
+    // parseable JSON with the v2.1.0 envelope, and that the load-bearing
+    // typosquat finding (`plain-crypto-js` -> `crypto-js`) shows up as a
+    // `bomdrift.typosquat` result. `--no-osv` and `--no-maintainer-age` keep
+    // the test offline and deterministic.
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--no-maintainer-age",
+            "--output",
+            "sarif",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(
+        out.status.success(),
+        "exit code: {}\nstderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout).expect("--output sarif must produce parseable JSON");
+
+    assert_eq!(v["version"], "2.1.0");
+    assert!(
+        v["$schema"]
+            .as_str()
+            .unwrap()
+            .contains("sarif-schema-2.1.0.json")
+    );
+    let driver = &v["runs"][0]["tool"]["driver"];
+    assert_eq!(driver["name"], "bomdrift");
+
+    let results = v["runs"][0]["results"].as_array().expect("results array");
+    let typosquat_purls: Vec<&str> = results
+        .iter()
+        .filter(|r| r["ruleId"] == "bomdrift.typosquat")
+        .filter_map(|r| r["properties"]["purl"].as_str())
+        .collect();
+    assert!(
+        typosquat_purls
+            .iter()
+            .any(|p| p.contains("plain-crypto-js")),
+        "expected a bomdrift.typosquat result for plain-crypto-js, got: {typosquat_purls:?}"
+    );
+}
+
+#[test]
 fn diff_axios_fixture_pair_renders_typosquat_section() {
     // End-to-end: typosquat enricher always runs (pure compute, no I/O), so
     // even with `--no-osv` the "Possible typosquats" section appears for the
