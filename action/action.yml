@@ -21,7 +21,12 @@ inputs:
     description: Post the diff as a PR comment when run on a pull_request event.
     default: 'true'
   fail-on:
-    description: Threshold to fail the action (none|cve|critical-cve|typosquat|any).
+    description: |
+      Threshold to fail the action with exit code 2 when findings of the
+      configured kind surface. Accepted: none|cve|critical-cve|typosquat|any.
+      `critical-cve` is currently treated as `cve` (severity data isn't yet
+      populated by OSV's /v1/querybatch in v0.2). The PR comment is still
+      posted on a tripped exit so reviewers see the findings.
     default: none
   github-token:
     description: Token used to post PR comments. Defaults to GITHUB_TOKEN.

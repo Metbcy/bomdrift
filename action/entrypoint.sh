@@ -155,10 +155,17 @@ run_diff() {
   local after="$3"
   local fmt="${4:-markdown}"
   local input_format="${5:-auto}"
+  shift 5
+  # Remaining args are passed through verbatim — used for `--fail-on <value>`
+  # and any future bomdrift CLI flags the action wants to plumb through
+  # without having to re-position parameters.
 
   local args=(diff "$before" "$after" --output "$fmt")
   if [ "$input_format" != "auto" ]; then
     args+=(--format "$input_format")
+  fi
+  if [ "$#" -gt 0 ]; then
+    args+=("$@")
   fi
 
   log "Running bomdrift ${args[*]}"
@@ -186,19 +193,32 @@ main() {
     fail "after-sbom not found: $after"
   fi
 
-  if [ "$fail_on" != "none" ]; then
-    printf '::warning::fail-on=%s requested but not yet implemented in v0.1.0; treating as none\n' "$fail_on"
-  fi
-
-  local tag target bin out
+  local tag target bin out rc
   tag="$(resolve_tag)"
   target="$(resolve_target)"
   printf 'bomdrift Action: tag=%s target=%s\n' "$tag" "$target"
 
   bin="$(download_bomdrift "$tag" "$target")"
 
-  out="$(run_diff "$bin" "$before" "$after" "$output_format" "$input_format")"
-  printf '%s\n' "$out"
+  # `set -euo pipefail` would abort the script the instant bomdrift exits
+  # non-zero (e.g. when --fail-on trips), short-circuiting the PR-comment
+  # post that consumers rely on for visibility. The `tee` + PIPESTATUS
+  # capture lets us preserve bomdrift's exit code while still posting the
+  # comment from the captured body.
+  local out_file
+  out_file="$(mktemp)"
+  local fail_on_args=()
+  if [ "$fail_on" != "none" ]; then
+    fail_on_args=(--fail-on "$fail_on")
+  fi
+
+  set +e
+  run_diff "$bin" "$before" "$after" "$output_format" "$input_format" "${fail_on_args[@]}" \
+    | tee "$out_file"
+  rc="${PIPESTATUS[0]}"
+  set -e
+  out="$(cat "$out_file")"
+  rm -f "$out_file"
 
   # Always also write to the step summary so users see the diff even when no
   # PR comment is posted.
@@ -211,6 +231,11 @@ main() {
      && [ "$output_format" = "markdown" ]; then
     post_pr_comment "$out"
   fi
+
+  # bomdrift exit 2 means --fail-on tripped; surface that to the runner so
+  # the workflow step fails as the consumer requested. Other non-zero codes
+  # are bomdrift bugs / parse errors and should also propagate.
+  exit "$rc"
 }
 
 # ---- PR comment upsert -------------------------------------------------------
