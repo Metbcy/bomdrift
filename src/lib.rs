@@ -45,6 +45,20 @@ fn run_diff(args: DiffArgs) -> Result<()> {
     // runs, regardless of `--no-osv`. Findings are informational.
     enrichment.typosquats = enrich::typosquat::enrich(&cs);
 
+    // Maintainer-age enrichment hits the GitHub REST API; gated behind
+    // `--no-maintainer-age` for offline runs. Best-effort: failures warn and
+    // continue, mirroring the OSV enricher's contract.
+    if !args.no_maintainer_age {
+        match enrich::maintainer::enrich(&cs) {
+            Ok(findings) => enrichment.maintainer_age = findings,
+            Err(err) => {
+                eprintln!(
+                    "warning: maintainer-age enrichment failed, continuing without it: {err:#}"
+                );
+            }
+        }
+    }
+
     let rendered = match args.output {
         OutputFormat::Terminal | OutputFormat::Markdown => {
             render::markdown::render(&cs, &enrichment)

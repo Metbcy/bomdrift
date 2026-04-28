@@ -172,3 +172,40 @@ fn diff_axios_fixture_pair_renders_typosquat_section() {
         "wording must be 'similar to', never 'is a typosquat'"
     );
 }
+
+#[test]
+fn diff_no_maintainer_age_flag_skips_enricher() {
+    // With --no-maintainer-age (and --no-osv to keep the run fully offline),
+    // the diff renders successfully and the "Young maintainers" section is
+    // absent. This guards against accidentally always-running the GitHub-API
+    // enricher in test/CI environments where GITHUB_TOKEN may be unset and
+    // the unauth rate limit (60/hr) is shared with other concurrent jobs.
+    let out = std::process::Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--no-maintainer-age",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(
+        out.status.success(),
+        "exit code: {}\nstderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    assert!(
+        !stdout.contains("### Young maintainers"),
+        "young-maintainers section must not render when --no-maintainer-age is set; got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("| Young maintainers |"),
+        "young-maintainers summary row must not appear when the enricher is skipped"
+    );
+}

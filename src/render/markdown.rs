@@ -20,6 +20,7 @@ use std::fmt::Write as _;
 
 use crate::diff::ChangeSet;
 use crate::enrich::Enrichment;
+use crate::enrich::maintainer::MaintainerAgeFinding;
 use crate::enrich::typosquat::TyposquatFinding;
 use crate::model::Component;
 
@@ -49,6 +50,13 @@ pub fn render(cs: &ChangeSet, enrichment: &Enrichment) -> String {
             out,
             "| Possible typosquats | {} |",
             enrichment.typosquats.len()
+        );
+    }
+    if !enrichment.maintainer_age.is_empty() {
+        let _ = writeln!(
+            out,
+            "| Young maintainers | {} |",
+            enrichment.maintainer_age.len()
         );
     }
     out.push('\n');
@@ -135,7 +143,35 @@ pub fn render(cs: &ChangeSet, enrichment: &Enrichment) -> String {
         out.push('\n');
     }
 
+    if !enrichment.maintainer_age.is_empty() {
+        out.push_str("### Young maintainers (added deps)\n\n");
+        out.push_str(
+            "The top contributor to each repository below opened their first commit \
+             recently. The xz/liblzma backdoor (CVE-2024-3094) was authored by an \
+             identity that took over maintainership after a sustained ramp-up; a \
+             very-recent top contributor on a newly-introduced dependency is the \
+             early signal of that pattern. Investigate the maintainer's history \
+             before merging.\n\n",
+        );
+        out.push_str(
+            "| Ecosystem | Name | Version | Top contributor | Days since first commit |\n\
+             |---|---|---|---|---:|\n",
+        );
+        for f in &enrichment.maintainer_age {
+            write_maintainer_age_row(&mut out, f);
+        }
+        out.push('\n');
+    }
+
     out
+}
+
+fn write_maintainer_age_row(out: &mut String, f: &MaintainerAgeFinding) {
+    let _ = writeln!(
+        out,
+        "| {} | {} | {} | {} | {} |",
+        f.component.ecosystem, f.component.name, f.component.version, f.top_contributor, f.days_old
+    );
 }
 
 fn write_typosquat_row(out: &mut String, f: &TyposquatFinding) {
@@ -383,5 +419,47 @@ mod tests {
         let md = render(&cs, &e);
         assert!(md.contains("| Possible typosquats | 1 |"));
         assert!(!md.contains("| Vulnerabilities |"));
+    }
+
+    fn maintainer_finding(name: &str, contributor: &str, days: i64) -> MaintainerAgeFinding {
+        MaintainerAgeFinding {
+            component: comp(name, "1.0.0", Ecosystem::Npm, None),
+            top_contributor: contributor.to_string(),
+            first_commit_at: "2026-04-01T00:00:00Z".to_string(),
+            days_old: days,
+        }
+    }
+
+    #[test]
+    fn maintainer_age_section_renders_with_table_and_xz_callout() {
+        let cs = ChangeSet {
+            added: vec![comp("liblzma-shim", "5.6.1", Ecosystem::Npm, None)],
+            ..Default::default()
+        };
+        let mut e = Enrichment::default();
+        e.maintainer_age
+            .push(maintainer_finding("liblzma-shim", "jia-tan", 14));
+        let md = render(&cs, &e);
+        assert!(md.contains("### Young maintainers (added deps)"));
+        assert!(md.contains("| Young maintainers | 1 |"));
+        assert!(
+            md.contains("xz") || md.contains("CVE-2024-3094"),
+            "section copy must reference the xz incident as the motivating signal"
+        );
+        assert!(md.contains(
+            "| Ecosystem | Name | Version | Top contributor | Days since first commit |"
+        ));
+        assert!(md.contains("| npm | liblzma-shim | 1.0.0 | jia-tan | 14 |"));
+    }
+
+    #[test]
+    fn maintainer_age_section_omitted_when_no_findings() {
+        let cs = ChangeSet {
+            added: vec![comp("safe", "1.0", Ecosystem::Npm, None)],
+            ..Default::default()
+        };
+        let md = render(&cs, &Enrichment::default());
+        assert!(!md.contains("### Young maintainers"));
+        assert!(!md.contains("| Young maintainers |"));
     }
 }

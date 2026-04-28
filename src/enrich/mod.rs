@@ -1,15 +1,17 @@
 //! Risk-signal enrichers. Each runs over a [`crate::diff::ChangeSet`] and produces
 //! data that the renderers can pair back to the changed components.
 //!
-//! v0 ships [`osv`] (CVE lookup via OSV.dev) and [`typosquat`] (similarity to
-//! popular npm packages). Maintainer-age and version-jump enrichers land in
-//! subsequent PRs.
+//! v0 ships [`osv`] (CVE lookup via OSV.dev), [`typosquat`] (similarity to
+//! popular npm packages), and [`maintainer`] (xz-style young-maintainer signal
+//! via the GitHub REST API). The version-jump enricher lands in a later PR.
 
+pub mod maintainer;
 pub mod osv;
 pub mod typosquat;
 
 use std::collections::HashMap;
 
+use maintainer::MaintainerAgeFinding;
 use typosquat::TyposquatFinding;
 
 /// Aggregated enrichment data attached to a diff. Keyed by the component's
@@ -25,6 +27,10 @@ pub struct Enrichment {
     /// Newly added components whose names look suspiciously close to a popular
     /// package. Always informational — never trips fail-on.
     pub typosquats: Vec<TyposquatFinding>,
+    /// Newly added components whose top GitHub contributor's first commit is
+    /// younger than [`maintainer::YOUNG_MAINTAINER_DAYS`]. The xz/Jia Tan
+    /// pattern. Always informational — never trips fail-on.
+    pub maintainer_age: Vec<MaintainerAgeFinding>,
 }
 
 impl Enrichment {
@@ -36,6 +42,6 @@ impl Enrichment {
     }
 
     pub fn has_findings(&self) -> bool {
-        !self.vulns.is_empty() || !self.typosquats.is_empty()
+        !self.vulns.is_empty() || !self.typosquats.is_empty() || !self.maintainer_age.is_empty()
     }
 }
