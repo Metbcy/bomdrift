@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod diff;
 pub mod model;
 pub mod parse;
 

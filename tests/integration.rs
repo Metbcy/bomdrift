@@ -3,6 +3,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use bomdrift::diff;
 use bomdrift::model::{Ecosystem, HashAlg, SbomFormat};
 use bomdrift::parse;
 
@@ -145,4 +146,54 @@ fn syft_minimal_parses() {
         "Syft `type: rust-crate` should map to Cargo when purl is absent"
     );
     assert!(no_purl.purl.is_none());
+}
+
+#[test]
+fn diff_cdx_minimal_against_cdx_after() {
+    // The "after" fixture mirrors the axios incident shape: axios bumped to
+    // 1.14.1 (the compromised version), `plain-crypto-js@4.2.1` newly added
+    // (the malicious typosquat), and a no-purl component removed.
+    let before = parse_fixture("cdx-minimal.json");
+    let after = parse_fixture("cdx-after.json");
+
+    let cs = diff::diff(&before, &after);
+
+    assert_eq!(cs.added.len(), 1, "plain-crypto-js should be added");
+    assert_eq!(cs.added[0].name, "plain-crypto-js");
+    assert_eq!(cs.added[0].version, "4.2.1");
+
+    assert_eq!(
+        cs.removed.len(),
+        1,
+        "no-purl-component should be removed (no purl, NameTuple keying)"
+    );
+    assert_eq!(cs.removed[0].name, "no-purl-component");
+
+    assert_eq!(
+        cs.version_changed.len(),
+        1,
+        "axios should be version-bumped"
+    );
+    let (b, a) = &cs.version_changed[0];
+    assert_eq!(b.name, "axios");
+    assert_eq!(b.version, "1.14.0");
+    assert_eq!(a.version, "1.14.1");
+
+    assert!(cs.license_changed.is_empty());
+}
+
+#[test]
+fn diff_is_deterministic_across_runs() {
+    let before = parse_fixture("cdx-minimal.json");
+    let after = parse_fixture("cdx-after.json");
+
+    let a = diff::diff(&before, &after);
+    let b = diff::diff(&before, &after);
+    assert_eq!(a, b, "diff output must be byte-identical for same inputs");
+}
+
+fn parse_fixture(name: &str) -> bomdrift::model::Sbom {
+    let raw = fixture(name);
+    let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    parse::parse(value).expect("parse fixture")
 }
