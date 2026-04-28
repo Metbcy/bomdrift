@@ -54,3 +54,58 @@ fn cdx_minimal_parses() {
     assert_eq!(no_purl.ecosystem, Ecosystem::Other("library".to_string()));
     assert!(no_purl.purl.is_none());
 }
+
+#[test]
+fn spdx_minimal_parses() {
+    let raw = fixture("spdx-minimal.json");
+    let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let sbom = parse::parse(value).expect("parse spdx fixture");
+
+    assert_eq!(sbom.format, SbomFormat::Spdx);
+    assert_eq!(
+        sbom.serial.as_deref(),
+        Some("https://github.com/Metbcy/bomdrift/dependency_graph/sbom-abc123")
+    );
+    assert_eq!(sbom.components.len(), 3);
+
+    let axios = &sbom.components[0];
+    assert_eq!(axios.name, "axios");
+    assert_eq!(axios.version, "1.14.0");
+    assert_eq!(axios.ecosystem, Ecosystem::Npm);
+    assert_eq!(axios.purl.as_deref(), Some("pkg:npm/axios@1.14.0"));
+    assert_eq!(axios.licenses, vec!["MIT".to_string()]);
+    assert_eq!(axios.hashes.len(), 1);
+    assert_eq!(axios.hashes[0].alg, HashAlg::Sha256);
+    assert_eq!(axios.supplier.as_deref(), Some("Matt Zabriskie"));
+    assert_eq!(
+        axios.source_url.as_deref(),
+        Some("https://github.com/axios/axios"),
+        "git+ prefix should be stripped from downloadLocation"
+    );
+    assert_eq!(axios.bom_ref.as_deref(), Some("SPDXRef-npm-axios-1.14.0"));
+
+    let requests = &sbom.components[1];
+    assert_eq!(requests.ecosystem, Ecosystem::PyPI);
+    assert_eq!(
+        requests.licenses,
+        vec!["Apache-2.0".to_string()],
+        "should fall back to licenseDeclared when concluded is NOASSERTION"
+    );
+    assert!(
+        requests.supplier.is_none(),
+        "supplier=NOASSERTION should not produce a value"
+    );
+    assert!(
+        requests.source_url.is_none(),
+        "downloadLocation=NOASSERTION should not produce a source URL"
+    );
+
+    let no_purl = &sbom.components[2];
+    assert_eq!(no_purl.name, "no-purl-component");
+    assert_eq!(
+        no_purl.ecosystem,
+        Ecosystem::Other("spdx-package".to_string())
+    );
+    assert!(no_purl.purl.is_none());
+    assert!(no_purl.licenses.is_empty());
+}

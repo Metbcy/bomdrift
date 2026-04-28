@@ -8,7 +8,7 @@ pub mod syft;
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::model::{Sbom, SbomFormat};
+use crate::model::{Ecosystem, HashAlg, Sbom, SbomFormat};
 
 #[derive(Error, Debug)]
 pub enum ParseError {
@@ -65,6 +65,35 @@ pub fn parse(value: Value) -> Result<Sbom, ParseError> {
     }
 }
 
+// ----- Cross-format helpers --------------------------------------------------------
+
+/// Extract an [`Ecosystem`] from a Package URL prefix. Returns `None` for malformed
+/// purls so callers can fall back to format-specific inference.
+pub(crate) fn ecosystem_from_purl(purl: &str) -> Option<Ecosystem> {
+    let after = purl.strip_prefix("pkg:")?;
+    let ty = after.split(['/', '@']).next()?;
+    Some(match ty {
+        "npm" => Ecosystem::Npm,
+        "pypi" => Ecosystem::PyPI,
+        "cargo" => Ecosystem::Cargo,
+        "maven" => Ecosystem::Maven,
+        "golang" => Ecosystem::Go,
+        other if !other.is_empty() => Ecosystem::Other(other.to_string()),
+        _ => return None,
+    })
+}
+
+/// Normalize hash-algorithm strings from any SBOM format to [`HashAlg`].
+pub(crate) fn hash_alg(s: &str) -> HashAlg {
+    match s.to_ascii_uppercase().as_str() {
+        "SHA-1" | "SHA1" => HashAlg::Sha1,
+        "SHA-256" | "SHA256" => HashAlg::Sha256,
+        "SHA-512" | "SHA512" => HashAlg::Sha512,
+        "MD5" => HashAlg::Md5,
+        _ => HashAlg::Other(s.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,5 +130,42 @@ mod tests {
     fn rejects_unknown() {
         let v = json!({"foo": "bar"});
         assert!(matches!(detect_format(&v), Err(ParseError::UnknownFormat)));
+    }
+
+    #[test]
+    fn purl_ecosystem_inference() {
+        assert_eq!(
+            ecosystem_from_purl("pkg:npm/axios@1.14.0"),
+            Some(Ecosystem::Npm)
+        );
+        assert_eq!(
+            ecosystem_from_purl("pkg:pypi/requests@2.31.0"),
+            Some(Ecosystem::PyPI)
+        );
+        assert_eq!(
+            ecosystem_from_purl("pkg:cargo/serde@1.0.0"),
+            Some(Ecosystem::Cargo)
+        );
+        assert_eq!(
+            ecosystem_from_purl("pkg:maven/org.apache.commons/commons-lang3@3.12.0"),
+            Some(Ecosystem::Maven)
+        );
+        assert_eq!(
+            ecosystem_from_purl("pkg:golang/github.com/spf13/cobra@v1.8.0"),
+            Some(Ecosystem::Go)
+        );
+        assert_eq!(
+            ecosystem_from_purl("pkg:gem/rails@7.1.0"),
+            Some(Ecosystem::Other("gem".to_string()))
+        );
+        assert_eq!(ecosystem_from_purl("not-a-purl"), None);
+    }
+
+    #[test]
+    fn hash_alg_normalization() {
+        assert_eq!(hash_alg("SHA-256"), HashAlg::Sha256);
+        assert_eq!(hash_alg("sha256"), HashAlg::Sha256);
+        assert_eq!(hash_alg("MD5"), HashAlg::Md5);
+        assert_eq!(hash_alg("BLAKE3"), HashAlg::Other("BLAKE3".to_string()));
     }
 }
