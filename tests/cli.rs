@@ -110,7 +110,7 @@ fn diff_missing_file_fails_with_useful_error() {
 }
 
 #[test]
-fn diff_json_output_returns_not_implemented_error() {
+fn diff_json_output_produces_parseable_json() {
     let out = Command::new(bin())
         .current_dir(manifest_dir())
         .args([
@@ -124,9 +124,39 @@ fn diff_json_output_returns_not_implemented_error() {
         .output()
         .expect("spawn bomdrift");
 
-    assert!(!out.status.success());
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("json is not implemented"));
+    assert!(
+        out.status.success(),
+        "exit code: {}\nstderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout).expect("--output json must produce parseable JSON");
+
+    assert!(
+        v.get("changes").is_some(),
+        "missing top-level `changes` key"
+    );
+    assert!(
+        v.get("enrichment").is_some(),
+        "missing top-level `enrichment` key"
+    );
+
+    // The axios-incident fixture pair always produces the plain-crypto-js
+    // typosquat finding (pure compute, no network — runs even with --no-osv).
+    let typosquats = v["enrichment"]["typosquats"]
+        .as_array()
+        .expect("enrichment.typosquats must be an array");
+    let names: Vec<&str> = typosquats
+        .iter()
+        .filter_map(|t| t["component"]["name"].as_str())
+        .collect();
+    assert!(
+        names.contains(&"plain-crypto-js"),
+        "expected plain-crypto-js in enrichment.typosquats, got names: {names:?}"
+    );
 }
 
 #[test]

@@ -4,18 +4,24 @@
 //! v0 ships [`osv`] (CVE lookup via OSV.dev) and [`typosquat`] (similarity to
 //! popular npm packages). Maintainer-age and version-jump enrichers land in
 //! subsequent PRs.
+//!
+//! New `Enrichment` fields must derive `serde::Serialize` to appear in JSON
+//! output (see `crate::render::json`). Future enrichers (version_jump,
+//! maintainer_age) should keep that contract.
 
 pub mod osv;
 pub mod typosquat;
 
 use std::collections::HashMap;
 
+use serde::Serialize;
+
 use typosquat::TyposquatFinding;
 
 /// Aggregated enrichment data attached to a diff. Keyed by the component's
 /// purl-with-version (e.g. `pkg:npm/axios@1.14.1`) so renderers can look up
 /// per-component findings without re-iterating over the changeset.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Enrichment {
     /// Map of `purl@version` → list of advisory IDs (e.g. GHSA-..., CVE-...).
     /// Components with no findings are absent from the map (never present with

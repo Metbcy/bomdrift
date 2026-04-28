@@ -49,7 +49,7 @@ fn run_diff(args: DiffArgs) -> Result<()> {
         OutputFormat::Terminal | OutputFormat::Markdown => {
             render::markdown::render(&cs, &enrichment)
         }
-        OutputFormat::Json => bail!("--output json is not implemented yet (planned for v0.2)"),
+        OutputFormat::Json => render::json::render(&cs, &enrichment),
         OutputFormat::Sarif => bail!("--output sarif is not implemented yet (planned for v0.2)"),
     };
 
