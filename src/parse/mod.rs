@@ -55,9 +55,28 @@ pub fn detect_format(value: &Value) -> Result<SbomFormat, ParseError> {
     Err(ParseError::UnknownFormat)
 }
 
-/// Parse an SBOM from a JSON value, dispatching to the appropriate format parser.
+/// Parse an SBOM from a JSON value, auto-detecting the format. Equivalent to
+/// `parse_with_format(value, None)`.
 pub fn parse(value: Value) -> Result<Sbom, ParseError> {
-    let format = detect_format(&value)?;
+    parse_with_format(value, None)
+}
+
+/// Parse an SBOM, optionally forcing a specific format instead of auto-detection.
+///
+/// When `hint` is `Some(_)`, the corresponding per-format parser is invoked
+/// directly without consulting `detect_format`. This is the wire-in for
+/// `bomdrift diff --format cdx|spdx|syft`: SBOMs that lack the canonical
+/// magic markers (e.g. partial or hand-written CycloneDX without `bomFormat`,
+/// or Syft output piped through tooling that strips the `schema` block) can
+/// still be parsed by telling the CLI what they are.
+///
+/// Forcing the wrong format yields a parser-level error rather than silently
+/// misinterpreting the document.
+pub fn parse_with_format(value: Value, hint: Option<SbomFormat>) -> Result<Sbom, ParseError> {
+    let format = match hint {
+        Some(f) => f,
+        None => detect_format(&value)?,
+    };
     match format {
         SbomFormat::CycloneDx => cyclonedx::CycloneDxParser::parse(value),
         SbomFormat::Spdx => spdx::SpdxParser::parse(value),
@@ -130,6 +149,53 @@ mod tests {
     fn rejects_unknown() {
         let v = json!({"foo": "bar"});
         assert!(matches!(detect_format(&v), Err(ParseError::UnknownFormat)));
+    }
+
+    #[test]
+    fn parse_with_format_none_falls_back_to_detection() {
+        let v = json!({
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.5",
+            "components": []
+        });
+        let sbom = parse_with_format(v, None).expect("auto-detect succeeds");
+        assert_eq!(sbom.format, SbomFormat::CycloneDx);
+    }
+
+    #[test]
+    fn parse_with_format_hint_bypasses_detection() {
+        // No `bomFormat`, no `spdxVersion`, no Syft schema marker — auto-detect
+        // would return UnknownFormat. The hint must force dispatch directly
+        // into the chosen per-format parser. Whether that parser then errors
+        // or accepts the value is its own concern; the contract under test is
+        // that detect_format is NOT consulted.
+        let v = json!({"foo": "bar"});
+        let auto = parse_with_format(v.clone(), None);
+        assert!(matches!(auto, Err(ParseError::UnknownFormat)));
+
+        let hinted = parse_with_format(v, Some(SbomFormat::Spdx))
+            .expect("SPDX parser tolerates an empty document");
+        assert_eq!(
+            hinted.format,
+            SbomFormat::Spdx,
+            "hint must steer dispatch into the SPDX parser regardless of the body"
+        );
+    }
+
+    #[test]
+    fn parse_with_format_steers_to_chosen_parser_even_when_body_matches_a_different_format() {
+        // CycloneDX body with a CycloneDX-specific marker, force-parsed as Syft.
+        // Auto-detect would route to the CycloneDX parser; the hint overrides
+        // that and the resulting Sbom carries the Syft format tag.
+        let v = json!({
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.5",
+            "components": [],
+            "schema": {"version": "16.0.0", "url": "https://example.invalid/"}
+        });
+        let hinted = parse_with_format(v, Some(SbomFormat::Syft))
+            .expect("Syft parser accepts an artifacts-less document");
+        assert_eq!(hinted.format, SbomFormat::Syft);
     }
 
     #[test]

@@ -22,8 +22,9 @@ pub fn run(cli: Cli) -> Result<()> {
 }
 
 fn run_diff(args: DiffArgs) -> Result<()> {
-    let before = load_sbom(&args.before)?;
-    let after = load_sbom(&args.after)?;
+    let format_hint = args.format.to_sbom_format();
+    let before = load_sbom(&args.before, format_hint)?;
+    let after = load_sbom(&args.after, format_hint)?;
 
     let cs = diff::diff(&before, &after);
 
@@ -83,10 +84,11 @@ fn run_diff(args: DiffArgs) -> Result<()> {
     Ok(())
 }
 
-fn load_sbom(path: &Path) -> Result<model::Sbom> {
+fn load_sbom(path: &Path, format_hint: Option<model::SbomFormat>) -> Result<model::Sbom> {
     let raw = fs::read_to_string(path)
         .with_context(|| format!("reading SBOM file: {}", path.display()))?;
     let value: serde_json::Value = serde_json::from_str(&raw)
         .with_context(|| format!("parsing JSON in: {}", path.display()))?;
-    parse::parse(value).with_context(|| format!("normalizing SBOM from: {}", path.display()))
+    parse::parse_with_format(value, format_hint)
+        .with_context(|| format!("normalizing SBOM from: {}", path.display()))
 }
