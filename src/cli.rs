@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+use crate::model::SbomFormat;
+
 #[derive(Parser, Debug)]
 #[command(
     name = "bomdrift",
@@ -81,4 +83,18 @@ pub enum InputFormat {
     Cdx,
     Spdx,
     Syft,
+}
+
+impl InputFormat {
+    /// Convert the user-facing `--format` flag to the internal model enum used
+    /// by the parser layer. `Auto` returns `None`, signalling auto-detection;
+    /// every other variant maps 1:1 to a forced-parse hint.
+    pub fn to_sbom_format(self) -> Option<SbomFormat> {
+        match self {
+            InputFormat::Auto => None,
+            InputFormat::Cdx => Some(SbomFormat::CycloneDx),
+            InputFormat::Spdx => Some(SbomFormat::Spdx),
+            InputFormat::Syft => Some(SbomFormat::Syft),
+        }
+    }
 }

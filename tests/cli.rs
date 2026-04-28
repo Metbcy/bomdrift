@@ -42,6 +42,79 @@ fn diff_axios_fixture_pair_prints_pr_comment_markdown() {
 }
 
 #[test]
+fn diff_explicit_format_cdx_succeeds_on_cdx_input() {
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--format",
+            "cdx",
+            "--no-osv",
+            "--no-maintainer-age",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+    assert!(
+        out.status.success(),
+        "exit code: {}\nstderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn diff_explicit_format_overrides_autodetection() {
+    // Auto-detect on CycloneDX inputs produces the documented diff. Forcing
+    // `--format spdx` against the same files routes them through the SPDX
+    // parser, which finds zero packages in CycloneDX-shaped JSON, yielding
+    // "no changes". A different output proves the hint took effect — i.e.
+    // the flag is no longer dead code.
+    let auto_out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--no-maintainer-age",
+        ])
+        .output()
+        .expect("spawn bomdrift (auto)");
+
+    let forced_out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--format",
+            "spdx",
+            "--no-osv",
+            "--no-maintainer-age",
+        ])
+        .output()
+        .expect("spawn bomdrift (forced spdx)");
+
+    let auto_stdout = String::from_utf8(auto_out.stdout).expect("utf-8");
+    let forced_stdout = String::from_utf8(forced_out.stdout).expect("utf-8");
+
+    assert!(
+        auto_stdout.contains("plain-crypto-js"),
+        "auto-detect should produce the documented diff, got: {auto_stdout}"
+    );
+    assert!(
+        forced_stdout.contains("_No dependency changes._"),
+        "forcing --format spdx on CycloneDX inputs should yield no diff, got: {forced_stdout}"
+    );
+    assert_ne!(
+        auto_stdout, forced_stdout,
+        "--format must change behavior when it overrides auto-detection"
+    );
+}
+
+#[test]
 fn diff_self_against_self_reports_no_changes() {
     let out = Command::new(bin())
         .current_dir(manifest_dir())
