@@ -37,6 +37,11 @@ pub struct DiffArgs {
     /// Skip OSV.dev CVE enrichment (offline mode, faster, deterministic).
     #[arg(long)]
     pub no_osv: bool,
+    /// Skip the maintainer-age enricher (no GitHub API calls). Use for offline
+    /// runs and tests; required when `GITHUB_TOKEN` is unset and the unauth
+    /// rate limit (60/hr) is too low for the diff being analyzed.
+    #[arg(long)]
+    pub no_maintainer_age: bool,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]

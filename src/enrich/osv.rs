@@ -60,6 +60,7 @@ fn enrich_with(purls: &[String], url: &str, timeout: Duration) -> Result<Enrichm
         vulns,
         typosquats: Vec::new(),
         version_jumps: Vec::new(),
+        maintainer_age: Vec::new(),
     })
 }
 

@@ -26,7 +26,7 @@
 
 use std::fmt::Write as _;
 
-use owo_colors::{OwoColorize, Style, Stream};
+use owo_colors::{OwoColorize, Stream, Style};
 
 use crate::diff::ChangeSet;
 use crate::enrich::Enrichment;

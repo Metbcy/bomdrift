@@ -196,6 +196,7 @@ mod tests {
             vulns,
             typosquats,
             version_jumps: Vec::new(),
+            maintainer_age: Vec::new(),
         };
         let cs = ChangeSet::default();
 

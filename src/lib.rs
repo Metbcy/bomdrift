@@ -50,6 +50,20 @@ fn run_diff(args: DiffArgs) -> Result<()> {
     // Findings are informational.
     enrichment.version_jumps = enrich::version_jump::enrich(&cs);
 
+    // Maintainer-age enrichment hits the GitHub REST API; gated behind
+    // `--no-maintainer-age` for offline runs. Best-effort: failures warn and
+    // continue, mirroring the OSV enricher's contract.
+    if !args.no_maintainer_age {
+        match enrich::maintainer::enrich(&cs) {
+            Ok(findings) => enrichment.maintainer_age = findings,
+            Err(err) => {
+                eprintln!(
+                    "warning: maintainer-age enrichment failed, continuing without it: {err:#}"
+                );
+            }
+        }
+    }
+
     let rendered = match args.output {
         OutputFormat::Terminal => {
             // ANSI escapes are only safe on a real TTY. Piped/redirected stdout
