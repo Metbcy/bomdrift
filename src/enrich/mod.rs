@@ -1,16 +1,18 @@
 //! Risk-signal enrichers. Each runs over a [`crate::diff::ChangeSet`] and produces
 //! data that the renderers can pair back to the changed components.
 //!
-//! v0 ships [`osv`] (CVE lookup via OSV.dev) and [`typosquat`] (similarity to
-//! popular npm packages). Maintainer-age and version-jump enrichers land in
-//! subsequent PRs.
+//! v0 ships [`osv`] (CVE lookup via OSV.dev), [`typosquat`] (similarity to
+//! popular npm packages), and [`version_jump`] (multi-major upgrades).
+//! Maintainer-age enricher lands in a subsequent PR.
 
 pub mod osv;
 pub mod typosquat;
+pub mod version_jump;
 
 use std::collections::HashMap;
 
 use typosquat::TyposquatFinding;
+use version_jump::VersionJumpFinding;
 
 /// Aggregated enrichment data attached to a diff. Keyed by the component's
 /// purl-with-version (e.g. `pkg:npm/axios@1.14.1`) so renderers can look up
@@ -25,6 +27,10 @@ pub struct Enrichment {
     /// Newly added components whose names look suspiciously close to a popular
     /// package. Always informational — never trips fail-on.
     pub typosquats: Vec<TyposquatFinding>,
+    /// Version-changed components whose major version jumped by 2 or more in a
+    /// single diff (e.g. 1.x → 4.x). Always informational — never trips
+    /// fail-on.
+    pub version_jumps: Vec<VersionJumpFinding>,
 }
 
 impl Enrichment {
@@ -36,6 +42,6 @@ impl Enrichment {
     }
 
     pub fn has_findings(&self) -> bool {
-        !self.vulns.is_empty() || !self.typosquats.is_empty()
+        !self.vulns.is_empty() || !self.typosquats.is_empty() || !self.version_jumps.is_empty()
     }
 }

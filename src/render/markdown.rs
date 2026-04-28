@@ -4,8 +4,9 @@
 //! - `## SBOM diff` headline (always present so the comment-tag upsert lands on a
 //!   stable selector).
 //! - Summary table of counts per change category, plus a "Vulnerabilities" row
-//!   when OSV enrichment found any and a "Possible typosquats" row when the
-//!   typosquat enricher fires.
+//!   when OSV enrichment found any, a "Possible typosquats" row when the
+//!   typosquat enricher fires, and a "Multi-major version jumps" row when the
+//!   version-jump heuristic fires.
 //! - Per-category tables. Sections with zero entries are omitted entirely so the
 //!   PR comment stays scannable.
 //! - License-changed section is prefaced with an investigation note since same-
@@ -21,6 +22,7 @@ use std::fmt::Write as _;
 use crate::diff::ChangeSet;
 use crate::enrich::Enrichment;
 use crate::enrich::typosquat::TyposquatFinding;
+use crate::enrich::version_jump::VersionJumpFinding;
 use crate::model::Component;
 
 pub fn render(cs: &ChangeSet, enrichment: &Enrichment) -> String {
@@ -49,6 +51,13 @@ pub fn render(cs: &ChangeSet, enrichment: &Enrichment) -> String {
             out,
             "| Possible typosquats | {} |",
             enrichment.typosquats.len()
+        );
+    }
+    if !enrichment.version_jumps.is_empty() {
+        let _ = writeln!(
+            out,
+            "| Multi-major version jumps | {} |",
+            enrichment.version_jumps.len()
         );
     }
     out.push('\n');
@@ -135,7 +144,37 @@ pub fn render(cs: &ChangeSet, enrichment: &Enrichment) -> String {
         out.push('\n');
     }
 
+    if !enrichment.version_jumps.is_empty() {
+        out.push_str("### Multi-major version jumps\n\n");
+        out.push_str(
+            "These dependencies crossed two or more major versions in a single diff. \
+             Multi-major bumps can hide takeover swaps, namespace reuse, or large \
+             refactors that bypass the SemVer signals reviewers usually rely on. \
+             Confirm the upgrade is intentional and the source matches.\n\n",
+        );
+        out.push_str(
+            "| Ecosystem | Name | Before | After | Major bump |\n|---|---|---|---|---:|\n",
+        );
+        for f in &enrichment.version_jumps {
+            write_version_jump_row(&mut out, f);
+        }
+        out.push('\n');
+    }
+
     out
+}
+
+fn write_version_jump_row(out: &mut String, f: &VersionJumpFinding) {
+    let _ = writeln!(
+        out,
+        "| {} | {} | {} | {} | {} → {} |",
+        f.after.ecosystem,
+        f.after.name,
+        f.before.version,
+        f.after.version,
+        f.before_major,
+        f.after_major,
+    );
 }
 
 fn write_typosquat_row(out: &mut String, f: &TyposquatFinding) {
@@ -383,5 +422,40 @@ mod tests {
         let md = render(&cs, &e);
         assert!(md.contains("| Possible typosquats | 1 |"));
         assert!(!md.contains("| Vulnerabilities |"));
+    }
+
+    #[test]
+    fn version_jump_section_renders_with_table() {
+        let before = comp("react", "16.14.0", Ecosystem::Npm, None);
+        let after = comp("react", "19.0.0", Ecosystem::Npm, None);
+        let cs = ChangeSet {
+            version_changed: vec![(before.clone(), after.clone())],
+            ..Default::default()
+        };
+        let mut e = Enrichment::default();
+        e.version_jumps
+            .push(crate::enrich::version_jump::VersionJumpFinding {
+                before,
+                after,
+                before_major: 16,
+                after_major: 19,
+            });
+        let md = render(&cs, &e);
+        assert!(md.contains("### Multi-major version jumps"));
+        assert!(md.contains("| Multi-major version jumps | 1 |"));
+        assert!(md.contains("| Ecosystem | Name | Before | After | Major bump |"));
+        assert!(md.contains("| npm | react | 16.14.0 | 19.0.0 | 16 → 19 |"));
+        assert!(md.contains("takeover swaps"));
+    }
+
+    #[test]
+    fn version_jump_section_omitted_when_no_findings() {
+        let cs = ChangeSet {
+            added: vec![comp("safe", "1.0", Ecosystem::Npm, None)],
+            ..Default::default()
+        };
+        let md = render(&cs, &Enrichment::default());
+        assert!(!md.contains("### Multi-major version jumps"));
+        assert!(!md.contains("| Multi-major version jumps |"));
     }
 }
