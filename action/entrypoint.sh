@@ -69,20 +69,21 @@ resolve_target() {
   case "${RUNNER_OS:-}" in
     Linux)
       case "${RUNNER_ARCH:-}" in
-        X64) printf 'x86_64-unknown-linux-gnu' ;;
-        *)   fail "unsupported Linux RUNNER_ARCH: ${RUNNER_ARCH:-<unset>} (only X64 ships in v0.1.0)" ;;
+        X64)   printf 'x86_64-unknown-linux-gnu' ;;
+        ARM64) printf 'aarch64-unknown-linux-gnu' ;;
+        *)     fail "unsupported Linux RUNNER_ARCH: ${RUNNER_ARCH:-<unset>} (supported: X64, ARM64)" ;;
       esac
       ;;
     macOS)
       case "${RUNNER_ARCH:-}" in
         ARM64) printf 'aarch64-apple-darwin' ;;
-        *)     fail "unsupported macOS RUNNER_ARCH: ${RUNNER_ARCH:-<unset>} (only ARM64 ships in v0.1.0)" ;;
+        *)     fail "unsupported macOS RUNNER_ARCH: ${RUNNER_ARCH:-<unset>} (only ARM64 ships)" ;;
       esac
       ;;
     Windows)
       case "${RUNNER_ARCH:-}" in
         X64) printf 'x86_64-pc-windows-msvc' ;;
-        *)   fail "unsupported Windows RUNNER_ARCH: ${RUNNER_ARCH:-<unset>} (only X64 ships in v0.1.0)" ;;
+        *)   fail "unsupported Windows RUNNER_ARCH: ${RUNNER_ARCH:-<unset>} (only X64 ships)" ;;
       esac
       ;;
     *)
@@ -96,6 +97,7 @@ resolve_target() {
 download_bomdrift() {
   local tag="$1"
   local target="$2"
+  local verify="${VERIFY_SIGNATURES:-true}"
   local ext="tar.gz"
   if [[ "$target" == *windows* ]]; then
     ext="zip"
@@ -108,11 +110,21 @@ download_bomdrift() {
 
   log "Downloading ${archive}"
   curl -fSL -o "${workdir}/${archive}" "${url}"
-  curl -fSL -o "${workdir}/${archive}.sig"  "${url}.sig"  || true
-  curl -fSL -o "${workdir}/${archive}.pem"  "${url}.pem"  || true
+  if [ "$verify" = "true" ]; then
+    curl -fSL -o "${workdir}/${archive}.sig"  "${url}.sig"  || true
+    curl -fSL -o "${workdir}/${archive}.pem"  "${url}.pem"  || true
+  fi
   endlog
 
-  if command -v cosign >/dev/null 2>&1; then
+  if [ "$verify" = "true" ]; then
+    if ! command -v cosign >/dev/null 2>&1; then
+      # `verify-signatures: true` is the default and contracts-with the
+      # consumer that we WILL verify. If cosign is missing, fail loudly
+      # rather than silently degrading — that's the whole point of the
+      # opt-out flag (consumers who deliberately want no verification
+      # set verify-signatures: false).
+      fail "cosign not installed but verify-signatures=true. Install cosign in a prior step or set verify-signatures: false."
+    fi
     if [ -s "${workdir}/${archive}.sig" ] && [ -s "${workdir}/${archive}.pem" ]; then
       log "Verifying cosign signature for ${archive}"
       cosign verify-blob \
@@ -123,10 +135,10 @@ download_bomdrift() {
         "${workdir}/${archive}"
       endlog
     else
-      printf '::warning::cosign signature artifacts missing for %s; skipping verification\n' "${archive}"
+      fail "cosign signature artifacts missing for ${archive} but verify-signatures=true. The release may have been tampered with, or this tag predates cosign signing."
     fi
   else
-    printf '::warning::cosign not installed on this runner; skipping signature verification\n'
+    printf '::notice::verify-signatures=false; skipping cosign verification of %s\n' "${archive}"
   fi
 
   log "Extracting ${archive}"
