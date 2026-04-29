@@ -36,6 +36,11 @@ pub struct Options {
     /// reviewer follows the footer link to the full report (workflow-step
     /// summary, JSON artifact, etc.) when they need detail.
     pub summary_only: bool,
+    /// When true, keep the summary table and risk-bearing sections but omit
+    /// raw dependency churn detail (Added / Removed / Version changed). This
+    /// keeps PR comments focused on review decisions while preserving the
+    /// counts that show how large the dependency change is.
+    pub findings_only: bool,
     /// Repository URL — `https://github.com/<owner>/<repo>` form, no
     /// trailing slash. When supplied, the renderer appends a footer
     /// linking to a pre-filled "Report this finding" issue and the
@@ -103,7 +108,16 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
         return out;
     }
 
-    if !cs.added.is_empty() {
+    if opts.findings_only
+        && (!cs.added.is_empty() || !cs.removed.is_empty() || !cs.version_changed.is_empty())
+    {
+        out.push_str(
+            "_Raw dependency churn detail elided (`--findings-only`); risk-bearing \
+             sections remain below._\n\n",
+        );
+    }
+
+    if !opts.findings_only && !cs.added.is_empty() {
         section_open(&mut out, "Added", cs.added.len(), None);
         out.push_str("| Ecosystem | Name | Version |\n|---|---|---|\n");
         for c in &cs.added {
@@ -112,7 +126,7 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
         section_close(&mut out);
     }
 
-    if !cs.removed.is_empty() {
+    if !opts.findings_only && !cs.removed.is_empty() {
         section_open(&mut out, "Removed", cs.removed.len(), None);
         out.push_str("| Ecosystem | Name | Version |\n|---|---|---|\n");
         for c in &cs.removed {
@@ -121,7 +135,7 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
         section_close(&mut out);
     }
 
-    if !cs.version_changed.is_empty() {
+    if !opts.findings_only && !cs.version_changed.is_empty() {
         section_open(&mut out, "Version changed", cs.version_changed.len(), None);
         out.push_str("| Ecosystem | Name | Before | After |\n|---|---|---|---|\n");
         for (b, a) in &cs.version_changed {
@@ -631,6 +645,7 @@ mod tests {
             &e,
             Options {
                 summary_only: true,
+                findings_only: false,
                 repo_url: None,
             },
         );
@@ -656,11 +671,55 @@ mod tests {
             &Enrichment::default(),
             Options {
                 summary_only: true,
+                findings_only: false,
                 repo_url: None,
             },
         );
         assert!(out.contains("_No dependency changes._"));
         assert!(!out.contains("Per-category detail elided"));
+    }
+
+    #[test]
+    fn findings_only_hides_raw_churn_but_keeps_risk_sections() {
+        let cs = ChangeSet {
+            added: vec![comp(
+                "axios",
+                "1.14.1",
+                Ecosystem::Npm,
+                Some("pkg:npm/axios@1.14.1"),
+            )],
+            version_changed: vec![(
+                comp("left-pad", "1.0.0", Ecosystem::Npm, None),
+                comp("left-pad", "4.0.0", Ecosystem::Npm, None),
+            )],
+            ..Default::default()
+        };
+        let mut e = Enrichment::default();
+        e.vulns.insert(
+            "pkg:npm/axios@1.14.1".to_string(),
+            vec![crate::enrich::VulnRef {
+                id: "GHSA-xxxx-yyyy-zzzz".to_string(),
+                severity: crate::enrich::Severity::High,
+            }],
+        );
+
+        let md = render_with_options(
+            &cs,
+            &e,
+            Options {
+                summary_only: false,
+                findings_only: true,
+                repo_url: None,
+            },
+        );
+
+        assert!(md.contains("| Added | 1 |"));
+        assert!(md.contains("| Version changed | 1 |"));
+        assert!(md.contains("Raw dependency churn detail elided"));
+        assert!(!md.contains("### Added"));
+        assert!(!md.contains("### Version changed"));
+        assert!(md.contains("### Vulnerabilities"));
+        assert!(md.contains("GHSA-xxxx-yyyy-zzzz"));
     }
 
     #[test]
@@ -991,6 +1050,7 @@ mod tests {
             &Enrichment::default(),
             Options {
                 summary_only: false,
+                findings_only: false,
                 repo_url: Some("https://github.com/example/proj".to_string()),
             },
         );
@@ -1013,6 +1073,7 @@ mod tests {
             &Enrichment::default(),
             Options {
                 summary_only: false,
+                findings_only: false,
                 repo_url: Some("https://github.com/example/proj/".to_string()),
             },
         );

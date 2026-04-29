@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use serde::Deserialize;
 
 use crate::model::SbomFormat;
 
@@ -37,6 +38,19 @@ pub enum Command {
         #[command(subcommand)]
         action: BaselineAction,
     },
+    /// Scaffold bomdrift config and GitHub Actions workflows in this repo.
+    Init(InitArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct InitArgs {
+    /// Overwrite existing generated files.
+    #[arg(long)]
+    pub force: bool,
+
+    /// Only write `.bomdrift.toml`; skip GitHub workflow files.
+    #[arg(long)]
+    pub config_only: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -115,12 +129,17 @@ pub struct DiffArgs {
     pub before: PathBuf,
     /// Path to the "after" SBOM (CycloneDX, SPDX, or Syft JSON).
     pub after: PathBuf,
-    /// Output format.
-    #[arg(long, value_enum, default_value_t = OutputFormat::Terminal)]
-    pub output: OutputFormat,
-    /// Force input format detection.
-    #[arg(long, value_enum, default_value_t = InputFormat::Auto)]
-    pub format: InputFormat,
+    /// Path to a repo policy config file. When omitted, `.bomdrift.toml` is
+    /// loaded if it exists in the current working directory.
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+    /// Output format (default: terminal, unless `.bomdrift.toml` sets one).
+    #[arg(long, value_enum)]
+    pub output: Option<OutputFormat>,
+    /// Force input format detection (default: auto, unless `.bomdrift.toml`
+    /// sets one).
+    #[arg(long, value_enum)]
+    pub format: Option<InputFormat>,
     /// Skip OSV.dev CVE enrichment (offline mode, faster, deterministic).
     #[arg(long)]
     pub no_osv: bool,
@@ -143,10 +162,9 @@ pub struct DiffArgs {
     #[arg(long)]
     pub no_maintainer_age: bool,
     /// Exit with code 2 when findings of the configured severity or higher
-    /// surface. Default `none` is informational-only (always exit 0 on a
-    /// successful run).
-    #[arg(long, value_enum, default_value_t = FailOn::None)]
-    pub fail_on: FailOn,
+    /// surface (default: none, unless `.bomdrift.toml` sets one).
+    #[arg(long, value_enum)]
+    pub fail_on: Option<FailOn>,
     /// Emit only the summary table (counts per change/finding category) and
     /// a footer pointing at the full output, omitting every per-category
     /// section. The PR-comment-friendly form for diffs that would otherwise
@@ -156,6 +174,11 @@ pub struct DiffArgs {
     /// goal is comment-size compression, not data loss).
     #[arg(long)]
     pub summary_only: bool,
+    /// Markdown-only. Omit raw Added / Removed / Version changed detail
+    /// sections, leaving the summary table plus risk-bearing sections. Useful
+    /// for PR comments where reviewers only want actionable findings.
+    #[arg(long)]
+    pub findings_only: bool,
     /// Keep `Ecosystem::Other("file")` pseudo-components emitted by Syft's
     /// directory cataloger. Off by default — the cataloger emits each
     /// YAML / lockfile / source file in the scanned directory as a synthetic
@@ -173,6 +196,15 @@ pub struct DiffArgs {
     /// use don't render dead links to bomdrift's own issue tracker.
     #[arg(long)]
     pub repo_url: Option<String>,
+    /// Exit 2 when more than this many components are added in one diff.
+    #[arg(long)]
+    pub max_added: Option<usize>,
+    /// Exit 2 when more than this many components are removed in one diff.
+    #[arg(long)]
+    pub max_removed: Option<usize>,
+    /// Exit 2 when more than this many components change version in one diff.
+    #[arg(long)]
+    pub max_version_changed: Option<usize>,
 }
 
 /// Threshold for `--fail-on` exit-code-2 behavior.
@@ -180,7 +212,8 @@ pub struct DiffArgs {
 /// Variants are intentionally ordered loosest-to-strictest in their
 /// declaration order, but the comparison logic in [`crate::tripped`] is
 /// per-variant rather than ordinal — adding a new variant later is safe.
-#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum FailOn {
     /// Never trip. Default. The diff is informational-only.
     None,
@@ -194,12 +227,15 @@ pub enum FailOn {
     CriticalCve,
     /// Trip when at least one typosquat finding is present.
     Typosquat,
+    /// Trip when at least one same-version license change is present.
+    LicenseChange,
     /// Trip on ANY finding (CVE, typosquat, version-jump, young-maintainer)
     /// OR any license-changed-without-version-bump pair (the suspicious case).
     Any,
 }
 
-#[derive(ValueEnum, Clone, Copy, Debug)]
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum OutputFormat {
     Terminal,
     Markdown,
@@ -207,7 +243,8 @@ pub enum OutputFormat {
     Sarif,
 }
 
-#[derive(ValueEnum, Clone, Copy, Debug)]
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum InputFormat {
     Auto,
     Cdx,

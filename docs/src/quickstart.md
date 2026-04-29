@@ -28,6 +28,11 @@ The `@v1` mutable tag tracks the latest v0.x release. Pin to a specific
 version (`@v0.5.0`) if you prefer reproducible builds. See
 [GitHub Action](./github-action.md) for every input.
 
+If you prefer a checked-in policy file, install the binary and run
+`bomdrift init` once. It writes `.bomdrift.toml` plus the SBOM-diff and
+comment-suppression workflows, so future policy tweaks happen in TOML
+instead of workflow YAML.
+
 ## Locally with the binary
 
 Pre-built binaries cover Linux x86_64 + aarch64, macOS aarch64, and

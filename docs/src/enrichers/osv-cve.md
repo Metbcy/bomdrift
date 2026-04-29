@@ -104,6 +104,8 @@ bomdrift diff before.json after.json --no-osv
 | `none` | Never. |
 | `cve` | Any vuln finding present (regardless of severity). |
 | `critical-cve` | Any finding with `severity >= High` (covers HIGH and CRITICAL). |
+| `typosquat` | Any typosquat finding; OSV findings do not trip it. |
+| `license-change` | Any same-version license change; OSV findings do not trip it. |
 | `any` | Any finding of any kind, plus license-changed-without-version-bump. |
 
 The `critical-cve` name covers HIGH-or-CRITICAL because CRITICAL alone

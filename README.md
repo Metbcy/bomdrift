@@ -75,12 +75,13 @@ jobs:
     steps:
       - uses: Metbcy/bomdrift@v1
         # Optional inputs (all have sensible defaults):
-        #   fail-on:           critical-cve | cve | typosquat | any | none
+        #   fail-on:           critical-cve | cve | typosquat | license-change | any | none
         #   baseline:          .bomdrift/baseline.json
+        #   findings-only:     true
         #   verify-signatures: true   (set false on trusted mirrors)
 ```
 
-Pin to `@v1` for the latest v0.x; pin to `@v0.5.0` for reproducible builds. See the [Action reference](https://metbcy.github.io/bomdrift/github-action.html) for every input.
+Pin to `@v1` for the latest v0.x; pin to `@v0.5.0` for reproducible builds. Run `bomdrift init` if you want a checked-in `.bomdrift.toml` policy and both workflows scaffolded locally. See the [Action reference](https://metbcy.github.io/bomdrift/github-action.html) for every input.
 
 #### Optional: in-comment suppression (v0.5+)
 
@@ -148,8 +149,17 @@ bomdrift diff before.json after.json --output sarif
 # Exit 2 on findings (the action wraps this for PR-comment workflows)
 bomdrift diff before.json after.json --fail-on critical-cve
 
+# Keep raw churn out of PR comments while preserving risk sections
+bomdrift diff before.json after.json --findings-only
+
+# Block unusually large dependency churn
+bomdrift diff before.json after.json --max-added 25 --max-version-changed 10
+
 # Suppress findings already present in a baseline snapshot
 bomdrift diff before.json after.json --baseline .bomdrift/baseline.json
+
+# Scaffold .bomdrift.toml and GitHub Action workflows
+bomdrift init
 
 # Hand-curate a baseline (or let the comment-suppress sub-action do it)
 bomdrift baseline add GHSA-xxxx-yyyy-zzzz
@@ -159,7 +169,7 @@ bomdrift refresh-typosquat                     # all ecosystems
 bomdrift refresh-typosquat --ecosystem pypi    # one specific list
 ```
 
-`bomdrift diff` exits 0 on success regardless of findings unless `--fail-on` is set — then it exits 2 when the threshold trips. Stdout is Markdown by default when piped/redirected (the PR-comment path) and ANSI-colored when stdout is a TTY. `--output markdown|json|terminal|sarif` overrides detection.
+`bomdrift diff` exits 0 on success regardless of findings unless `--fail-on` or a diff budget is set — then it exits 2 when the policy trips. Stdout is Markdown by default when piped/redirected (the PR-comment path) and ANSI-colored when stdout is a TTY. `--output markdown|json|terminal|sarif` overrides detection.
 
 See the [`examples/`](./examples/) directory for end-to-end scenarios (axios incident, multi-ecosystem typosquats, version jumps, baseline suppression).
 
@@ -206,10 +216,11 @@ With network access, an additional Vulnerabilities section lists each advisory I
 - Flag deps whose **top GitHub maintainer joined the project recently** (the xz-style takeover signal). Honors `GITHUB_TOKEN`, rate-limit-aware, skipped when the repo has > 50 contributors.
 - Flag **multi-major version jumps** (≥ 2 majors) in a single diff — often correlates with takeover swaps and namespace reuse.
 - **Output formats**: terminal (colored, TTY-aware), Markdown (PR comment, with collapsible sections + severity sort), **JSON**, and **SARIF v2.1.0** for GitHub Code Scanning ingestion.
-- **`--fail-on`** thresholds (`cve` / `critical-cve` / `typosquat` / `any`) exit code 2 on trip while still emitting the comment body, so the PR comment posts even when the workflow step fails.
+- **`--fail-on`** thresholds (`cve` / `critical-cve` / `typosquat` / `license-change` / `any`) and diff budgets (`--max-added`, `--max-removed`, `--max-version-changed`) exit code 2 on trip while still emitting the comment body, so the PR comment posts even when the workflow step fails.
+- **`.bomdrift.toml` + `bomdrift init`** let repos keep policy in version control instead of repeating inputs in workflow YAML.
 - **`/bomdrift suppress <id>`** in-comment suppression (v0.5+) via a companion sub-action.
 - **`--baseline <path.json>`** suppresses findings already captured in a previously stored `bomdrift diff --output json` snapshot.
-- **`--summary-only`** + automatic comment-size fallback (default 60 KB) keeps big SBOM diffs under GitHub's 65,536-char comment-body cap.
+- **`--summary-only`**, **`--findings-only`**, and automatic comment-size fallback (default 60 KB) keep big SBOM diffs under GitHub's 65,536-char comment-body cap.
 - Ships as a **single Rust binary** (~3.4 MB, stripped + LTO) **and** a composite GitHub Action — no Docker.
 - Releases are **cosign-signed** keyless via Sigstore + GitHub OIDC — eat-your-own-supply-chain-dogfood.
 

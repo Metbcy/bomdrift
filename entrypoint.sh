@@ -233,9 +233,8 @@ run_diff() {
   local fmt="${4:-markdown}"
   local input_format="${5:-auto}"
   shift 5
-  # Remaining args are passed through verbatim — used for `--fail-on <value>`
-  # and any future bomdrift CLI flags the action wants to plumb through
-  # without having to re-position parameters.
+  # Remaining args are passed through verbatim — used for policy flags such as
+  # `--config`, `--fail-on`, and diff budgets without re-positioning params.
 
   local args=(diff "$before" "$after" --output "$fmt")
   if [ "$input_format" != "auto" ]; then
@@ -264,6 +263,11 @@ main() {
   local output_format="${OUTPUT_FORMAT:-markdown}"
   local comment_on_pr="${COMMENT_ON_PR:-true}"
   local comment_size_limit="${COMMENT_SIZE_LIMIT:-60000}"
+  local config_path="${CONFIG_PATH:-}"
+  local findings_only="${FINDINGS_ONLY:-false}"
+  local max_added="${MAX_ADDED:-}"
+  local max_removed="${MAX_REMOVED:-}"
+  local max_version_changed="${MAX_VERSION_CHANGED:-}"
   local fail_on="${FAIL_ON:-none}"
   local baseline="${BASELINE:-}"
 
@@ -335,10 +339,29 @@ main() {
   if [ -n "$baseline" ]; then
     baseline_args=(--baseline "$baseline")
   fi
+  local config_args=()
+  if [ -n "$config_path" ]; then
+    config_args=(--config "$config_path")
+  fi
+  local focus_args=()
+  if [ "$findings_only" = "true" ]; then
+    focus_args=(--findings-only)
+  fi
+  local budget_args=()
+  if [ -n "$max_added" ]; then
+    budget_args+=(--max-added "$max_added")
+  fi
+  if [ -n "$max_removed" ]; then
+    budget_args+=(--max-removed "$max_removed")
+  fi
+  if [ -n "$max_version_changed" ]; then
+    budget_args+=(--max-version-changed "$max_version_changed")
+  fi
 
   set +e
   run_diff "$bin" "$before" "$after" "$output_format" "$input_format" \
-    "${fail_on_args[@]}" "${baseline_args[@]}" \
+    "${config_args[@]}" "${fail_on_args[@]}" "${baseline_args[@]}" \
+    "${focus_args[@]}" "${budget_args[@]}" \
     | tee "$out_file"
   rc="${PIPESTATUS[0]}"
   set -e
@@ -369,7 +392,8 @@ main() {
       summary_file="$(mktemp)"
       set +e
       run_diff "$bin" "$before" "$after" "$output_format" "$input_format" \
-        "${fail_on_args[@]}" "${baseline_args[@]}" --summary-only > "$summary_file"
+        "${config_args[@]}" "${fail_on_args[@]}" "${baseline_args[@]}" \
+        "${focus_args[@]}" "${budget_args[@]}" --summary-only > "$summary_file"
       set -e
       body="$(cat "$summary_file")"
       rm -f "$summary_file"
@@ -378,9 +402,9 @@ main() {
     post_pr_comment "$body"
   fi
 
-  # bomdrift exit 2 means --fail-on tripped; surface that to the runner so
-  # the workflow step fails as the consumer requested. Other non-zero codes
-  # are bomdrift bugs / parse errors and should also propagate.
+  # bomdrift exit 2 means a configured policy gate tripped; surface that to
+  # the runner so the workflow step fails as the consumer requested. Other
+  # non-zero codes are bomdrift bugs / parse errors and should also propagate.
   exit "$rc"
 }
 

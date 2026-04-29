@@ -30,6 +30,7 @@ strsim = "0.11"
 owo-colors = { version = "4", features = ["supports-colors"] }
 supports-color = "3"
 directories = "6"
+toml = "0.8"
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["html_reports"] }

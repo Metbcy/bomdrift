@@ -8,6 +8,8 @@ groups the same information by behavior so it's easier to look up.
 
 ```text
 bomdrift diff <BEFORE> <AFTER> [OPTIONS]
+bomdrift init [--config-only] [--force]
+bomdrift baseline add <ID> [--path <PATH>]
 bomdrift refresh-typosquat [--ecosystem <ECOSYSTEM>]
 ```
 
@@ -48,6 +50,46 @@ Markdown-only. Emits just the summary table + a footer pointing at the
 full output. Used by the action's comment-size fallback when the full
 diff exceeds GitHub's 65,536-char comment-body cap.
 
+#### `--findings-only`
+
+Markdown-only. Keeps the summary table and risk-bearing sections
+(vulnerabilities, typosquats, version jumps, young maintainers, license
+changes) but omits raw Added / Removed / Version changed detail tables.
+This is useful when a PR intentionally updates a large lockfile and
+reviewers only want the actionable findings inline.
+
+The counts still appear in the summary table, so churn is visible even
+when the long per-dependency rows are hidden.
+
+### Repo policy config
+
+#### `--config <PATH>`
+
+Load defaults from a `.bomdrift.toml` policy file. When omitted,
+`bomdrift diff` auto-loads `.bomdrift.toml` from the current working
+directory if it exists; missing default config is ignored. An explicit
+`--config` path must exist and parse.
+
+CLI flags override config values for one-off runs. Positive booleans in
+config, such as `findings_only = true`, turn the behavior on; v0.6 does
+not add parallel `--no-*` flags to turn those booleans off from the CLI.
+
+Example:
+
+```toml
+[diff]
+fail_on = "critical-cve"
+baseline = ".bomdrift/baseline.json"
+findings_only = true
+max_added = 25
+max_version_changed = 10
+```
+
+Supported `[diff]` keys map to the CLI flags: `output`, `format`,
+`no_osv`, `no_osv_cache`, `baseline`, `no_maintainer_age`, `fail_on`,
+`summary_only`, `findings_only`, `include_file_components`, `repo_url`,
+`max_added`, `max_removed`, and `max_version_changed`.
+
 ### Enrichment flags
 
 #### `--no-osv`
@@ -83,12 +125,21 @@ Exit with code 2 when findings of the configured threshold surface. One of:
   many actively-exploited advisories ship as HIGH.
 - `typosquat` — trips on any typosquat finding (always `severity = none`,
   but the threshold lets you gate on the structural signal).
+- `license-change` — trips on same-version license changes.
 - `any` — trips on any finding (CVE, typosquat, version-jump,
   maintainer-age) OR any license-changed-without-version-bump.
 
 The PR-comment body is written to stdout **before** exit-2 — the action's
 `tee` + `PIPESTATUS` wrapper relies on this so the comment posts even
 when the workflow step fails.
+
+#### Diff budgets
+
+`--max-added <N>`, `--max-removed <N>`, and
+`--max-version-changed <N>` fail the run with exit code 2 when a diff
+exceeds the configured dependency-churn budget. The rendered body is
+still written before exit, just like `--fail-on`, so GitHub Actions can
+post the PR comment and then block the merge.
 
 #### `--baseline <PATH>`
 
@@ -97,6 +148,26 @@ Findings present in the baseline are suppressed from the rendered output
 and from the `--fail-on` trip-evaluation. Match keys are conservative —
 a finding at a different version than baseline still surfaces. See
 [Baseline & suppression](./baseline.md) for full match-key semantics.
+
+## `bomdrift init`
+
+Scaffold a copy-paste adoption setup in the current repository:
+
+```bash
+bomdrift init
+```
+
+This writes:
+
+- `.bomdrift.toml`
+- `.github/workflows/sbom-diff.yml`
+- `.github/workflows/bomdrift-suppress.yml`
+
+Flags:
+
+- `--config-only` — write only `.bomdrift.toml`.
+- `--force` — overwrite existing generated files. Without `--force`,
+  existing files are preserved and the command fails loudly.
 
 ## `bomdrift refresh-typosquat`
 
@@ -131,7 +202,7 @@ over the embedded snapshot when present and parseable.
 |---|---|
 | 0 | Success. |
 | 1 | bomdrift internal error (parse failure, network mishap not gated by best-effort path, etc.). |
-| 2 | `--fail-on` threshold tripped. The body is still on stdout — the action posts it before propagating the exit code. |
+| 2 | `--fail-on` threshold or diff budget tripped. The body is still on stdout — the action posts it before propagating the exit code. |
 | (clap 2) | Usage error from clap (unknown flag, missing required argument). Distinguishable from exit-2 from `--fail-on` by stderr containing `error: ...` rather than the v0.2 caveat warning. |
 
 ## Environment variables
