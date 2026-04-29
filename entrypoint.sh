@@ -292,6 +292,7 @@ main() {
   local max_version_changed="${MAX_VERSION_CHANGED:-}"
   local fail_on="${FAIL_ON:-none}"
   local baseline="${BASELINE:-}"
+  local upload_to_cs="${UPLOAD_TO_CODE_SCANNING:-false}"
 
   # ---- Resolve "before" SBOM path -------------------------------------------
   #
@@ -379,16 +380,35 @@ main() {
   if [ -n "$max_version_changed" ]; then
     budget_args+=(--max-version-changed "$max_version_changed")
   fi
+  # When emitting SARIF, write to a stable workspace path so the
+  # codeql-action upload step can pick it up. We always set this when
+  # output is sarif (whether or not upload is enabled) — the file is
+  # cheap and consumers running their own SARIF upload pipeline benefit
+  # too. stdout still receives the SARIF for back-compat callers that
+  # piped it to their own file in a follow-up step.
+  local sarif_args=()
+  local sarif_path=""
+  if [ "$output_format" = "sarif" ]; then
+    sarif_path="${GITHUB_WORKSPACE:-$PWD}/bomdrift.sarif"
+    sarif_args=(--output-file "$sarif_path")
+  fi
 
   set +e
   run_diff "$bin" "$before" "$after" "$output_format" "$input_format" \
     "${config_args[@]}" "${fail_on_args[@]}" "${baseline_args[@]}" \
-    "${focus_args[@]}" "${budget_args[@]}" \
+    "${focus_args[@]}" "${budget_args[@]}" "${sarif_args[@]}" \
     | tee "$out_file"
   rc="${PIPESTATUS[0]}"
   set -e
   out="$(cat "$out_file")"
   rm -f "$out_file"
+
+  # When SARIF was written via --output-file, the file is the canonical
+  # output for downstream upload; leave $out (terminal mirror) unused.
+  if [ "$output_format" = "sarif" ] && [ -n "$sarif_path" ] && [ -f "$sarif_path" ]; then
+    printf 'bomdrift Action: SARIF written to %s\n' "$sarif_path"
+  fi
+  : "$upload_to_cs"  # consumed by composite step in action.yml; reference here keeps shellcheck quiet
 
   # Always also write to the step summary so users see the diff even when no
   # PR comment is posted.

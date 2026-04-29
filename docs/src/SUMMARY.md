@@ -12,6 +12,7 @@
 # Output
 
 - [Output formats](./output-formats.md)
+- [SARIF + Code Scanning](./sarif.md)
 - [Baseline & suppression](./baseline.md)
 
 # Enrichers

@@ -215,7 +215,12 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
         OutputFormat::Sarif => render::sarif::render(&cs, &enrichment),
     };
 
-    print!("{rendered}");
+    if let Some(path) = &args.output_file {
+        std::fs::write(path, &rendered)
+            .with_context(|| format!("writing --output-file {}", path.display()))?;
+    } else {
+        print!("{rendered}");
+    }
 
     // Body must be fully written before we exit-2 — the action's `tee`
     // wrapper still wants the comment posted even when fail-on trips.

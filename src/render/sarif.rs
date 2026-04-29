@@ -50,6 +50,7 @@
 //! The render-twice-byte-equal regression test below guards this.
 
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::diff::ChangeSet;
 use crate::enrich::Enrichment;
@@ -137,7 +138,45 @@ fn rules() -> Value {
              regardless. Always informational severity (`warning`).",
             "https://metbcy.github.io/bomdrift/output-formats.html#sarif-v210",
         ),
+        rule(
+            "bomdrift.license-violation",
+            "license-violation",
+            "Component license violates configured allow/deny policy",
+            "The component's declared license is on the deny list, doesn't \
+             appear on the allow list, or is a compound expression that \
+             cannot be safely evaluated against the configured policy (with \
+             `allow_ambiguous=false`). Configure via the `[license]` block \
+             in `.bomdrift.toml` or the `--allow-licenses` / `--deny-licenses` \
+             CLI flags. Severity `error` (this is a policy gate, not an \
+             advisory heuristic).",
+            "https://metbcy.github.io/bomdrift/license-policy.html",
+        ),
     ])
+}
+
+/// Stable per-rule identity hash for SARIF `partialFingerprints`. GitHub
+/// Code Scanning uses these to thread alert state across runs (resolved /
+/// dismissed / open) so the value MUST stay byte-equal for the same logical
+/// finding. We hex-encode SHA-256 of a `|`-joined identity string so the
+/// inputs are inspectable from a debugger and the output is filename-safe.
+///
+/// The `/v1` suffix on the fingerprint key (see emit sites) lets us evolve
+/// the identity scheme later without GitHub re-opening every alert.
+pub(crate) fn fingerprint(parts: &[&str]) -> String {
+    let mut h = Sha256::new();
+    for (i, p) in parts.iter().enumerate() {
+        if i > 0 {
+            h.update(b"|");
+        }
+        h.update(p.as_bytes());
+    }
+    let digest = h.finalize();
+    let mut out = String::with_capacity(64);
+    for byte in digest {
+        use std::fmt::Write;
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
 }
 
 fn rule(id: &str, name: &str, short: &str, full: &str, help_uri: &str) -> Value {
@@ -165,6 +204,8 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
         let mut advisories: Vec<&crate::enrich::VulnRef> = e.vulns[purl].iter().collect();
         advisories.sort_by(|a, b| b.severity.cmp(&a.severity).then_with(|| a.id.cmp(&b.id)));
         for advisory in advisories {
+            let purl_str: &str = purl;
+            let fp = fingerprint(&["bomdrift.cve", purl_str, &advisory.id]);
             out.push(json!({
                 "ruleId": "bomdrift.cve",
                 "level": sarif_level(advisory.severity),
@@ -177,6 +218,7 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
                     ),
                 },
                 "locations": [synthetic_location()],
+                "partialFingerprints": { "primaryHash/v1": fp },
                 "properties": {
                     "purl":        purl,
                     "advisoryId":  advisory.id,
@@ -190,6 +232,8 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
     for finding in &e.typosquats {
         let name = &finding.component.name;
         let closest = &finding.closest;
+        let purl_or_name = finding.component.purl.as_deref().unwrap_or(name);
+        let fp = fingerprint(&["bomdrift.typosquat", purl_or_name, closest]);
         out.push(json!({
             "ruleId": "bomdrift.typosquat",
             "level": "warning",
@@ -201,6 +245,7 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
                 ),
             },
             "locations": [synthetic_location()],
+            "partialFingerprints": { "primaryHash/v1": fp },
             "properties": {
                 "purl":       finding.component.purl,
                 "name":       name,
@@ -214,6 +259,13 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
     // ---- bomdrift.version-jump ----
     for finding in &e.version_jumps {
         let name = &finding.after.name;
+        let purl_or_name = finding.after.purl.as_deref().unwrap_or(name);
+        let fp = fingerprint(&[
+            "bomdrift.version-jump",
+            purl_or_name,
+            &finding.before.version,
+            &finding.after.version,
+        ]);
         out.push(json!({
             "ruleId": "bomdrift.version-jump",
             "level": "warning",
@@ -228,6 +280,7 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
                 ),
             },
             "locations": [synthetic_location()],
+            "partialFingerprints": { "primaryHash/v1": fp },
             "properties": {
                 "purl":         finding.after.purl,
                 "name":         name,
@@ -242,6 +295,12 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
     // ---- bomdrift.young-maintainer ----
     for finding in &e.maintainer_age {
         let name = &finding.component.name;
+        let purl_or_name = finding.component.purl.as_deref().unwrap_or(name);
+        let fp = fingerprint(&[
+            "bomdrift.young-maintainer",
+            purl_or_name,
+            &finding.top_contributor,
+        ]);
         out.push(json!({
             "ruleId": "bomdrift.young-maintainer",
             "level": "warning",
@@ -255,6 +314,7 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
                 ),
             },
             "locations": [synthetic_location()],
+            "partialFingerprints": { "primaryHash/v1": fp },
             "properties": {
                 "purl":           finding.component.purl,
                 "name":           name,
@@ -270,6 +330,19 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
     // version_changed already folds in license-changes-with-version-bumps.
     for (before, after) in &cs.license_changed {
         let name = &after.name;
+        let purl_or_name = after.purl.as_deref().unwrap_or(name);
+        let mut before_lic = before.licenses.clone();
+        before_lic.sort();
+        let mut after_lic = after.licenses.clone();
+        after_lic.sort();
+        let before_join = before_lic.join(",");
+        let after_join = after_lic.join(",");
+        let fp = fingerprint(&[
+            "bomdrift.license-change",
+            purl_or_name,
+            &before_join,
+            &after_join,
+        ]);
         out.push(json!({
             "ruleId": "bomdrift.license-change",
             "level": "warning",
@@ -281,6 +354,7 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
                 ),
             },
             "locations": [synthetic_location()],
+            "partialFingerprints": { "primaryHash/v1": fp },
             "properties": {
                 "purl":            after.purl,
                 "name":            name,
@@ -362,6 +436,7 @@ mod tests {
                 "bomdrift.version-jump",
                 "bomdrift.young-maintainer",
                 "bomdrift.license-change",
+                "bomdrift.license-violation",
             ],
             "rule IDs are stable public API — order also stable for byte-determinism",
         );
@@ -639,5 +714,113 @@ mod tests {
             let locs = result["locations"].as_array().unwrap();
             assert!(!locs.is_empty(), "result missing locations: {result}");
         }
+    }
+
+    #[test]
+    fn fingerprint_helper_is_pure_and_hex_64_chars() {
+        let fp = fingerprint(&["a", "b", "c"]);
+        assert_eq!(fp.len(), 64);
+        assert!(fp.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(fp, fingerprint(&["a", "b", "c"]));
+        assert_ne!(fp, fingerprint(&["a", "b", "d"]));
+        // Joining with `|` matters: ["ab", "c"] must not collide with
+        // ["a", "bc"].
+        assert_ne!(fingerprint(&["ab", "c"]), fingerprint(&["a", "bc"]));
+    }
+
+    #[test]
+    fn cve_results_carry_partial_fingerprints_stable_across_runs() {
+        let mut vulns: HashMap<String, Vec<crate::enrich::VulnRef>> = HashMap::new();
+        vulns.insert(
+            "pkg:npm/axios@1.14.1".to_string(),
+            vec![crate::enrich::VulnRef {
+                id: "GHSA-3p68-rc4w-qgx5".to_string(),
+                severity: crate::enrich::Severity::High,
+                aliases: Vec::new(),
+            }],
+        );
+        let e = Enrichment {
+            vulns,
+            ..Default::default()
+        };
+        let r1 = render(&ChangeSet::default(), &e);
+        let r2 = render(&ChangeSet::default(), &e);
+        assert_eq!(r1, r2, "byte-equal across runs");
+        let v: Value = serde_json::from_str(&r1).unwrap();
+        let fp = &v["runs"][0]["results"][0]["partialFingerprints"]["primaryHash/v1"];
+        assert!(fp.is_string(), "fingerprint missing: {}", v);
+        assert_eq!(fp.as_str().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn two_cves_on_same_purl_get_distinct_fingerprints() {
+        // The duck flagged this collision case: per-purl-only fingerprints
+        // would dedup distinct advisories. Identity must include the
+        // advisory id.
+        let mut vulns: HashMap<String, Vec<crate::enrich::VulnRef>> = HashMap::new();
+        vulns.insert(
+            "pkg:npm/axios@1.14.1".to_string(),
+            vec![
+                crate::enrich::VulnRef {
+                    id: "CVE-2025-1".to_string(),
+                    severity: crate::enrich::Severity::High,
+                    aliases: Vec::new(),
+                },
+                crate::enrich::VulnRef {
+                    id: "CVE-2025-2".to_string(),
+                    severity: crate::enrich::Severity::High,
+                    aliases: Vec::new(),
+                },
+            ],
+        );
+        let e = Enrichment {
+            vulns,
+            ..Default::default()
+        };
+        let s = render(&ChangeSet::default(), &e);
+        let v: Value = serde_json::from_str(&s).unwrap();
+        let results = v["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 2);
+        let f1 = results[0]["partialFingerprints"]["primaryHash/v1"]
+            .as_str()
+            .unwrap();
+        let f2 = results[1]["partialFingerprints"]["primaryHash/v1"]
+            .as_str()
+            .unwrap();
+        assert_ne!(
+            f1, f2,
+            "distinct advisories must have distinct fingerprints"
+        );
+    }
+
+    #[test]
+    fn version_jump_fingerprint_uses_full_versions_not_majors() {
+        // 1.0.0 -> 4.0.0 and 1.5.0 -> 4.5.0 both have major delta 3 but
+        // are distinct findings — fingerprints must not collide.
+        let mk = |a: &str, b: &str| VersionJumpFinding {
+            before: comp("foo", a, Ecosystem::Npm, Some("pkg:npm/foo@1")),
+            after: comp("foo", b, Ecosystem::Npm, Some("pkg:npm/foo@4")),
+            before_major: 1,
+            after_major: 4,
+        };
+        let e1 = Enrichment {
+            version_jumps: vec![mk("1.0.0", "4.0.0")],
+            ..Default::default()
+        };
+        let e2 = Enrichment {
+            version_jumps: vec![mk("1.5.0", "4.5.0")],
+            ..Default::default()
+        };
+        let v1: Value = serde_json::from_str(&render(&ChangeSet::default(), &e1)).unwrap();
+        let v2: Value = serde_json::from_str(&render(&ChangeSet::default(), &e2)).unwrap();
+        let f1 = v1["runs"][0]["results"][0]["partialFingerprints"]["primaryHash/v1"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let f2 = v2["runs"][0]["results"][0]["partialFingerprints"]["primaryHash/v1"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_ne!(f1, f2);
     }
 }
