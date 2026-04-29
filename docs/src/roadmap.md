@@ -22,9 +22,19 @@ Items are grouped by likely landing area and rough sizing.
   organization-specific enrichers (e.g. "flag any dep from
   internal-mirror.example.com without a SHA-256 attestation").
   Probably WASM-based for sandboxing.
-- **GitLab CI integration** — same `bomdrift diff` invocation, but
-  with a wrapper that posts to GitLab merge-request notes instead of
-  PR comments. The CLI is already CI-agnostic; this is glue + docs.
+- **GitLab in-comment suppression** — v0.7 ships the GitLab CI
+  template + `--platform gitlab` (the diff path), but the
+  comment-driven `/bomdrift suppress <ID>` flow on GitLab is
+  deferred. GitLab note-event webhooks have a different model than
+  GitHub PR comments — wiring the safe path (rate-limit, fork-MR
+  safety, command parsing, double-trigger debounce) is a v0.8
+  candidate once we see real adoption data on the v0.7 manual
+  path.
+- **Calibration tuning from `--debug-calibration` data** — v0.7
+  added the diagnostic flag; v0.8 may revise
+  `SIMILARITY_THRESHOLD`, `YOUNG_MAINTAINER_DAYS`, and OSV cache
+  TTL defaults based on adopter-collected samples shared on
+  issue #5.
 - **OCI artifact attestation** — verify SBOMs are themselves signed
   by the build system before diffing. Pairs with cosign attest.
 

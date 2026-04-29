@@ -81,7 +81,7 @@ jobs:
         #   verify-signatures: true   (set false on trusted mirrors)
 ```
 
-Pin to `@v1` for the latest v0.x; pin to `@v0.6.1` for reproducible builds. Run `bomdrift init` if you want a checked-in `.bomdrift.toml` policy and both workflows scaffolded locally. See the [Action reference](https://metbcy.github.io/bomdrift/github-action.html) for every input.
+Pin to `@v1` for the latest v0.x; pin to `@v0.7.0` for reproducible builds. Run `bomdrift init` if you want a checked-in `.bomdrift.toml` policy and both workflows scaffolded locally. See the [Action reference](https://metbcy.github.io/bomdrift/github-action.html) for every input.
 
 #### Optional: in-comment suppression (v0.5+)
 
@@ -112,7 +112,7 @@ Comment `/bomdrift suppress GHSA-xxxx` on any PR; the sub-action appends to `.bo
 Pre-built binaries cover Linux x86_64 + aarch64, macOS aarch64, and Windows x86_64. Each archive is cosign-signed via Sigstore + GitHub OIDC.
 
 ```bash
-VERSION=v0.6.1
+VERSION=v0.7.0
 TARGET=x86_64-unknown-linux-gnu
 curl -sSL -o bomdrift.tar.gz \
   "https://github.com/Metbcy/bomdrift/releases/download/${VERSION}/bomdrift-${VERSION}-${TARGET}.tar.gz"
@@ -128,7 +128,7 @@ Verify the archive's signature before you trust the binary — see [Release sign
 ### From source
 
 ```bash
-cargo install --locked --git https://github.com/Metbcy/bomdrift --tag v0.6.1 bomdrift
+cargo install --locked --git https://github.com/Metbcy/bomdrift --tag v0.7.0 bomdrift
 ```
 
 Requires Rust 1.85+ (the project uses edition 2024).
@@ -230,7 +230,7 @@ Every release archive is signed with cosign keyless via Sigstore (GitHub OIDC).
 
 ```bash
 # Replace VERSION + TARGET with your downloaded archive's pair
-VERSION=v0.6.1
+VERSION=v0.7.0
 TARGET=x86_64-unknown-linux-gnu
 ARCHIVE=bomdrift-${VERSION}-${TARGET}.tar.gz
 
