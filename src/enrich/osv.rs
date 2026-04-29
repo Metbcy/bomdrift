@@ -36,11 +36,24 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_QUERIES_PER_BATCH: usize = 1000;
 
 pub fn enrich(cs: &ChangeSet) -> Result<Enrichment> {
+    enrich_cached(cs, false)
+}
+
+/// Like [`enrich`] but lets the caller opt out of the on-disk severity cache
+/// (`bomdrift diff --no-osv-cache`).
+pub fn enrich_cached(cs: &ChangeSet, no_cache: bool) -> Result<Enrichment> {
     let purls = candidate_purls(cs);
     if purls.is_empty() {
         return Ok(Enrichment::default());
     }
-    enrich_with(&purls, OSV_BATCH_URL, OSV_VULN_URL_BASE, DEFAULT_TIMEOUT)
+    let cache = crate::enrich::cache::open_unless_disabled(no_cache);
+    enrich_with(
+        &purls,
+        OSV_BATCH_URL,
+        OSV_VULN_URL_BASE,
+        DEFAULT_TIMEOUT,
+        cache.as_ref(),
+    )
 }
 
 /// Components worth querying: every purl-bearing entry in `added` and the after
@@ -66,6 +79,7 @@ fn enrich_with(
     batch_url: &str,
     vuln_url_base: &str,
     timeout: Duration,
+    cache: Option<&crate::enrich::cache::Cache>,
 ) -> Result<Enrichment> {
     let agent = ureq::AgentBuilder::new().timeout(timeout).build();
 
@@ -82,16 +96,35 @@ fn enrich_with(
     let unique_ids: BTreeSet<String> = purl_to_ids.values().flatten().cloned().collect();
     let mut severities: HashMap<String, Severity> = HashMap::new();
     let mut lookup_failures = 0usize;
+    let mut cache_hits = 0usize;
     for id in &unique_ids {
+        if let Some(c) = cache
+            && let Some(cached) = c.get(id)
+        {
+            severities.insert(id.clone(), cached);
+            cache_hits += 1;
+            continue;
+        }
         match fetch_severity(&agent, vuln_url_base, id) {
             Ok(sev) => {
                 severities.insert(id.clone(), sev);
+                if let Some(c) = cache {
+                    c.put(id, sev);
+                }
             }
             Err(_) => {
                 lookup_failures += 1;
                 severities.insert(id.clone(), Severity::None);
+                // Deliberately do NOT cache failures — a transient 5xx
+                // shouldn't pin Severity::None for 24h.
             }
         }
+    }
+    if cache_hits > 0 {
+        eprintln!(
+            "osv: {cache_hits}/{} severities served from cache",
+            unique_ids.len()
+        );
     }
     if lookup_failures > 0 {
         eprintln!(
