@@ -59,6 +59,12 @@ const OSV_SUBDIR: &str = "osv";
 struct CacheEntry {
     fetched_at: u64,
     severity: Severity,
+    /// Cross-database aliases captured at fetch time. Newly added in
+    /// v0.9. Old cache entries without this field deserialize with an
+    /// empty vec; downstream consumers tolerate the empty case by
+    /// falling back to the primary advisory ID.
+    #[serde(default)]
+    aliases: Vec<String>,
 }
 
 /// Filesystem-backed severity cache. Construct via [`Cache::open`] (production)
@@ -87,10 +93,17 @@ impl Cache {
         Self { root, now_secs }
     }
 
-    /// Look up cached severity for `advisory_id`. Returns `None` on cache
-    /// miss, missing file, parse error, or expired entry — every failure
-    /// mode collapses to "go fetch fresh".
+    /// Look up cached severity + aliases for `advisory_id`. Returns
+    /// `None` on cache miss, missing file, parse error, or expired
+    /// entry — every failure mode collapses to "go fetch fresh".
     pub fn get(&self, advisory_id: &str) -> Option<Severity> {
+        self.get_full(advisory_id).map(|(s, _)| s)
+    }
+
+    /// Like [`Cache::get`] but also returns the aliases stored in the
+    /// cache entry. Empty when the entry was written by a pre-v0.9
+    /// build.
+    pub fn get_full(&self, advisory_id: &str) -> Option<(Severity, Vec<String>)> {
         let path = self.path_for(advisory_id);
         let body = std::fs::read(&path).ok()?;
         let entry: CacheEntry = serde_json::from_slice(&body).ok()?;
@@ -98,27 +111,30 @@ impl Cache {
         if now.saturating_sub(entry.fetched_at) > CACHE_TTL_SECS {
             return None;
         }
-        Some(entry.severity)
+        Some((entry.severity, entry.aliases))
     }
 
     /// Persist `severity` for `advisory_id`. Best-effort: filesystem errors
     /// are silently dropped because the caller has the live response in hand
     /// and we never want a write failure to corrupt the in-memory data path.
     pub fn put(&self, advisory_id: &str, severity: Severity) {
+        self.put_full(advisory_id, severity, &[]);
+    }
+
+    /// Like [`Cache::put`] but stores aliases alongside the severity.
+    pub fn put_full(&self, advisory_id: &str, severity: Severity, aliases: &[String]) {
         if std::fs::create_dir_all(&self.root).is_err() {
             return;
         }
         let entry = CacheEntry {
             fetched_at: (self.now_secs)(),
             severity,
+            aliases: aliases.to_vec(),
         };
         let Ok(body) = serde_json::to_vec(&entry) else {
             return;
         };
         let target = self.path_for(advisory_id);
-        // Temp-file + rename pattern, mirroring src/refresh.rs's atomicity
-        // contract: a concurrent reader either sees the previous entry or
-        // the new one, never a torn write.
         let mut tmp = target.as_os_str().to_owned();
         tmp.push(".tmp");
         let tmp = PathBuf::from(tmp);
@@ -193,6 +209,24 @@ mod tests {
         cache.put("GHSA-xxxx-yyyy-zzzz", Severity::Critical);
         let got = cache.get("GHSA-xxxx-yyyy-zzzz");
         assert_eq!(got, Some(Severity::Critical));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn put_full_roundtrips_aliases() {
+        let dir = tempdir_unique("aliases");
+        let cache = Cache::with_root(dir.clone(), fixed_clock);
+        cache.put_full(
+            "GHSA-aliases-1",
+            Severity::High,
+            &["CVE-2024-1".to_string(), "CVE-2024-2".to_string()],
+        );
+        let (sev, aliases) = cache.get_full("GHSA-aliases-1").unwrap();
+        assert_eq!(sev, Severity::High);
+        assert_eq!(
+            aliases,
+            vec!["CVE-2024-1".to_string(), "CVE-2024-2".to_string()]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

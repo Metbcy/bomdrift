@@ -205,6 +205,9 @@ mod tests {
             maintainer_age: Vec::new(),
 
             license_violations: Vec::new(),
+            recently_published: Vec::new(),
+            deprecated: Vec::new(),
+            maintainer_set_changed: Vec::new(),
             vex_annotations: HashMap::new(),
             vex_suppressed_count: 0,
         };

@@ -129,6 +129,23 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
             enrichment.license_violations.len()
         );
     }
+    if !enrichment.recently_published.is_empty() {
+        let _ = writeln!(
+            out,
+            "| Recently published | {} |",
+            enrichment.recently_published.len()
+        );
+    }
+    if !enrichment.deprecated.is_empty() {
+        let _ = writeln!(out, "| Deprecated | {} |", enrichment.deprecated.len());
+    }
+    if !enrichment.maintainer_set_changed.is_empty() {
+        let _ = writeln!(
+            out,
+            "| Maintainer set changed | {} |",
+            enrichment.maintainer_set_changed.len()
+        );
+    }
     if enrichment.vex_suppressed_count > 0 {
         let _ = writeln!(
             out,
@@ -342,6 +359,94 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
         );
         for f in &enrichment.maintainer_age {
             write_maintainer_age_row(&mut out, f);
+        }
+        section_close(&mut out);
+    }
+
+    if !enrichment.recently_published.is_empty() {
+        section_open(
+            &mut out,
+            "Recently published (added deps)",
+            enrichment.recently_published.len(),
+            None,
+        );
+        out.push_str(
+            "These newly added dependencies were published to their registry within the \
+             configured threshold (default 14 days). Recent publishes correlate with \
+             takeover swaps and namespace-reuse attacks. \
+             [Why this matters](https://metbcy.github.io/bomdrift/enrichers/registry.html)\n\n",
+        );
+        out.push_str("| Ecosystem | Name | Version | Published | Days |\n|---|---|---|---|---:|\n");
+        for f in &enrichment.recently_published {
+            let _ = writeln!(
+                out,
+                "| {} | {} | {} | {} | {} |",
+                f.component.ecosystem,
+                f.component.name,
+                f.component.version,
+                f.published_at,
+                f.days_old,
+            );
+        }
+        section_close(&mut out);
+    }
+
+    if !enrichment.deprecated.is_empty() {
+        section_open(
+            &mut out,
+            "Deprecated upstream",
+            enrichment.deprecated.len(),
+            None,
+        );
+        out.push_str(
+            "These dependencies are flagged deprecated or yanked by their package registry. \
+             [Why this matters](https://metbcy.github.io/bomdrift/enrichers/registry.html)\n\n",
+        );
+        out.push_str("| Ecosystem | Name | Version | Message |\n|---|---|---|---|\n");
+        for f in &enrichment.deprecated {
+            let _ = writeln!(
+                out,
+                "| {} | {} | {} | {} |",
+                f.component.ecosystem,
+                f.component.name,
+                f.component.version,
+                f.message.as_deref().unwrap_or("(deprecated upstream)"),
+            );
+        }
+        section_close(&mut out);
+    }
+
+    if !enrichment.maintainer_set_changed.is_empty() {
+        section_open(
+            &mut out,
+            "Maintainer set changed (npm)",
+            enrichment.maintainer_set_changed.len(),
+            None,
+        );
+        out.push_str(
+            "These npm dependencies have a different set of maintainers compared to the \
+             previous version. New publish-rights are a classic takeover-attack precursor. \
+             [Why this matters](https://metbcy.github.io/bomdrift/enrichers/registry.html)\n\n",
+        );
+        out.push_str("| Name | Before | After | Added | Removed |\n|---|---|---|---|---|\n");
+        for f in &enrichment.maintainer_set_changed {
+            let _ = writeln!(
+                out,
+                "| {} | {} | {} | {} | {} |",
+                f.after.name,
+                f.before.version,
+                f.after.version,
+                if f.added.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    f.added.join(", ")
+                },
+                if f.removed.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    f.removed.join(", ")
+                },
+            );
         }
         section_close(&mut out);
     }

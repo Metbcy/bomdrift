@@ -177,6 +177,15 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
     };
     enrichment.license_violations = enrich::license::enrich(&cs, &license_policy);
 
+    // Registry-metadata enrichers (Phase K, v0.9). Best-effort — a
+    // registry timeout returns Ok with no findings.
+    if !args.no_registry {
+        let findings = enrich::registry::enrich(&cs, args.recently_published_days);
+        enrichment.recently_published = findings.recently_published;
+        enrichment.deprecated = findings.deprecated;
+        enrichment.maintainer_set_changed = findings.maintainer_set_changed;
+    }
+
     // Apply the baseline AFTER all enrichers run — suppression operates on
     // the realized finding set, not on intermediate inputs. This keeps the
     // baseline file format stable as new enrichers are added: a new finding
@@ -379,6 +388,8 @@ pub fn tripped(cs: &ChangeSet, e: &Enrichment, threshold: FailOn) -> bool {
         FailOn::LicenseChange => !cs.license_changed.is_empty(),
         FailOn::Kev => any_kev(e),
         FailOn::LicenseViolation => !e.license_violations.is_empty(),
+        FailOn::RecentlyPublished => !e.recently_published.is_empty(),
+        FailOn::Deprecated => !e.deprecated.is_empty(),
         FailOn::Any => e.has_findings() || !cs.license_changed.is_empty() || any_kev(e),
     }
 }
@@ -517,6 +528,42 @@ fn write_calibration_lines<W: std::io::Write>(
                 crate::enrich::LicenseViolationKind::Ambiguous => "ambiguous",
                 crate::enrich::LicenseViolationKind::NotAllowed => "not-allowed",
             }),
+            format,
+        );
+    }
+    for f in &e.recently_published {
+        write_calibration_row(
+            out,
+            "recently-published",
+            f.component
+                .purl
+                .as_deref()
+                .unwrap_or(f.component.name.as_str()),
+            CalibrationScore::Int(f.days_old),
+            CalibrationThreshold::Int(crate::enrich::registry::MIN_PUBLISHED_AGE_DAYS),
+            format,
+        );
+    }
+    for f in &e.deprecated {
+        write_calibration_row(
+            out,
+            "deprecated",
+            f.component
+                .purl
+                .as_deref()
+                .unwrap_or(f.component.name.as_str()),
+            CalibrationScore::Text(f.message.as_deref().unwrap_or("(deprecated)")),
+            CalibrationThreshold::Text("any"),
+            format,
+        );
+    }
+    for f in &e.maintainer_set_changed {
+        write_calibration_row(
+            out,
+            "maintainer-set-changed",
+            f.after.purl.as_deref().unwrap_or(f.after.name.as_str()),
+            CalibrationScore::Int((f.added.len() + f.removed.len()) as i64),
+            CalibrationThreshold::Int(1),
             format,
         );
     }

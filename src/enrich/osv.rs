@@ -99,20 +99,18 @@ fn enrich_with(
     let mut cache_hits = 0usize;
     for id in &unique_ids {
         if let Some(c) = cache
-            && let Some(cached) = c.get(id)
+            && let Some((sev, aliases)) = c.get_full(id)
         {
-            // v0.7 cache only stored severity; aliases stay empty on a
-            // cache hit. EPSS/KEV (Phase B) tolerates empty aliases.
-            details.insert(id.clone(), (cached, Vec::new()));
+            details.insert(id.clone(), (sev, aliases));
             cache_hits += 1;
             continue;
         }
         match fetch_detail(&agent, vuln_url_base, id) {
             Ok((sev, aliases)) => {
-                details.insert(id.clone(), (sev, aliases));
                 if let Some(c) = cache {
-                    c.put(id, sev);
+                    c.put_full(id, sev, &aliases);
                 }
+                details.insert(id.clone(), (sev, aliases));
             }
             Err(_) => {
                 lookup_failures += 1;
@@ -166,6 +164,9 @@ fn enrich_with(
         version_jumps: Vec::new(),
         maintainer_age: Vec::new(),
         license_violations: Vec::new(),
+        recently_published: Vec::new(),
+        deprecated: Vec::new(),
+        maintainer_set_changed: Vec::new(),
         vex_annotations: std::collections::HashMap::new(),
         vex_suppressed_count: 0,
     })

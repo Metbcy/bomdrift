@@ -336,6 +336,17 @@ pub struct DiffArgs {
     /// claims); un-suppressed findings emit as `affected`. v0.9+.
     #[arg(long)]
     pub emit_vex: Option<PathBuf>,
+    /// Skip registry-metadata enrichers (npm/PyPI/crates.io) entirely.
+    /// Use for offline runs or when you don't want bomdrift to fan out
+    /// HTTP requests to package registries.
+    #[arg(long)]
+    pub no_registry: bool,
+    /// Recently-published threshold in days. Components published
+    /// within this window trip a `RecentlyPublished` finding. Default
+    /// 14 days; set to 0 to disable the kind without disabling the
+    /// other registry checks.
+    #[arg(long)]
+    pub recently_published_days: Option<i64>,
     /// VEX `author` for `--emit-vex`. Falls back to repo_url, then
     /// to `"bomdrift"`. v0.9+.
     #[arg(long)]
@@ -401,6 +412,13 @@ pub enum FailOn {
     Kev,
     /// Trip on a license-policy violation (Phase D, v0.8+).
     LicenseViolation,
+    /// Trip when a registry-metadata enricher (npm/PyPI/crates.io) flags
+    /// any added component as published within the
+    /// recently-published threshold (default 14 days). v0.9+.
+    RecentlyPublished,
+    /// Trip when a registry-metadata enricher flags any component as
+    /// deprecated or yanked upstream. v0.9+.
+    Deprecated,
     /// Trip on ANY finding (CVE, typosquat, version-jump, young-maintainer)
     /// OR any license-changed-without-version-bump pair (the suspicious case).
     Any,

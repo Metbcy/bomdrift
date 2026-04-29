@@ -28,6 +28,7 @@
 - [Typosquat detection](./enrichers/typosquat.md)
 - [Multi-major version jumps](./enrichers/version-jump.md)
 - [Maintainer age signal](./enrichers/maintainer-age.md)
+- [Registry metadata (npm/PyPI/crates.io)](./enrichers/registry.md)
 
 # Operations
 
