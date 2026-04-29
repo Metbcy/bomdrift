@@ -4,8 +4,7 @@
 # Triggered by the consumer's workflow on `issue_comment` events. Parses
 # `/bomdrift suppress <ID>` from the comment body, runs `bomdrift
 # baseline add <ID>`, commits the resulting baseline file to the PR's
-# head branch, and reacts to the trigger comment with 👍 (success) /
-# 👎 (failure).
+# head branch, and reacts to the trigger comment on success or failure.
 #
 # Non-matching comments (no `/bomdrift suppress` prefix, comments on
 # issues rather than PRs, comments by bots) exit 0 without doing
@@ -79,7 +78,7 @@ pr_number="$(jq -r '.issue.number' "$event_path")"
 comment_id="$(jq -r '.comment.id' "$event_path")"
 commenter="$(jq -r '.comment.user.login' "$event_path")"
 
-# ---- React with eyes 👀 to acknowledge we're working on it -------------------
+# ---- React to acknowledge we're working on it --------------------------------
 
 react() {
   local content="$1"

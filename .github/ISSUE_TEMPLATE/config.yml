@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Read the docs
+    url: https://metbcy.github.io/bomdrift/
+    about: Setup, CLI reference, output formats, suppression, and release-signing docs.
+  - name: Private security report
+    url: https://github.com/Metbcy/bomdrift/security/advisories/new
+    about: Report vulnerabilities in bomdrift itself privately.
