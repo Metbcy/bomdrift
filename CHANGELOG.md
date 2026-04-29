@@ -7,6 +7,85 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-28
+
+The "more ecosystems, more action surface" release. Adds four typosquat
+ecosystems (Go, RubyGems, NuGet, Composer), plumbs `--baseline` into the
+GitHub Action input surface, and refreshes the docs site to match.
+
+### Added
+
+- **`baseline:` action input** — passes straight through to
+  `bomdrift diff --baseline <path>`. Previously consumers wanting baseline
+  suppression had to bypass the action and call the binary directly via a
+  custom step; the action now handles it. The file's existence is
+  validated up front (a typo'd path no-op'ing would defeat the point).
+- **Typosquat detection for Go, RubyGems, NuGet, and Composer.** The
+  v0.2 multi-ecosystem expansion shipped npm + PyPI + Cargo + Maven; v0.4
+  rounds out the JVM-adjacent and dynamic-language pillars. Per-ecosystem
+  rules:
+  - **Go** matches on the **last path segment** of `host/owner/repo`
+    (`github.com/attacker/cobra` flagged against `github.com/spf13/cobra`).
+    Same-segment-different-org is treated as a legitimate fork and not
+    flagged.
+  - **Gem** uses standard JW + suffix-containment with `-` and `_`
+    separators (`railz` flagged against `rails`; `rspec-rails` extension
+    pattern not flagged).
+  - **NuGet** canonicalizes IDs to lowercase per the package-spec's
+    case-insensitivity (`Newtonsoft.Json` ≡ `newtonsoft.json`); `.` is
+    the separator (`Microsoft.Extensions.Logging` shape).
+  - **Composer** matches on the **package portion** of `vendor/package`
+    (symmetric to the Maven artifactId-only rule) — `attacker/consolee`
+    flagged against `symfony/console`; `myorg/console` is a legit fork.
+- **`Ecosystem::Gem`, `Ecosystem::NuGet`, `Ecosystem::Composer`** model
+  variants. Components whose purl now resolves to one of these will
+  serialize their `ecosystem` field as the canonical name (`gem`,
+  `nuget`, `composer`) rather than falling back to the
+  `Other("gem")`-as-string representation. JSON / SARIF / markdown
+  output all reflect this shape change.
+- **`bomdrift refresh-typosquat --ecosystem`** now accepts `nuget`
+  (real fetcher; uses the v3 search API
+  `?orderby=totalDownloads&take=200`), `go`, `gem`, and `composer`.
+  The latter three are no-ops with informational notices: pkg.go.dev,
+  rubygems.org, and packagist.org all lack stable public popularity
+  feeds, so the curated `data/{go,gem,composer}-top200.txt` snapshots
+  shipped in the binary remain the source of truth. Adding a name
+  to those lists is an explicit editorial decision; PRs welcome.
+- **Embedded data files**: `data/go-top200.txt` (~140 module paths
+  curated from pkg.go.dev and well-known imports — cobra, gin, grpc,
+  k8s, prometheus, opentelemetry), `data/gem-top200.txt` (~185 well-
+  known gems — rails, rspec, devise, sidekiq), `data/nuget-top200.txt`
+  (200 IDs auto-fetched from the v3 search API), and
+  `data/composer-top200.txt` (~140 `vendor/package` coords — symfony,
+  laravel, doctrine).
+
+### Changed
+
+- **`--ecosystem all`** for `refresh-typosquat` now expands to **eight**
+  ecosystems (npm, PyPI, Cargo, Maven, Go, Gem, NuGet, Composer)
+  instead of four. Network egress increases proportionally; pin to a
+  specific `--ecosystem <name>` if you need the v0.3 behavior.
+
+### Deferred to v0.5
+
+- **GraphQL maintainer-age** was investigated for v0.4 and deferred. The
+  current REST implementation already uses `?per_page=1` + `Link: rel=
+  "last"` parsing for both top contributor and contributor count, so
+  the only remaining round-trip cost is the per-author commit-history
+  pagination — and GitHub's GraphQL `history()` connection doesn't
+  expose an ASC ordering, so the GraphQL replacement would still need
+  cursor-based pagination to find the oldest commit (same shape as
+  REST). Will revisit if a v0.5 contributor finds a clean approach,
+  e.g. via `User.contributionsCollection`.
+
+### Migration notes
+
+- The serialized `ecosystem` field for components with
+  `pkg:gem/...`, `pkg:nuget/...`, or `pkg:composer/...` purls
+  changes from the v0.3 fallback (`"library"` or `"gem"` as the
+  `Other(...)` string) to the v0.4 canonical name. Consumers that
+  pinned on the v0.3 string need to migrate.
+
 ## [0.3.0] - 2026-04-28
 
 The "severity, baselines, and big-PR survival" release. Closes the v0.2
@@ -244,7 +323,8 @@ changed dependency in a format ready to drop into a PR comment.
 - Linux aarch64 binary.
 - PyPI / Cargo / Maven typosquat reference lists (only npm in v0.1.0).
 
-[Unreleased]: https://github.com/Metbcy/bomdrift/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Metbcy/bomdrift/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Metbcy/bomdrift/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Metbcy/bomdrift/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Metbcy/bomdrift/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Metbcy/bomdrift/releases/tag/v0.1.0

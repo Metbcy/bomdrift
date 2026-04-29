@@ -109,12 +109,17 @@ Refresh the bundled typosquat top-package lists from upstream sources.
 Which ecosystem's list to refresh. One of:
 
 - `all` — refresh every ecosystem with a wired-up fetcher (default).
+  Expands to all eight supported ecosystems as of v0.4.
 - `npm` — top-1000 from the anvaka/npmrank gist.
 - `pypi` — top-200 from hugovk/top-pypi-packages.
 - `cargo` — top-200 from the crates.io API (paginated, polite 1 req/s).
-- `maven` — accepted but emits a notice. Maven Central has no canonical
-  "top N" feed; the curated `data/maven-top100.txt` shipped in the binary
-  remains the source of truth.
+- `nuget` — top-200 from the nuget.org v3 search API
+  (`orderby=totalDownloads&take=200`). No pagination at this list size.
+- `maven` / `go` / `gem` / `composer` — accepted but no-op. Each
+  ecosystem lacks a stable public popularity feed; the curated
+  `data/<eco>-top*.txt` snapshots shipped in the binary remain the
+  source of truth. Refreshing those means editing the file and
+  rebuilding.
 
 Refreshed lists are written to `<XDG_CACHE_HOME>/bomdrift/typosquat/<eco>.txt`
 via temp-file + atomic rename. The typosquat enricher prefers cache files
