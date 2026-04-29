@@ -62,6 +62,10 @@ const NPM_TOP_LIST: &str = include_str!("../../data/npm-top1k.txt");
 const PYPI_TOP_LIST: &str = include_str!("../../data/pypi-top200.txt");
 const CARGO_TOP_LIST: &str = include_str!("../../data/cargo-top200.txt");
 const MAVEN_TOP_LIST: &str = include_str!("../../data/maven-top100.txt");
+const GO_TOP_LIST: &str = include_str!("../../data/go-top200.txt");
+const GEM_TOP_LIST: &str = include_str!("../../data/gem-top200.txt");
+const NUGET_TOP_LIST: &str = include_str!("../../data/nuget-top200.txt");
+const COMPOSER_TOP_LIST: &str = include_str!("../../data/composer-top200.txt");
 
 /// Minimum Jaro-Winkler score (or boosted score) for a pairing to be reported.
 pub const SIMILARITY_THRESHOLD: f64 = 0.92;
@@ -98,13 +102,17 @@ pub struct TyposquatFinding {
 
 /// Internal enum identifying the wired typosquat ecosystems. Distinct from
 /// [`crate::model::Ecosystem`] because not every modeled ecosystem has a list
-/// (Go, gem, Other(...)).
+/// (Other(...) entries with no canonical purl-type prefix).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SupportedEcosystem {
     Npm,
     PyPI,
     Cargo,
     Maven,
+    Go,
+    Gem,
+    NuGet,
+    Composer,
 }
 
 impl SupportedEcosystem {
@@ -114,7 +122,11 @@ impl SupportedEcosystem {
             Ecosystem::PyPI => Some(Self::PyPI),
             Ecosystem::Cargo => Some(Self::Cargo),
             Ecosystem::Maven => Some(Self::Maven),
-            _ => None,
+            Ecosystem::Go => Some(Self::Go),
+            Ecosystem::Gem => Some(Self::Gem),
+            Ecosystem::NuGet => Some(Self::NuGet),
+            Ecosystem::Composer => Some(Self::Composer),
+            Ecosystem::Other(_) => None,
         }
     }
 
@@ -124,6 +136,10 @@ impl SupportedEcosystem {
             Self::PyPI => PYPI_TOP_LIST,
             Self::Cargo => CARGO_TOP_LIST,
             Self::Maven => MAVEN_TOP_LIST,
+            Self::Go => GO_TOP_LIST,
+            Self::Gem => GEM_TOP_LIST,
+            Self::NuGet => NUGET_TOP_LIST,
+            Self::Composer => COMPOSER_TOP_LIST,
         }
     }
 
@@ -136,6 +152,10 @@ impl SupportedEcosystem {
             Self::PyPI => "pypi.txt",
             Self::Cargo => "cargo.txt",
             Self::Maven => "maven.txt",
+            Self::Go => "go.txt",
+            Self::Gem => "gem.txt",
+            Self::NuGet => "nuget.txt",
+            Self::Composer => "composer.txt",
         }
     }
 
@@ -148,6 +168,15 @@ impl SupportedEcosystem {
             Self::PyPI => b"-_.",
             Self::Cargo => b"-",
             Self::Maven => b"",
+            // Go module names use both `-` (hyphenated repo names) and `/`
+            // (path separators); the latter doesn't actually appear in the
+            // *match form* (the last path segment) but is harmless to keep.
+            Self::Go => b"-/",
+            Self::Gem => b"-_",
+            // NuGet IDs use `.` as the canonical separator
+            // (`Microsoft.Extensions.Logging`, `Newtonsoft.Json`).
+            Self::NuGet => b".",
+            Self::Composer => b"-/",
         }
     }
 }
@@ -174,9 +203,13 @@ fn check_one(comp: &Component, eco: SupportedEcosystem) -> Option<TyposquatFindi
     }
     let (closest, score) = match eco {
         SupportedEcosystem::Maven => best_match_maven(&candidate, legit_list)?,
-        SupportedEcosystem::Npm | SupportedEcosystem::PyPI | SupportedEcosystem::Cargo => {
-            best_match_jw(&candidate, legit_list, eco)?
-        }
+        SupportedEcosystem::Npm
+        | SupportedEcosystem::PyPI
+        | SupportedEcosystem::Cargo
+        | SupportedEcosystem::Go
+        | SupportedEcosystem::Gem
+        | SupportedEcosystem::NuGet
+        | SupportedEcosystem::Composer => best_match_jw(&candidate, legit_list, eco)?,
     };
     if score >= SIMILARITY_THRESHOLD {
         Some(TyposquatFinding {
@@ -194,10 +227,42 @@ fn check_one(comp: &Component, eco: SupportedEcosystem) -> Option<TyposquatFindi
 /// rules see the same normalized form.
 fn canonicalize(eco: SupportedEcosystem, name: &str) -> String {
     match eco {
-        SupportedEcosystem::Npm | SupportedEcosystem::Cargo => name.to_lowercase(),
+        // NuGet IDs are case-insensitive per the package-spec; lowercase
+        // them at canonicalization time so `Newtonsoft.Json` and
+        // `newtonsoft.json` collapse to the same legit-list entry.
+        SupportedEcosystem::Npm
+        | SupportedEcosystem::Cargo
+        | SupportedEcosystem::Maven
+        | SupportedEcosystem::Go
+        | SupportedEcosystem::Gem
+        | SupportedEcosystem::NuGet
+        | SupportedEcosystem::Composer => name.to_lowercase(),
         SupportedEcosystem::PyPI => pep503_normalize(name),
-        SupportedEcosystem::Maven => name.to_lowercase(),
     }
+}
+
+/// The substring of a canonicalized name that's actually compared for
+/// similarity. For most ecosystems this is the canonical form itself.
+/// For ecosystems where the user-visible coordinate has a stable prefix
+/// shared by many legit packages (Go's `github.com/<org>/`, Composer's
+/// `<vendor>/`), the prefix would inflate Jaro-Winkler past anything
+/// useful — match on the post-prefix portion only.
+///
+/// Note: Maven uses its own scoring path ([`best_match_maven`]) with
+/// Levenshtein on the artifactId; this helper isn't called on the Maven
+/// path. The match for Maven is computed inline in `best_match_maven`.
+fn match_form(eco: SupportedEcosystem, canonical: &str) -> &str {
+    match eco {
+        SupportedEcosystem::Go | SupportedEcosystem::Composer => last_path_segment(canonical),
+        _ => canonical,
+    }
+}
+
+/// Extract the substring after the last `/`, or the whole string when no
+/// `/` is present. Used for both Go (`host/owner/repo` → `repo`) and
+/// Composer (`vendor/package` → `package`).
+fn last_path_segment(s: &str) -> &str {
+    s.rsplit_once('/').map(|(_, a)| a).unwrap_or(s)
 }
 
 /// PEP 503 simplified normalization: lowercase, then collapse any run of
@@ -226,18 +291,35 @@ fn best_match_jw<'a>(
     legit: &'a [String],
     eco: SupportedEcosystem,
 ) -> Option<(&'a str, f64)> {
+    let cand_match = match_form(eco, candidate);
+    if cand_match.is_empty() {
+        return None;
+    }
     let mut best: Option<(&'a str, f64)> = None;
     let separators = eco.separators();
     for name in legit {
         let name = name.as_str();
         if name == candidate {
+            // Already-handled elsewhere via `legit_set.contains()`, but
+            // the per-iteration cheap-skip is defensive against a future
+            // refactor that drops the set check.
             continue;
         }
-        if is_likely_legit_extension(candidate, name, separators) {
+        let legit_match = match_form(eco, name);
+        // For ecosystems with a match-form (Go, Composer), two distinct
+        // full coordinates can collapse to the same match form — a
+        // legitimate fork of the same repo under a different vendor.
+        // Don't treat that as a typosquat; the structural similarity is
+        // identical by definition and a human reviewer is the right
+        // judge.
+        if legit_match == cand_match {
             continue;
         }
-        let mut score = jaro_winkler(candidate, name);
-        if has_suspicious_suffix_containment(candidate, name) {
+        if is_likely_legit_extension(cand_match, legit_match, separators) {
+            continue;
+        }
+        let mut score = jaro_winkler(cand_match, legit_match);
+        if has_suspicious_suffix_containment(cand_match, legit_match) {
             score = score.max(SUFFIX_BOOST_SCORE);
         }
         match best {
@@ -328,11 +410,19 @@ fn legit_list_for(eco: SupportedEcosystem) -> &'static [String] {
     static PYPI: OnceLock<Vec<String>> = OnceLock::new();
     static CARGO: OnceLock<Vec<String>> = OnceLock::new();
     static MAVEN: OnceLock<Vec<String>> = OnceLock::new();
+    static GO: OnceLock<Vec<String>> = OnceLock::new();
+    static GEM: OnceLock<Vec<String>> = OnceLock::new();
+    static NUGET: OnceLock<Vec<String>> = OnceLock::new();
+    static COMPOSER: OnceLock<Vec<String>> = OnceLock::new();
     let lock = match eco {
         SupportedEcosystem::Npm => &NPM,
         SupportedEcosystem::PyPI => &PYPI,
         SupportedEcosystem::Cargo => &CARGO,
         SupportedEcosystem::Maven => &MAVEN,
+        SupportedEcosystem::Go => &GO,
+        SupportedEcosystem::Gem => &GEM,
+        SupportedEcosystem::NuGet => &NUGET,
+        SupportedEcosystem::Composer => &COMPOSER,
     };
     lock.get_or_init(|| load_legit_list(eco, default_cache_path(eco).as_deref()))
 }
@@ -342,11 +432,19 @@ fn legit_set_for(eco: SupportedEcosystem) -> &'static HashSet<String> {
     static PYPI_SET: OnceLock<HashSet<String>> = OnceLock::new();
     static CARGO_SET: OnceLock<HashSet<String>> = OnceLock::new();
     static MAVEN_SET: OnceLock<HashSet<String>> = OnceLock::new();
+    static GO_SET: OnceLock<HashSet<String>> = OnceLock::new();
+    static GEM_SET: OnceLock<HashSet<String>> = OnceLock::new();
+    static NUGET_SET: OnceLock<HashSet<String>> = OnceLock::new();
+    static COMPOSER_SET: OnceLock<HashSet<String>> = OnceLock::new();
     let set_lock = match eco {
         SupportedEcosystem::Npm => &NPM_SET,
         SupportedEcosystem::PyPI => &PYPI_SET,
         SupportedEcosystem::Cargo => &CARGO_SET,
         SupportedEcosystem::Maven => &MAVEN_SET,
+        SupportedEcosystem::Go => &GO_SET,
+        SupportedEcosystem::Gem => &GEM_SET,
+        SupportedEcosystem::NuGet => &NUGET_SET,
+        SupportedEcosystem::Composer => &COMPOSER_SET,
     };
     set_lock.get_or_init(|| legit_list_for(eco).iter().cloned().collect())
 }
@@ -390,6 +488,10 @@ fn ecosystem_label(eco: SupportedEcosystem) -> &'static str {
         SupportedEcosystem::PyPI => "PyPI",
         SupportedEcosystem::Cargo => "Cargo",
         SupportedEcosystem::Maven => "Maven",
+        SupportedEcosystem::Go => "Go",
+        SupportedEcosystem::Gem => "Gem",
+        SupportedEcosystem::NuGet => "NuGet",
+        SupportedEcosystem::Composer => "Composer",
     }
 }
 
@@ -429,7 +531,11 @@ mod tests {
             Ecosystem::PyPI => "pypi",
             Ecosystem::Cargo => "cargo",
             Ecosystem::Maven => "maven",
-            _ => "other",
+            Ecosystem::Go => "golang",
+            Ecosystem::Gem => "gem",
+            Ecosystem::NuGet => "nuget",
+            Ecosystem::Composer => "composer",
+            Ecosystem::Other(_) => "other",
         };
         Component {
             name: name.to_string(),
@@ -704,6 +810,144 @@ mod tests {
         let findings = enrich(&cs_added(vec![comp_eco(
             "com.example.fork:commons-lang3",
             Ecosystem::Maven,
+        )]));
+        assert!(findings.is_empty(), "got {findings:?}");
+    }
+
+    // ---- Go tests --------------------------------------------------------
+
+    #[test]
+    fn go_list_loads_with_known_top_modules() {
+        let list = legit_list_for(SupportedEcosystem::Go);
+        assert!(list.len() >= 100, "got {}", list.len());
+        let by_str: Vec<&str> = list.iter().map(String::as_str).collect();
+        assert!(by_str.iter().any(|s| s.ends_with("/cobra")));
+        assert!(by_str.iter().any(|s| s.ends_with("/gin")));
+        assert!(by_str.iter().any(|s| s.ends_with("/grpc")));
+    }
+
+    #[test]
+    fn go_repo_typo_flags_against_cobra() {
+        // last-segment typo of cobra. Different vendor + a one-character
+        // drift on the repo name.
+        let findings = enrich(&cs_added(vec![comp_eco(
+            "github.com/attacker/cobraa",
+            Ecosystem::Go,
+        )]));
+        assert_eq!(findings.len(), 1, "got {findings:?}");
+        assert!(findings[0].closest.ends_with("/cobra"));
+    }
+
+    #[test]
+    fn go_legit_fork_under_different_org_does_not_flag() {
+        // Same last segment as a known module but under a different
+        // org — legitimate fork; defer to a human reviewer.
+        let findings = enrich(&cs_added(vec![comp_eco(
+            "github.com/myorg/cobra",
+            Ecosystem::Go,
+        )]));
+        assert!(findings.is_empty(), "got {findings:?}");
+    }
+
+    #[test]
+    fn go_extension_pattern_is_not_a_squat() {
+        // `cobra-cli` is the standard extension form for `cobra` — match
+        // form is `cobra-cli`, legit match form is `cobra`, separator `-`
+        // → extension rule fires, skip.
+        let findings = enrich(&cs_added(vec![comp_eco(
+            "github.com/spf13/cobra-cli",
+            Ecosystem::Go,
+        )]));
+        assert!(findings.is_empty(), "got {findings:?}");
+    }
+
+    // ---- Gem tests -------------------------------------------------------
+
+    #[test]
+    fn gem_list_loads_with_known_top_gems() {
+        let list = legit_list_for(SupportedEcosystem::Gem);
+        let by_str: Vec<&str> = list.iter().map(String::as_str).collect();
+        assert!(by_str.contains(&"rails"));
+        assert!(by_str.contains(&"rspec"));
+        assert!(by_str.contains(&"devise"));
+    }
+
+    #[test]
+    fn gem_typo_flags_against_rails() {
+        let findings = enrich(&cs_added(vec![comp_eco("railz", Ecosystem::Gem)]));
+        assert_eq!(findings.len(), 1, "got {findings:?}");
+        assert_eq!(findings[0].closest, "rails");
+    }
+
+    #[test]
+    fn gem_extension_pattern_is_not_a_squat() {
+        // `rspec-rails` is the canonical Rails-integration variant of
+        // rspec, with `-` as the gem-extension separator.
+        let findings = enrich(&cs_added(vec![comp_eco("rspec-rails", Ecosystem::Gem)]));
+        assert!(findings.is_empty(), "got {findings:?}");
+    }
+
+    // ---- NuGet tests -----------------------------------------------------
+
+    #[test]
+    fn nuget_list_loads_with_known_top_packages() {
+        let list = legit_list_for(SupportedEcosystem::NuGet);
+        let by_str: Vec<&str> = list.iter().map(String::as_str).collect();
+        // NuGet IDs are case-insensitive; canonicalized to lowercase.
+        assert!(by_str.contains(&"newtonsoft.json"));
+        assert!(by_str.iter().any(|s| s.starts_with("microsoft.")));
+    }
+
+    #[test]
+    fn nuget_typo_flags_against_newtonsoft_json() {
+        let findings = enrich(&cs_added(vec![comp_eco(
+            "Newtonsoft.Jsonn",
+            Ecosystem::NuGet,
+        )]));
+        assert_eq!(findings.len(), 1, "got {findings:?}");
+        assert_eq!(findings[0].closest, "newtonsoft.json");
+    }
+
+    #[test]
+    fn nuget_case_insensitive_exact_match_is_not_flagged() {
+        // `Newtonsoft.Json` and `newtonsoft.json` are the same package per
+        // NuGet's case-insensitive ID rules — must not flag.
+        let findings = enrich(&cs_added(vec![comp_eco(
+            "NEWTONSOFT.JSON",
+            Ecosystem::NuGet,
+        )]));
+        assert!(findings.is_empty(), "got {findings:?}");
+    }
+
+    // ---- Composer tests --------------------------------------------------
+
+    #[test]
+    fn composer_list_loads_with_known_top_packages() {
+        let list = legit_list_for(SupportedEcosystem::Composer);
+        let by_str: Vec<&str> = list.iter().map(String::as_str).collect();
+        assert!(by_str.iter().any(|s| s.ends_with("/console")));
+        assert!(by_str.iter().any(|s| s.ends_with("/framework")));
+        assert!(by_str.iter().any(|s| s.ends_with("/guzzle")));
+    }
+
+    #[test]
+    fn composer_package_typo_flags_against_symfony_console() {
+        // Different vendor, single-character drift on the package portion.
+        let findings = enrich(&cs_added(vec![comp_eco(
+            "attacker/consolee",
+            Ecosystem::Composer,
+        )]));
+        assert_eq!(findings.len(), 1, "got {findings:?}");
+        assert!(findings[0].closest.ends_with("/console"));
+    }
+
+    #[test]
+    fn composer_legit_fork_under_different_vendor_does_not_flag() {
+        // Same package portion as a known coordinate but under a different
+        // vendor — legitimate fork or alternative. Don't flag.
+        let findings = enrich(&cs_added(vec![comp_eco(
+            "myorg/console",
+            Ecosystem::Composer,
         )]));
         assert!(findings.is_empty(), "got {findings:?}");
     }

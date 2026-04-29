@@ -97,6 +97,9 @@ pub(crate) fn ecosystem_from_purl(purl: &str) -> Option<Ecosystem> {
         "cargo" => Ecosystem::Cargo,
         "maven" => Ecosystem::Maven,
         "golang" => Ecosystem::Go,
+        "gem" => Ecosystem::Gem,
+        "nuget" => Ecosystem::NuGet,
+        "composer" => Ecosystem::Composer,
         other if !other.is_empty() => Ecosystem::Other(other.to_string()),
         _ => return None,
     })
@@ -222,7 +225,19 @@ mod tests {
         );
         assert_eq!(
             ecosystem_from_purl("pkg:gem/rails@7.1.0"),
-            Some(Ecosystem::Other("gem".to_string()))
+            Some(Ecosystem::Gem)
+        );
+        assert_eq!(
+            ecosystem_from_purl("pkg:nuget/Newtonsoft.Json@13.0.3"),
+            Some(Ecosystem::NuGet)
+        );
+        assert_eq!(
+            ecosystem_from_purl("pkg:composer/symfony/console@v6.4.0"),
+            Some(Ecosystem::Composer)
+        );
+        assert_eq!(
+            ecosystem_from_purl("pkg:hex/phoenix@1.7.0"),
+            Some(Ecosystem::Other("hex".to_string()))
         );
         assert_eq!(ecosystem_from_purl("not-a-purl"), None);
     }

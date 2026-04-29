@@ -70,6 +70,12 @@ pub const PYPI_SOURCE_URL: &str =
 pub const CARGO_SOURCE_URL_TEMPLATE: &str =
     "https://crates.io/api/v1/crates?sort=downloads&per_page=100&page=";
 
+/// Source URL for the NuGet top-N list. The v3 search API supports
+/// `orderby=totalDownloads&take=N` and returns up to 200 in one call —
+/// no pagination needed at this list size.
+pub const NUGET_SOURCE_URL: &str =
+    "https://api-v2v3search-0.nuget.org/query?orderby=totalDownloads&take=200&prerelease=false";
+
 /// How many crates.io pages to walk on a refresh. 2 pages * 100/page = 200
 /// names, matching `data/cargo-top200.txt`.
 const CARGO_PAGES: u32 = 2;
@@ -102,11 +108,38 @@ where
             RefreshEcosystem::Npm => refresh_npm(&fetcher, cache_root),
             RefreshEcosystem::PyPI => refresh_pypi(&fetcher, cache_root),
             RefreshEcosystem::Cargo => refresh_cargo(&fetcher, cache_root, std::thread::sleep),
+            RefreshEcosystem::NuGet => refresh_nuget(&fetcher, cache_root),
             RefreshEcosystem::Maven => {
                 eprintln!(
                     "skipping maven: no canonical upstream feed exists. The maven \
                      typosquat list is curated and shipped embedded; edit \
                      data/maven-top100.txt and rebuild bomdrift to update it."
+                );
+                Ok(())
+            }
+            RefreshEcosystem::Go => {
+                eprintln!(
+                    "skipping go: pkg.go.dev does not expose a public popularity feed. \
+                     The Go typosquat list is curated and shipped embedded; edit \
+                     data/go-top200.txt and rebuild bomdrift to update it."
+                );
+                Ok(())
+            }
+            RefreshEcosystem::Gem => {
+                eprintln!(
+                    "skipping gem: rubygems.org's public most-downloaded API has been \
+                     unstable across releases. The Gem typosquat list is curated and \
+                     shipped embedded; edit data/gem-top200.txt and rebuild bomdrift \
+                     to update it."
+                );
+                Ok(())
+            }
+            RefreshEcosystem::Composer => {
+                eprintln!(
+                    "skipping composer: packagist.org's public statistics API has \
+                     been unstable across releases. The Composer typosquat list is \
+                     curated and shipped embedded; edit data/composer-top200.txt and \
+                     rebuild bomdrift to update it."
                 );
                 Ok(())
             }
@@ -133,6 +166,10 @@ fn selected_ecosystems(eco: RefreshEcosystem) -> Vec<RefreshEcosystem> {
             RefreshEcosystem::PyPI,
             RefreshEcosystem::Cargo,
             RefreshEcosystem::Maven,
+            RefreshEcosystem::Go,
+            RefreshEcosystem::Gem,
+            RefreshEcosystem::NuGet,
+            RefreshEcosystem::Composer,
         ],
         single => vec![single],
     }
@@ -184,6 +221,19 @@ where
         }
     }
     persist_list(cache_root, "cargo.txt", "cargo", &all_names)
+}
+
+/// Refresh NuGet: GET the v3 search API ordered by total downloads, take
+/// 200 IDs in one shot. NuGet's search endpoint accepts `take=200` directly
+/// so no pagination is required at this list size.
+fn refresh_nuget<F>(fetcher: &F, cache_root: &Path) -> Result<()>
+where
+    F: Fn(&str) -> Result<Vec<u8>>,
+{
+    eprintln!("refreshing nuget from {NUGET_SOURCE_URL}...");
+    let body = fetcher(NUGET_SOURCE_URL).context("fetching nuget top-list source")?;
+    let names = parse_nuget_json(&body)?;
+    persist_list(cache_root, "nuget.txt", "nuget", &names)
 }
 
 /// Shared cache-write tail for all per-ecosystem refresh paths. Refuses to
@@ -249,6 +299,22 @@ pub(crate) fn parse_cargo_json(body: &[u8]) -> Result<Vec<String>> {
     }
     let parsed: Page = serde_json::from_slice(body).context("decoding cargo JSON")?;
     Ok(parsed.crates.into_iter().map(|c| c.name).collect())
+}
+
+/// Parse the NuGet v3 search API JSON. Shape:
+/// `{"data": [{"id": "<name>", ...}, ...], "totalHits": ...}`. Returns the
+/// IDs in upstream (descending downloads) order.
+pub(crate) fn parse_nuget_json(body: &[u8]) -> Result<Vec<String>> {
+    #[derive(serde::Deserialize)]
+    struct Pkg {
+        id: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct SearchResult {
+        data: Vec<Pkg>,
+    }
+    let parsed: SearchResult = serde_json::from_slice(body).context("decoding nuget JSON")?;
+    Ok(parsed.data.into_iter().map(|p| p.id).collect())
 }
 
 /// Extract package names from the anvaka most-depended-upon markdown gist.
@@ -398,7 +464,7 @@ not a package line at all
     }
 
     #[test]
-    fn refresh_all_includes_npm_pypi_cargo_maven() {
+    fn refresh_all_includes_all_eight_ecosystems() {
         let ecos = selected_ecosystems(RefreshEcosystem::All);
         assert_eq!(
             ecos,
@@ -406,7 +472,11 @@ not a package line at all
                 RefreshEcosystem::Npm,
                 RefreshEcosystem::PyPI,
                 RefreshEcosystem::Cargo,
-                RefreshEcosystem::Maven
+                RefreshEcosystem::Maven,
+                RefreshEcosystem::Go,
+                RefreshEcosystem::Gem,
+                RefreshEcosystem::NuGet,
+                RefreshEcosystem::Composer,
             ]
         );
     }
@@ -513,6 +583,115 @@ not a package line at all
         // Confirm no cache file was created — the embedded list stays the
         // source of truth.
         assert!(!cache_root.join("typosquat").join("maven.txt").exists());
+    }
+
+    // ---- NuGet -----------------------------------------------------------
+
+    const SAMPLE_NUGET_JSON: &[u8] = br#"{
+        "totalHits": 3,
+        "data": [
+            {"id": "Newtonsoft.Json", "version": "13.0.3"},
+            {"id": "Microsoft.Extensions.Logging", "version": "8.0.0"},
+            {"id": "System.Text.Json", "version": "8.0.0"}
+        ]
+    }"#;
+
+    #[test]
+    fn parse_nuget_json_extracts_ids_in_order() {
+        let names = parse_nuget_json(SAMPLE_NUGET_JSON).expect("parses");
+        assert_eq!(
+            names,
+            vec![
+                "Newtonsoft.Json",
+                "Microsoft.Extensions.Logging",
+                "System.Text.Json"
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_nuget_json_rejects_non_json() {
+        assert!(parse_nuget_json(b"<html>not json</html>").is_err());
+    }
+
+    #[test]
+    fn refresh_writes_parsed_nuget_list_to_cache_dir() {
+        let tmp = tempdir();
+        let cache_root = tmp.path().to_path_buf();
+        let fetcher = |url: &str| -> Result<Vec<u8>> {
+            assert_eq!(url, NUGET_SOURCE_URL);
+            Ok(SAMPLE_NUGET_JSON.to_vec())
+        };
+        run_with(
+            RefreshArgs {
+                ecosystem: RefreshEcosystem::NuGet,
+            },
+            fetcher,
+            &cache_root,
+        )
+        .expect("nuget refresh should succeed");
+        let target = cache_root.join("typosquat").join("nuget.txt");
+        let body = fs::read_to_string(&target).expect("nuget cache file must exist");
+        assert_eq!(
+            body,
+            "Newtonsoft.Json\nMicrosoft.Extensions.Logging\nSystem.Text.Json\n"
+        );
+    }
+
+    // ---- Go / Gem / Composer (no-op paths) -------------------------------
+
+    #[test]
+    fn refresh_go_is_a_noop_no_cache_file_written() {
+        let tmp = tempdir();
+        let cache_root = tmp.path().to_path_buf();
+        let fetcher = |url: &str| -> Result<Vec<u8>> {
+            panic!("Go refresh must not call fetcher; got URL: {url}")
+        };
+        run_with(
+            RefreshArgs {
+                ecosystem: RefreshEcosystem::Go,
+            },
+            fetcher,
+            &cache_root,
+        )
+        .expect("Go path must succeed (no-op)");
+        assert!(!cache_root.join("typosquat").join("go.txt").exists());
+    }
+
+    #[test]
+    fn refresh_gem_is_a_noop_no_cache_file_written() {
+        let tmp = tempdir();
+        let cache_root = tmp.path().to_path_buf();
+        let fetcher = |url: &str| -> Result<Vec<u8>> {
+            panic!("Gem refresh must not call fetcher; got URL: {url}")
+        };
+        run_with(
+            RefreshArgs {
+                ecosystem: RefreshEcosystem::Gem,
+            },
+            fetcher,
+            &cache_root,
+        )
+        .expect("Gem path must succeed (no-op)");
+        assert!(!cache_root.join("typosquat").join("gem.txt").exists());
+    }
+
+    #[test]
+    fn refresh_composer_is_a_noop_no_cache_file_written() {
+        let tmp = tempdir();
+        let cache_root = tmp.path().to_path_buf();
+        let fetcher = |url: &str| -> Result<Vec<u8>> {
+            panic!("Composer refresh must not call fetcher; got URL: {url}")
+        };
+        run_with(
+            RefreshArgs {
+                ecosystem: RefreshEcosystem::Composer,
+            },
+            fetcher,
+            &cache_root,
+        )
+        .expect("Composer path must succeed (no-op)");
+        assert!(!cache_root.join("typosquat").join("composer.txt").exists());
     }
 
     #[test]

@@ -1,0 +1,143 @@
+# Top ~100 Go modules, hand-curated from well-known imports on
+# pkg.go.dev and the awesome-go community list. Snapshot date: 2026-04-28.
+#
+# Go's pkg.go.dev does not expose a public popularity API analogous to
+# npm/PyPI/crates.io, so the v0.4 ship is curated. Adding a name here is
+# an explicit editorial decision; PRs welcome.
+#
+# Format: full module path (host/owner/repo). The typosquat enricher
+# matches on the LAST PATH SEGMENT (the repo name), since typosquatters
+# typically copy just the repo name (`github.com/attacker/cobra` vs
+# the legitimate `github.com/spf13/cobra`).
+#
+# Lines beginning with `#` and blank lines are ignored.
+
+# --- Standard ecosystems ---
+github.com/spf13/cobra
+github.com/spf13/viper
+github.com/spf13/pflag
+github.com/spf13/cast
+github.com/spf13/afero
+
+# --- Web frameworks / HTTP ---
+github.com/gin-gonic/gin
+github.com/labstack/echo
+github.com/gofiber/fiber
+github.com/gorilla/mux
+github.com/gorilla/websocket
+github.com/gorilla/sessions
+github.com/gorilla/csrf
+github.com/go-chi/chi
+github.com/julienschmidt/httprouter
+github.com/valyala/fasthttp
+github.com/valyala/fastjson
+
+# --- Database / SQL / ORM ---
+github.com/go-sql-driver/mysql
+github.com/lib/pq
+github.com/jackc/pgx
+github.com/mattn/go-sqlite3
+github.com/jmoiron/sqlx
+gorm.io/gorm
+gorm.io/driver/mysql
+gorm.io/driver/postgres
+github.com/uptrace/bun
+ariga.io/atlas
+entgo.io/ent
+
+# --- gRPC / protobuf ---
+google.golang.org/grpc
+google.golang.org/protobuf
+google.golang.org/genproto
+github.com/golang/protobuf
+
+# --- Cloud / Kubernetes ---
+k8s.io/client-go
+k8s.io/api
+k8s.io/apimachinery
+k8s.io/kubectl
+sigs.k8s.io/controller-runtime
+sigs.k8s.io/yaml
+github.com/aws/aws-sdk-go
+github.com/aws/aws-sdk-go-v2
+cloud.google.com/go
+github.com/Azure/azure-sdk-for-go
+github.com/hashicorp/terraform-plugin-sdk
+
+# --- Logging / observability ---
+go.uber.org/zap
+github.com/sirupsen/logrus
+github.com/rs/zerolog
+github.com/prometheus/client_golang
+github.com/prometheus/common
+github.com/prometheus/procfs
+go.opentelemetry.io/otel
+go.opentelemetry.io/otel/sdk
+go.opentelemetry.io/otel/trace
+
+# --- Auth / crypto ---
+github.com/golang-jwt/jwt
+golang.org/x/crypto
+golang.org/x/oauth2
+github.com/dgrijalva/jwt-go
+github.com/coreos/go-oidc
+
+# --- Concurrency / utility ---
+golang.org/x/sync
+golang.org/x/text
+golang.org/x/net
+golang.org/x/sys
+golang.org/x/tools
+golang.org/x/exp
+github.com/google/uuid
+github.com/google/go-cmp
+github.com/google/go-github
+github.com/pkg/errors
+github.com/davecgh/go-spew
+github.com/fatih/color
+github.com/mitchellh/mapstructure
+github.com/mitchellh/copystructure
+github.com/mitchellh/go-homedir
+github.com/hashicorp/go-version
+github.com/hashicorp/go-multierror
+github.com/hashicorp/go-retryablehttp
+
+# --- Serialization / config ---
+gopkg.in/yaml.v3
+gopkg.in/yaml.v2
+github.com/BurntSushi/toml
+github.com/pelletier/go-toml
+github.com/json-iterator/go
+github.com/tidwall/gjson
+github.com/tidwall/sjson
+github.com/json-iterator/go
+
+# --- Testing ---
+github.com/stretchr/testify
+github.com/onsi/ginkgo
+github.com/onsi/gomega
+github.com/golang/mock
+go.uber.org/mock
+github.com/dvyukov/go-fuzz
+
+# --- Misc popular ---
+github.com/google/wire
+github.com/dgraph-io/badger
+go.etcd.io/bbolt
+go.etcd.io/etcd
+github.com/redis/go-redis
+github.com/go-redis/redis
+github.com/bradfitz/gomemcache
+github.com/streadway/amqp
+github.com/segmentio/kafka-go
+github.com/IBM/sarama
+github.com/nats-io/nats.go
+
+# --- Build / CLI ---
+github.com/urfave/cli
+github.com/alecthomas/kong
+github.com/jessevdk/go-flags
+github.com/cli/cli
+github.com/charmbracelet/bubbletea
+github.com/charmbracelet/lipgloss
+github.com/charmbracelet/glamour
