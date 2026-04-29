@@ -7,6 +7,40 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-04-28
+
+The "make the action actually invokable" patch release. No new
+features; fixes a layout bug that has silently broken every consumer
+trying to use `Metbcy/bomdrift@v1` since v0.1.0 was tagged.
+
+### Fixed
+
+- **`action.yml` moved from `action/action.yml` to the repo root.**
+  GitHub Actions resolves a composite action's manifest at the repo
+  root by default; subdirectory actions require consumers to type
+  `Metbcy/bomdrift/action@v1` instead of `Metbcy/bomdrift@v1`. Every
+  example in the README and docs site used the latter form, so any
+  consumer copying those snippets hit:
+
+  ```
+  Can't find 'action.yml', 'action.yaml' or 'Dockerfile' for action
+  'Metbcy/bomdrift@v1'.
+  ```
+
+  The bug surfaced when bomdrift's own dogfood workflow (introduced
+  in `60e772d`) tried to self-invoke `Metbcy/bomdrift@v1` and
+  failed for the same reason. With the manifest at the repo root,
+  `Metbcy/bomdrift@v1` (the form the docs always advertised) now
+  works. `entrypoint.sh` moved alongside it; the
+  `${{ github.action_path }}/entrypoint.sh` reference continues
+  to resolve correctly because that variable points at whatever
+  directory contains the loaded `action.yml`.
+
+  Note: this is a v0.x patch release, so the layout change is fine
+  for existing consumers who pinned to a prior tag (those tags still
+  work as they always did — broken). v1.0 will keep `action.yml` at
+  the root permanently.
+
 ## [0.4.2] - 2026-04-28
 
 The "fix the broken help links" patch release. No new features, no
@@ -410,7 +444,8 @@ changed dependency in a format ready to drop into a PR comment.
 - Linux aarch64 binary.
 - PyPI / Cargo / Maven typosquat reference lists (only npm in v0.1.0).
 
-[Unreleased]: https://github.com/Metbcy/bomdrift/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/Metbcy/bomdrift/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/Metbcy/bomdrift/releases/tag/v0.4.3
 [0.4.2]: https://github.com/Metbcy/bomdrift/releases/tag/v0.4.2
 [0.4.1]: https://github.com/Metbcy/bomdrift/releases/tag/v0.4.1
 [0.4.0]: https://github.com/Metbcy/bomdrift/releases/tag/v0.4.0
