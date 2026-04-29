@@ -92,7 +92,7 @@ for downstream tooling, baselines, debugging.
 The `Enrichment.vulns` shape is **per-purl, per-advisory severity-tagged**
 as of v0.3. v0.2 emitted a flat `Vec<String>` of advisory IDs without
 severity — consumers parsing v0.2 output need to migrate. See the
-[CHANGELOG](https://github.com/Metbcy/bomdrift/blob/main/CHANGELOG.md#breaking-output-shape)
+[CHANGELOG](https://github.com/Metbcy/bomdrift/blob/main/CHANGELOG.md#changed-breaking-output-shape)
 for the migration note.
 
 JSON output is the canonical format for `--baseline` snapshots: capture

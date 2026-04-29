@@ -7,6 +7,37 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-04-28
+
+The "fix the broken help links" patch release. No new features, no
+behavior change beyond the URLs that finding consumers click through.
+
+### Fixed
+
+- **SARIF `helpUri` fields point to real docs pages.** Every rule's
+  `helpUri` previously pointed to a README anchor like
+  `https://github.com/Metbcy/bomdrift#cve-enrichment` that didn't
+  exist — the README never had those exact heading texts, so the
+  link silently scrolled nowhere when a user clicked through GitHub
+  Code Scanning's UI for a `bomdrift.cve` finding (or any other
+  bomdrift rule). Now point at the corresponding chapter on the
+  mdBook docs site:
+  - `bomdrift.cve` → `enrichers/osv-cve.html`
+  - `bomdrift.typosquat` → `enrichers/typosquat.html`
+  - `bomdrift.version-jump` → `enrichers/version-jump.html`
+  - `bomdrift.young-maintainer` → `enrichers/maintainer-age.html`
+  - `bomdrift.license-change` → `output-formats.html#sarif-v210`
+    (no dedicated chapter; the SARIF rule listing is the
+    closest user-facing reference for this rule's semantics).
+- **SARIF `tool.driver.informationUri`** changed from the GitHub
+  repo root to the docs site. SARIF spec defines this as "the
+  absolute URI of the tool's website" — the docs site is the
+  user-friendly destination from a Code Scanning UI click.
+- **Broken anchor in `docs/src/output-formats.md`**: a CHANGELOG
+  cross-reference used `#breaking-output-shape` but the actual
+  GitHub heading-slug for that section is
+  `#changed-breaking-output-shape`. Now matches reality.
+
 ## [0.4.1] - 2026-04-28
 
 The "harden the foundations" patch release. No user-visible behavior
@@ -379,7 +410,8 @@ changed dependency in a format ready to drop into a PR comment.
 - Linux aarch64 binary.
 - PyPI / Cargo / Maven typosquat reference lists (only npm in v0.1.0).
 
-[Unreleased]: https://github.com/Metbcy/bomdrift/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/Metbcy/bomdrift/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/Metbcy/bomdrift/releases/tag/v0.4.2
 [0.4.1]: https://github.com/Metbcy/bomdrift/releases/tag/v0.4.1
 [0.4.0]: https://github.com/Metbcy/bomdrift/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Metbcy/bomdrift/releases/tag/v0.3.0

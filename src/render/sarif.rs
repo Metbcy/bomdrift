@@ -73,7 +73,7 @@ pub fn render(cs: &ChangeSet, e: &Enrichment) -> String {
                 "driver": {
                     "name": "bomdrift",
                     "semanticVersion": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/Metbcy/bomdrift",
+                    "informationUri": "https://metbcy.github.io/bomdrift/",
                     "rules": rules(),
                 }
             },
@@ -95,7 +95,7 @@ fn rules() -> Value {
              results map Critical/High to SARIF `error`, lower buckets to \
              `warning`. Advisories with no resolvable severity surface as \
              `warning` and don't trip `--fail-on critical-cve`.",
-            "https://github.com/Metbcy/bomdrift#cve-enrichment",
+            "https://metbcy.github.io/bomdrift/enrichers/osv-cve.html",
         ),
         rule(
             "bomdrift.typosquat",
@@ -105,7 +105,7 @@ fn rules() -> Value {
              package in the same ecosystem. High similarity does not prove \
              malicious intent — investigate the package source before merging. \
              Always informational severity (`warning`).",
-            "https://github.com/Metbcy/bomdrift#typosquat-detection",
+            "https://metbcy.github.io/bomdrift/enrichers/typosquat.html",
         ),
         rule(
             "bomdrift.version-jump",
@@ -115,7 +115,7 @@ fn rules() -> Value {
              diff (e.g. 1.x to 4.x). Multi-major bumps correlate with \
              takeover swaps and namespace reuse, not just legitimate \
              refactors. Always informational severity (`warning`).",
-            "https://github.com/Metbcy/bomdrift#version-jump-heuristic",
+            "https://metbcy.github.io/bomdrift/enrichers/version-jump.html",
         ),
         rule(
             "bomdrift.young-maintainer",
@@ -125,7 +125,7 @@ fn rules() -> Value {
              contributor's first commit is younger than 90 days. The xz / \
              Jia Tan supply-chain-takeover pattern. Always informational \
              severity (`warning`).",
-            "https://github.com/Metbcy/bomdrift#maintainer-age-signal",
+            "https://metbcy.github.io/bomdrift/enrichers/maintainer-age.html",
         ),
         rule(
             "bomdrift.license-change",
@@ -135,7 +135,7 @@ fn rules() -> Value {
              the SAME version. Could indicate a corrected SBOM, a \
              license-rug-pull, or a supply-chain swap. Worth a human glance \
              regardless. Always informational severity (`warning`).",
-            "https://github.com/Metbcy/bomdrift#license-change-detection",
+            "https://metbcy.github.io/bomdrift/output-formats.html#sarif-v210",
         ),
     ])
 }
