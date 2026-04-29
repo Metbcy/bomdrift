@@ -94,21 +94,26 @@ Supported `[diff]` keys map to the CLI flags: `output`, `format`,
 
 #### `--platform <PLATFORM>`
 
-`github` (default) or `gitlab`. Drives the rendered markdown
-comment's footer:
+`github` (default), `gitlab`, `bitbucket`, or `azure-devops`. Drives
+the rendered markdown comment's footer:
 
 - `github` — `/issues/new?...` URL shape, `/bomdrift suppress <ID>`
   comment-driven flow (requires the [comment-suppress
   sub-action](./baseline.md#in-comment-suppression-v05)).
 - `gitlab` — `/-/issues/new?issuable_template=false-positive` URL
-  shape, points reviewers at `bomdrift baseline add <ID>` instead
-  (the v0.5 `/bomdrift suppress` comment-driven flow on GitLab is
-  deferred to v0.8).
+  shape, points reviewers at `bomdrift baseline add <ID>` (with an
+  optional advanced webhook bridge for in-comment suppression — see
+  [GitLab CI](./gitlab-ci.md)).
+- `bitbucket` — `/issues/new` URL shape, `bomdrift baseline add <ID>`
+  manual suppression flow.
+- `azure-devops` — `/_workitems/create?templateName=false-positive`
+  URL shape, `bomdrift baseline add <ID>` manual suppression flow.
 
 When the flag is omitted, bomdrift auto-detects from CI environment
-variables: `GITLAB_CI=true` flips to GitLab; otherwise GitHub. The
-explicit flag always wins. Also configurable via `[diff] platform =
-"gitlab"` in `.bomdrift.toml`.
+variables in this order: `GITLAB_CI=true` → GitLab,
+`BITBUCKET_BUILD_NUMBER` → Bitbucket, `TF_BUILD` → Azure DevOps,
+otherwise GitHub. The explicit flag always wins. Also configurable
+via `[diff] platform = "<value>"` in `.bomdrift.toml`.
 
 Set in lockstep with `--repo-url` (or `BOMDRIFT_REPO_URL`, or — on
 GitLab CI — `CI_PROJECT_URL`). Without a URL the footer is omitted

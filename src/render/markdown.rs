@@ -41,6 +41,10 @@ pub enum Platform {
     /// `/bomdrift suppress` hint and points at `bomdrift baseline add`
     /// instead.
     GitLab,
+    /// Bitbucket Cloud or Bitbucket Data Center.
+    Bitbucket,
+    /// Azure DevOps Repos.
+    AzureDevOps,
 }
 
 /// Renderer toggles. Defaults match v0.2 behavior so existing callers keep
@@ -397,17 +401,36 @@ fn write_footer(out: &mut String, opts: &Options) {
             );
         }
         Platform::GitLab => {
-            // GitLab issue creation uses `/-/issues/new` (the `-/` is the
-            // namespace separator GitLab inserts between the project URL
-            // and the issue tracker route). `issuable_template=` selects a
-            // saved description template if the project has one named
-            // `false-positive`; projects without that template still get
-            // a working "new issue" form.
             let _ = writeln!(
                 out,
                 "<sub>**False positive?** [Report it]({repo}/-/issues/new?issuable_template=false-positive) · \
                  **Suppress a finding?** Run `bomdrift baseline add <ID>` and commit \
                  `.bomdrift/baseline.json` to your MR branch · \
+                 [Docs](https://metbcy.github.io/bomdrift/)</sub>",
+            );
+        }
+        Platform::Bitbucket => {
+            // Bitbucket Cloud uses `/issues/new` (no labels query string).
+            // Comment-driven suppress is not in scope for v0.9 — point
+            // reviewers at the manual CLI flow.
+            let _ = writeln!(
+                out,
+                "<sub>**False positive?** [Report it]({repo}/issues/new) · \
+                 **Suppress a finding?** Run `bomdrift baseline add <ID>` and commit \
+                 `.bomdrift/baseline.json` to your PR branch · \
+                 [Docs](https://metbcy.github.io/bomdrift/)</sub>",
+            );
+        }
+        Platform::AzureDevOps => {
+            // Azure DevOps work items use the `/_workitems/create`
+            // route. `templateName` is honored when the project has a
+            // matching work-item template; projects without one still
+            // get the default form.
+            let _ = writeln!(
+                out,
+                "<sub>**False positive?** [Report it]({repo}/_workitems/create?templateName=false-positive) · \
+                 **Suppress a finding?** Run `bomdrift baseline add <ID>` and commit \
+                 `.bomdrift/baseline.json` to your PR branch · \
                  [Docs](https://metbcy.github.io/bomdrift/)</sub>",
             );
         }
@@ -1267,6 +1290,51 @@ mod tests {
         );
         assert!(md.contains("/issues/new?labels=false-positive"));
         assert!(md.contains("/bomdrift suppress"));
+    }
+
+    #[test]
+    fn footer_renders_bitbucket_shape() {
+        let cs = ChangeSet {
+            added: vec![comp("a", "1.0", Ecosystem::Npm, None)],
+            ..Default::default()
+        };
+        let md = render_with_options(
+            &cs,
+            &Enrichment::default(),
+            Options {
+                repo_url: Some("https://bitbucket.org/team/proj".to_string()),
+                platform: Platform::Bitbucket,
+                ..Default::default()
+            },
+        );
+        assert!(
+            md.contains("https://bitbucket.org/team/proj/issues/new"),
+            "expected Bitbucket /issues/new URL; got:\n{md}"
+        );
+        assert!(md.contains("bomdrift baseline add"));
+        assert!(!md.contains("/bomdrift suppress"));
+    }
+
+    #[test]
+    fn footer_renders_azure_devops_shape() {
+        let cs = ChangeSet {
+            added: vec![comp("a", "1.0", Ecosystem::Npm, None)],
+            ..Default::default()
+        };
+        let md = render_with_options(
+            &cs,
+            &Enrichment::default(),
+            Options {
+                repo_url: Some("https://dev.azure.com/org/project/_git/repo".to_string()),
+                platform: Platform::AzureDevOps,
+                ..Default::default()
+            },
+        );
+        assert!(
+            md.contains("/_workitems/create?templateName=false-positive"),
+            "expected Azure DevOps work-item URL; got:\n{md}"
+        );
+        assert!(md.contains("bomdrift baseline add"));
     }
 
     #[test]

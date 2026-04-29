@@ -7,6 +7,8 @@
 - [Quickstart](./quickstart.md)
 - [GitHub Action](./github-action.md)
 - [GitLab CI](./gitlab-ci.md)
+- [Bitbucket Pipelines](./bitbucket.md)
+- [Azure DevOps Pipelines](./azure-devops.md)
 - [CLI reference](./cli-reference.md)
 
 # Output

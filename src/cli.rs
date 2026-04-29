@@ -158,6 +158,17 @@ pub enum Platform {
     /// comments).
     #[value(name = "gitlab")]
     GitLab,
+    /// Bitbucket Cloud or Bitbucket Data Center. Footer points
+    /// reviewers at the `/issues/new` form and uses `bomdrift baseline
+    /// add <ID>` for suppression — Bitbucket has no in-comment
+    /// suppression flow in v0.9.
+    #[value(name = "bitbucket")]
+    Bitbucket,
+    /// Azure DevOps Repos (Azure Pipelines). Footer points reviewers at
+    /// the work-item create form and uses `bomdrift baseline add <ID>`
+    /// for suppression.
+    #[value(name = "azure-devops")]
+    AzureDevOps,
 }
 
 impl From<Platform> for markdown::Platform {
@@ -170,6 +181,8 @@ impl From<Platform> for markdown::Platform {
         match value {
             Platform::GitHub => markdown::Platform::GitHub,
             Platform::GitLab => markdown::Platform::GitLab,
+            Platform::Bitbucket => markdown::Platform::Bitbucket,
+            Platform::AzureDevOps => markdown::Platform::AzureDevOps,
         }
     }
 }

@@ -275,17 +275,22 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
         .clone()
         .or_else(|| std::env::var("BOMDRIFT_REPO_URL").ok())
         .or_else(|| std::env::var("CI_PROJECT_URL").ok())
+        .or_else(|| std::env::var("BITBUCKET_GIT_HTTP_ORIGIN").ok())
+        .or_else(|| std::env::var("BUILD_REPOSITORY_URI").ok())
         .filter(|s| !s.is_empty());
 
     // Platform precedence: explicit `--platform` (or `[diff] platform`
     // in `.bomdrift.toml`, already merged into `args.platform`) wins;
-    // otherwise auto-detect from CI env. `GITLAB_CI=true` is GitLab's
-    // canonical CI marker — set unconditionally on every job in every
-    // GitLab pipeline. Fall through to `Platform::GitHub` (the default)
-    // so existing GitHub Action consumers see no behavior change.
+    // otherwise auto-detect from CI env. Detection order: GitLab
+    // (`GITLAB_CI=true`), Bitbucket (`BITBUCKET_BUILD_NUMBER`), Azure
+    // DevOps (`TF_BUILD`), then default GitHub.
     let platform = args.platform.unwrap_or_else(|| {
         if std::env::var("GITLAB_CI").is_ok_and(|v| v == "true") {
             crate::cli::Platform::GitLab
+        } else if std::env::var("BITBUCKET_BUILD_NUMBER").is_ok() {
+            crate::cli::Platform::Bitbucket
+        } else if std::env::var("TF_BUILD").is_ok() {
+            crate::cli::Platform::AzureDevOps
         } else {
             crate::cli::Platform::GitHub
         }
