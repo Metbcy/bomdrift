@@ -38,6 +38,16 @@ inputs:
       to 0 to disable the fallback (a too-large comment will then 422
       from the GitHub API and the action posts nothing).
     default: '60000'
+  baseline:
+    description: |
+      Path to a previously captured `bomdrift diff --output json` snapshot.
+      Findings present in the baseline are suppressed from the rendered
+      output and from the `--fail-on` trip evaluation. Match keys are
+      conservative — drift surfaces. Useful for adopting bomdrift on a
+      project with pre-existing findings without drowning the first PR.
+      See https://metbcy.github.io/bomdrift/baseline.html for full
+      match-key semantics.
+    default: ''
   verify-signatures:
     description: |
       Whether to install cosign and verify the bomdrift release archive's
@@ -68,5 +78,6 @@ runs:
         COMMENT_ON_PR: ${{ inputs.comment-on-pr }}
         COMMENT_SIZE_LIMIT: ${{ inputs.comment-size-limit }}
         FAIL_ON: ${{ inputs.fail-on }}
+        BASELINE: ${{ inputs.baseline }}
         VERIFY_SIGNATURES: ${{ inputs.verify-signatures }}
         INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}

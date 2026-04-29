@@ -16,6 +16,7 @@ keeps PR-comment latency low — typically 5–10s on a warm runner versus
 | `fail-on`     | no  | `none` | Exit code 2 on findings of the configured kind: `none`/`cve`/`critical-cve`/`typosquat`/`any`. The PR comment is still posted on a tripped run. |
 | `comment-size-limit` | no | `60000` | Bytes. When the rendered diff exceeds this size, bomdrift re-renders with `--summary-only` for the PR comment while keeping the full body in the workflow step summary. Set to `0` to disable the fallback. GitHub's hard cap is 65,536 chars. |
 | `verify-signatures` | no | `true` | Whether to install cosign and verify the bomdrift release archive's Sigstore signature. Set to `false` on trusted mirrors / cached runners to skip the cosign-installer step (~15s saved). |
+| `baseline` | no | `` (empty) | Path to a previously captured `bomdrift diff --output json` snapshot. Findings present in the baseline are suppressed from the rendered output and the `--fail-on` trip evaluation. See [Baseline & suppression](./baseline.md) for match-key semantics. |
 | `github-token` | no | `${{ github.token }}` | Token used to post PR comments. |
 
 ## Outputs
