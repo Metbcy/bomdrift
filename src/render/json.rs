@@ -175,10 +175,13 @@ mod tests {
 
     #[test]
     fn enrichment_round_trips() {
-        let mut vulns: HashMap<String, Vec<String>> = HashMap::new();
+        let mut vulns: HashMap<String, Vec<crate::enrich::VulnRef>> = HashMap::new();
         vulns.insert(
             "pkg:npm/axios@1.14.1".to_string(),
-            vec!["GHSA-3p68-rc4w-qgx5".to_string()],
+            vec![crate::enrich::VulnRef {
+                id: "GHSA-3p68-rc4w-qgx5".to_string(),
+                severity: crate::enrich::Severity::High,
+            }],
         );
 
         let typosquats = vec![TyposquatFinding {
@@ -206,8 +209,13 @@ mod tests {
         let vulns = &v["enrichment"]["vulns"];
         assert!(vulns.is_object());
         assert_eq!(
-            vulns["pkg:npm/axios@1.14.1"][0].as_str(),
+            vulns["pkg:npm/axios@1.14.1"][0]["id"].as_str(),
             Some("GHSA-3p68-rc4w-qgx5")
+        );
+        assert_eq!(
+            vulns["pkg:npm/axios@1.14.1"][0]["severity"].as_str(),
+            Some("HIGH"),
+            "severity must round-trip as the GHSA-style label"
         );
 
         let typo = &v["enrichment"]["typosquats"][0];

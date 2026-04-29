@@ -1,26 +1,37 @@
-//! OSV.dev batch CVE enrichment for changed dependencies.
+//! OSV.dev CVE enrichment for changed dependencies.
 //!
-//! Queries `https://api.osv.dev/v1/querybatch` with the purls of every component
-//! in `ChangeSet.added` and the after-side of `ChangeSet.version_changed`. The
-//! `/querybatch` endpoint accepts up to 1000 queries per request (we chunk if
-//! larger) and returns advisory IDs only — severity/summary lookups are deferred
-//! to a follow-up PR (one HTTP roundtrip is enough to flag "this changed dep is
-//! known-bad" in a PR comment).
+//! Two-stage protocol:
 //!
-//! Network errors are treated as best-effort: callers should surface them as
-//! warnings and continue rendering the diff. OSV being unreachable is not a
-//! reason to block a PR review.
+//! 1. **`/v1/querybatch`** — POST every purl of every component in
+//!    `ChangeSet.added` and the after-side of `ChangeSet.version_changed`,
+//!    chunked by [`MAX_QUERIES_PER_BATCH`]. Returns advisory IDs only.
+//! 2. **`/v1/vulns/{id}`** — GET each unique advisory ID returned in step 1
+//!    and parse `database_specific.severity` (GHSA's text label) to populate
+//!    [`crate::enrich::Severity`].
+//!
+//! Stage 2 is N+1 — one HTTP roundtrip per unique advisory — but advisories
+//! are deduplicated across components first, so the worst-case "200 components
+//! all flagged for the same Shai-Hulud worm advisory" PR makes one /vulns
+//! call, not 200. The on-disk OSV cache (separate v0.3 module) brings the
+//! amortized cost back to zero on reruns.
+//!
+//! Both stages are best-effort: callers should surface errors as warnings
+//! and continue rendering the diff. OSV being unreachable is not a reason to
+//! block a PR review. A failed /vulns/{id} lookup yields
+//! [`Severity::None`](crate::enrich::Severity::None) for that advisory and
+//! a single stderr warning per run.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::diff::ChangeSet;
-use crate::enrich::Enrichment;
+use crate::enrich::{Enrichment, Severity, VulnRef};
 
 const OSV_BATCH_URL: &str = "https://api.osv.dev/v1/querybatch";
+const OSV_VULN_URL_BASE: &str = "https://api.osv.dev/v1/vulns/";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_QUERIES_PER_BATCH: usize = 1000;
 
@@ -29,7 +40,7 @@ pub fn enrich(cs: &ChangeSet) -> Result<Enrichment> {
     if purls.is_empty() {
         return Ok(Enrichment::default());
     }
-    enrich_with(&purls, OSV_BATCH_URL, DEFAULT_TIMEOUT)
+    enrich_with(&purls, OSV_BATCH_URL, OSV_VULN_URL_BASE, DEFAULT_TIMEOUT)
 }
 
 /// Components worth querying: every purl-bearing entry in `added` and the after
@@ -50,12 +61,61 @@ fn candidate_purls(cs: &ChangeSet) -> Vec<String> {
     out
 }
 
-fn enrich_with(purls: &[String], url: &str, timeout: Duration) -> Result<Enrichment> {
-    let mut vulns: HashMap<String, Vec<String>> = HashMap::new();
+fn enrich_with(
+    purls: &[String],
+    batch_url: &str,
+    vuln_url_base: &str,
+    timeout: Duration,
+) -> Result<Enrichment> {
+    let agent = ureq::AgentBuilder::new().timeout(timeout).build();
+
+    let mut purl_to_ids: HashMap<String, Vec<String>> = HashMap::new();
     for chunk in purls.chunks(MAX_QUERIES_PER_BATCH) {
-        let response = post_batch(chunk, url, timeout)?;
-        merge(&mut vulns, chunk, response);
+        let response = post_batch(&agent, chunk, batch_url)?;
+        merge_ids(&mut purl_to_ids, chunk, response);
     }
+
+    // Deduplicate advisory IDs across components before /vulns/{id}
+    // lookups. Worst-case 200-component-all-flagged-for-Shai-Hulud → 1 call,
+    // not 200. BTreeSet ordering also means the lookups happen in a stable
+    // order, which makes the warn-once-on-failure stderr output deterministic.
+    let unique_ids: BTreeSet<String> = purl_to_ids.values().flatten().cloned().collect();
+    let mut severities: HashMap<String, Severity> = HashMap::new();
+    let mut lookup_failures = 0usize;
+    for id in &unique_ids {
+        match fetch_severity(&agent, vuln_url_base, id) {
+            Ok(sev) => {
+                severities.insert(id.clone(), sev);
+            }
+            Err(_) => {
+                lookup_failures += 1;
+                severities.insert(id.clone(), Severity::None);
+            }
+        }
+    }
+    if lookup_failures > 0 {
+        eprintln!(
+            "warning: {lookup_failures}/{} OSV /v1/vulns/{{id}} lookup(s) failed; \
+             affected advisories surface with severity NONE and will not trip \
+             --fail-on critical-cve",
+            unique_ids.len()
+        );
+    }
+
+    let mut vulns: HashMap<String, Vec<VulnRef>> = HashMap::new();
+    for (purl, ids) in purl_to_ids {
+        let refs: Vec<VulnRef> = ids
+            .into_iter()
+            .map(|id| {
+                let severity = severities.get(&id).copied().unwrap_or(Severity::None);
+                VulnRef { id, severity }
+            })
+            .collect();
+        if !refs.is_empty() {
+            vulns.insert(purl, refs);
+        }
+    }
+
     Ok(Enrichment {
         vulns,
         typosquats: Vec::new(),
@@ -64,9 +124,8 @@ fn enrich_with(purls: &[String], url: &str, timeout: Duration) -> Result<Enrichm
     })
 }
 
-fn post_batch(purls: &[String], url: &str, timeout: Duration) -> Result<OsvBatchResponse> {
+fn post_batch(agent: &ureq::Agent, purls: &[String], url: &str) -> Result<OsvBatchResponse> {
     let body = OsvBatchRequest::from_purls(purls);
-    let agent = ureq::AgentBuilder::new().timeout(timeout).build();
     let body_value = serde_json::to_value(&body).context("serializing OSV request body")?;
     let resp = agent
         .post(url)
@@ -80,7 +139,36 @@ fn post_batch(purls: &[String], url: &str, timeout: Duration) -> Result<OsvBatch
     Ok(parsed)
 }
 
-fn merge(out: &mut HashMap<String, Vec<String>>, purls: &[String], response: OsvBatchResponse) {
+fn fetch_severity(agent: &ureq::Agent, vuln_url_base: &str, id: &str) -> Result<Severity> {
+    let url = format!("{vuln_url_base}{id}");
+    let resp = agent
+        .get(&url)
+        .set(
+            "user-agent",
+            concat!("bomdrift/", env!("CARGO_PKG_VERSION")),
+        )
+        .call()
+        .with_context(|| format!("OSV.dev /v1/vulns/{id} request failed"))?;
+    let parsed: OsvVulnDetail = resp
+        .into_json()
+        .with_context(|| format!("parsing OSV detail JSON for {id}"))?;
+    Ok(severity_from_detail(&parsed))
+}
+
+/// Extract a severity bucket from the `/v1/vulns/{id}` response. Honors the
+/// priority order documented on [`Severity`]: GHSA `database_specific.severity`
+/// label first, then [`Severity::None`] (CVSS vector parsing is deferred to
+/// v0.4 — see module doc).
+fn severity_from_detail(detail: &OsvVulnDetail) -> Severity {
+    if let Some(db_specific) = &detail.database_specific
+        && let Some(label) = &db_specific.severity
+    {
+        return Severity::from_ghsa_label(label);
+    }
+    Severity::None
+}
+
+fn merge_ids(out: &mut HashMap<String, Vec<String>>, purls: &[String], response: OsvBatchResponse) {
     for (purl, result) in purls.iter().zip(response.results.iter()) {
         let ids: Vec<String> = result
             .vulns
@@ -138,6 +226,19 @@ struct OsvVulnRef {
     id: String,
 }
 
+// --- Wire-level OSV /v1/vulns/{id} shapes -----------------------------------------
+
+#[derive(Deserialize, Debug)]
+struct OsvVulnDetail {
+    database_specific: Option<OsvDatabaseSpecific>,
+}
+
+#[derive(Deserialize, Debug)]
+struct OsvDatabaseSpecific {
+    /// GHSA label (`LOW|MODERATE|HIGH|CRITICAL`) when present.
+    severity: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    fn merge_pairs_purls_with_response_results_in_order() {
+    fn merge_ids_pairs_purls_with_response_results_in_order() {
         let purls = vec![
             "pkg:npm/axios@1.14.1".to_string(),
             "pkg:npm/safe@1.0".to_string(),
@@ -201,13 +302,13 @@ mod tests {
             ],
         };
         let mut out = HashMap::new();
-        merge(&mut out, &purls, response);
+        merge_ids(&mut out, &purls, response);
         assert_eq!(out.len(), 1, "components with no vulns must not be in map");
         assert_eq!(out["pkg:npm/axios@1.14.1"], vec!["GHSA-xxxx"]);
     }
 
     #[test]
-    fn merge_drops_empty_vuln_lists() {
+    fn merge_ids_drops_empty_vuln_lists() {
         let purls = vec!["pkg:npm/safe@1.0".to_string()];
         let response = OsvBatchResponse {
             results: vec![OsvResult {
@@ -215,7 +316,7 @@ mod tests {
             }],
         };
         let mut out = HashMap::new();
-        merge(&mut out, &purls, response);
+        merge_ids(&mut out, &purls, response);
         assert!(out.is_empty());
     }
 
@@ -231,5 +332,41 @@ mod tests {
                 ]
             })
         );
+    }
+
+    #[test]
+    fn severity_from_detail_uses_database_specific_when_present() {
+        let detail = OsvVulnDetail {
+            database_specific: Some(OsvDatabaseSpecific {
+                severity: Some("CRITICAL".to_string()),
+            }),
+        };
+        assert_eq!(severity_from_detail(&detail), Severity::Critical);
+    }
+
+    #[test]
+    fn severity_from_detail_handles_ghsa_moderate_label() {
+        let detail = OsvVulnDetail {
+            database_specific: Some(OsvDatabaseSpecific {
+                severity: Some("MODERATE".to_string()),
+            }),
+        };
+        assert_eq!(severity_from_detail(&detail), Severity::Medium);
+    }
+
+    #[test]
+    fn severity_from_detail_returns_none_when_database_specific_absent() {
+        let detail = OsvVulnDetail {
+            database_specific: None,
+        };
+        assert_eq!(severity_from_detail(&detail), Severity::None);
+    }
+
+    #[test]
+    fn severity_from_detail_returns_none_when_severity_field_missing() {
+        let detail = OsvVulnDetail {
+            database_specific: Some(OsvDatabaseSpecific { severity: None }),
+        };
+        assert_eq!(severity_from_detail(&detail), Severity::None);
     }
 }

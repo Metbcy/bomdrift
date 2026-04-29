@@ -27,11 +27,11 @@
 //!
 //! ## Severity
 //!
-//! Every `result.level` is `"warning"` for v0.2. OSV's `/v1/querybatch` only
-//! returns advisory IDs (no severity / CVSS), and the heuristic enrichers
-//! (typosquat, version-jump, maintainer-age) are intentionally informational.
-//! v0.3 will add per-advisory `/v1/vulns/{id}` follow-up calls to populate
-//! real severity for `bomdrift.cve` results; until then, calibrate accordingly.
+//! `bomdrift.cve` results map their per-advisory severity to SARIF `level`:
+//! `Critical` and `High` → `"error"`, everything else (including `None`,
+//! used when /v1/vulns/{id} couldn't resolve a label) → `"warning"`. The
+//! heuristic-enricher rules (typosquat, version-jump, maintainer-age,
+//! license-change) stay at `"warning"` — they're intentionally informational.
 //!
 //! ## Locations
 //!
@@ -90,9 +90,11 @@ fn rules() -> Value {
             "cve",
             "Known CVE / advisory affects this component",
             "OSV.dev returned one or more advisory IDs (CVE, GHSA, MAL, etc.) \
-             for the component at this version. Severity is not yet populated \
-             from the OSV API in v0.2 — every CVE result surfaces as `warning` \
-             pending v0.3 per-advisory enrichment.",
+             for the component at this version. Per-advisory severity is \
+             populated via /v1/vulns/{id} (GHSA `database_specific.severity`); \
+             results map Critical/High to SARIF `error`, lower buckets to \
+             `warning`. Advisories with no resolvable severity surface as \
+             `warning` and don't trip `--fail-on critical-cve`.",
             "https://github.com/Metbcy/bomdrift#cve-enrichment",
         ),
         rule(
@@ -154,26 +156,31 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
 
     // ---- bomdrift.cve ----
     // Sort vulns by purl key for deterministic output (HashMap iteration is
-    // non-deterministic). Inner advisory-id Vec is already in OSV-returned
-    // order — preserve it.
+    // non-deterministic). Inner advisory list is sorted highest-severity
+    // first then by id, matching the markdown / term renderers so a SARIF
+    // reader and a PR-comment reader see the same priority order.
     let mut vuln_keys: Vec<&String> = e.vulns.keys().collect();
     vuln_keys.sort();
     for purl in vuln_keys {
-        let advisories = &e.vulns[purl];
+        let mut advisories: Vec<&crate::enrich::VulnRef> = e.vulns[purl].iter().collect();
+        advisories.sort_by(|a, b| b.severity.cmp(&a.severity).then_with(|| a.id.cmp(&b.id)));
         for advisory in advisories {
             out.push(json!({
                 "ruleId": "bomdrift.cve",
-                "level": "warning",
+                "level": sarif_level(advisory.severity),
                 "message": {
                     "text": format!(
-                        "{advisory} affects {purl}. Review the advisory and update \
-                         or pin a patched version."
+                        "{} ({}) affects {purl}. Review the advisory and update \
+                         or pin a patched version.",
+                        advisory.id,
+                        advisory.severity,
                     ),
                 },
                 "locations": [synthetic_location()],
                 "properties": {
-                    "purl": purl,
-                    "advisoryId": advisory,
+                    "purl":        purl,
+                    "advisoryId":  advisory.id,
+                    "severity":    advisory.severity.as_str(),
                 },
             }));
         }
@@ -295,6 +302,18 @@ fn synthetic_location() -> Value {
     })
 }
 
+/// Map our internal [`Severity`] enum to the SARIF `level` enum. Critical and
+/// High are the actionable buckets that block-on-merge tooling cares about;
+/// everything below collapses to `warning` so reviewers still see the finding
+/// without a hard fail in code-scanning views.
+fn sarif_level(severity: crate::enrich::Severity) -> &'static str {
+    use crate::enrich::Severity;
+    match severity {
+        Severity::Critical | Severity::High => "error",
+        Severity::Medium | Severity::Low | Severity::None => "warning",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,12 +373,18 @@ mod tests {
 
     #[test]
     fn cve_results_emit_one_per_advisory_with_purl_property() {
-        let mut vulns: HashMap<String, Vec<String>> = HashMap::new();
+        let mut vulns: HashMap<String, Vec<crate::enrich::VulnRef>> = HashMap::new();
         vulns.insert(
             "pkg:npm/axios@1.14.1".to_string(),
             vec![
-                "GHSA-3p68-rc4w-qgx5".to_string(),
-                "CVE-2025-99999".to_string(),
+                crate::enrich::VulnRef {
+                    id: "GHSA-3p68-rc4w-qgx5".to_string(),
+                    severity: crate::enrich::Severity::High,
+                },
+                crate::enrich::VulnRef {
+                    id: "CVE-2025-99999".to_string(),
+                    severity: crate::enrich::Severity::Medium,
+                },
             ],
         );
         let e = Enrichment {
@@ -374,12 +399,18 @@ mod tests {
             2,
             "one result per (component, advisory) pair"
         );
+        // High sorts before Medium.
         assert_eq!(results[0]["ruleId"], "bomdrift.cve");
-        assert_eq!(results[0]["level"], "warning");
+        assert_eq!(results[0]["level"], "error", "High severity → SARIF error");
         assert_eq!(results[0]["properties"]["purl"], "pkg:npm/axios@1.14.1");
         assert_eq!(
             results[0]["properties"]["advisoryId"],
             "GHSA-3p68-rc4w-qgx5"
+        );
+        assert_eq!(results[0]["properties"]["severity"], "HIGH");
+        assert_eq!(
+            results[1]["level"], "warning",
+            "Medium severity → SARIF warning"
         );
         // `locations` is required by SARIF; we project to a synthetic `sbom` URI.
         assert_eq!(
@@ -389,26 +420,45 @@ mod tests {
     }
 
     #[test]
+    fn cve_severity_none_emits_warning_level() {
+        let mut vulns: HashMap<String, Vec<crate::enrich::VulnRef>> = HashMap::new();
+        vulns.insert(
+            "pkg:npm/x@1".to_string(),
+            vec![crate::enrich::VulnRef {
+                id: "OSV-2025-1".to_string(),
+                severity: crate::enrich::Severity::None,
+            }],
+        );
+        let e = Enrichment {
+            vulns,
+            ..Default::default()
+        };
+        let s = render(&ChangeSet::default(), &e);
+        let v: Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["runs"][0]["results"][0]["level"], "warning");
+        assert_eq!(v["runs"][0]["results"][0]["properties"]["severity"], "NONE");
+    }
+
+    #[test]
     fn cve_results_are_sorted_by_purl_for_determinism() {
         // HashMap insertion order is non-deterministic, so the renderer must
         // sort the keys before emission. Build the same enrichment twice with
         // different insertion orders and assert byte-identical output.
         let purls = ["pkg:npm/zzz@1", "pkg:npm/mmm@1", "pkg:npm/aaa@1"];
-        let advisories = ["CVE-2025-1"];
+        let make_refs = || {
+            vec![crate::enrich::VulnRef {
+                id: "CVE-2025-1".to_string(),
+                severity: crate::enrich::Severity::Medium,
+            }]
+        };
 
-        let mut a: HashMap<String, Vec<String>> = HashMap::new();
+        let mut a: HashMap<String, Vec<crate::enrich::VulnRef>> = HashMap::new();
         for p in purls {
-            a.insert(
-                p.to_string(),
-                advisories.iter().map(|s| s.to_string()).collect(),
-            );
+            a.insert(p.to_string(), make_refs());
         }
-        let mut b: HashMap<String, Vec<String>> = HashMap::new();
+        let mut b: HashMap<String, Vec<crate::enrich::VulnRef>> = HashMap::new();
         for p in purls.iter().rev() {
-            b.insert(
-                p.to_string(),
-                advisories.iter().map(|s| s.to_string()).collect(),
-            );
+            b.insert(p.to_string(), make_refs());
         }
 
         let render_a = render(
@@ -513,10 +563,13 @@ mod tests {
     fn render_is_pure_byte_deterministic_across_runs() {
         // Regression guard for the upsert contract: identical inputs must
         // render to byte-identical SARIF every time.
-        let mut vulns: HashMap<String, Vec<String>> = HashMap::new();
+        let mut vulns: HashMap<String, Vec<crate::enrich::VulnRef>> = HashMap::new();
         vulns.insert(
             "pkg:npm/axios@1.14.1".to_string(),
-            vec!["CVE-2025-1".to_string()],
+            vec![crate::enrich::VulnRef {
+                id: "CVE-2025-1".to_string(),
+                severity: crate::enrich::Severity::High,
+            }],
         );
         let e = Enrichment {
             vulns,
@@ -551,8 +604,14 @@ mod tests {
         // SARIF v2.1.0 requires `locations` and `ruleId` (we don't use
         // taxonomies). This is a structural guard so future rule additions
         // can't silently violate the spec.
-        let mut vulns: HashMap<String, Vec<String>> = HashMap::new();
-        vulns.insert("pkg:npm/x@1".into(), vec!["CVE-1".into()]);
+        let mut vulns: HashMap<String, Vec<crate::enrich::VulnRef>> = HashMap::new();
+        vulns.insert(
+            "pkg:npm/x@1".into(),
+            vec![crate::enrich::VulnRef {
+                id: "CVE-1".into(),
+                severity: crate::enrich::Severity::Medium,
+            }],
+        );
         let e = Enrichment {
             vulns,
             typosquats: vec![TyposquatFinding {

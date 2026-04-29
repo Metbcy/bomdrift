@@ -125,7 +125,17 @@ pub fn render_with_color(cs: &ChangeSet, enrichment: &Enrichment, color: ColorCh
             .sum();
         let _ = writeln!(out, "Vulnerabilities ({total_vulns}):");
         for c in &vuln_components {
-            let ids = enrichment.vulns_for(c.purl.as_deref());
+            let refs = enrichment.vulns_for(c.purl.as_deref());
+            // Sort highest-severity-first, ties broken by id, so the on-screen
+            // line reads worst → less-bad and the rendered output is
+            // byte-deterministic across runs.
+            let mut sorted: Vec<&crate::enrich::VulnRef> = refs.iter().collect();
+            sorted.sort_by(|a, b| b.severity.cmp(&a.severity).then_with(|| a.id.cmp(&b.id)));
+            let advisories = sorted
+                .iter()
+                .map(|r| format!("{} ({})", r.id, r.severity))
+                .collect::<Vec<_>>()
+                .join(", ");
             let _ = writeln!(
                 out,
                 "  {} {}:{}@{} - {}",
@@ -133,7 +143,7 @@ pub fn render_with_color(cs: &ChangeSet, enrichment: &Enrichment, color: ColorCh
                 c.ecosystem,
                 c.name,
                 c.version,
-                ids.join(", ")
+                advisories
             );
         }
         out.push('\n');
@@ -297,13 +307,17 @@ mod tests {
         let mut e = Enrichment::default();
         e.vulns.insert(
             "pkg:npm/plain-crypto-js@4.2.1".to_string(),
-            vec!["MAL-2026-2306".to_string()],
+            vec![crate::enrich::VulnRef {
+                id: "MAL-2026-2306".to_string(),
+                severity: crate::enrich::Severity::Critical,
+            }],
         );
 
         let out = render_with_color(&cs, &e, ColorChoice::Never);
         assert!(out.contains("Vulnerabilities (1):"));
         assert!(out.contains("[CVE]"));
         assert!(out.contains("MAL-2026-2306"));
+        assert!(out.contains("(CRITICAL)"));
         assert!(out.contains("npm:plain-crypto-js@4.2.1"));
     }
 
