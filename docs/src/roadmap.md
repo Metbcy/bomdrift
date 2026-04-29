@@ -8,26 +8,16 @@ acceptance criteria for new contributions look like.
 The list below is intentionally short — bomdrift is small on purpose.
 Items are grouped by likely v0.4+ landing and rough sizing.
 
-### v0.4 candidates (not committed)
+### v0.5 candidates (not committed)
 
-- **`baseline:` action input** — currently `--baseline` only works via
-  the binary; the action wraps `bomdrift diff` but doesn't yet plumb
-  the flag through. Small change to `action/action.yml` +
-  `action/entrypoint.sh`.
-- **Go ecosystem typosquat list** — same algorithm as the existing
-  four ecosystems; needs a curated or auto-fetched seed list. Go
-  Module Index doesn't have a "popularity" feed analogous to
-  npm/PyPI/crates.io, so this likely lands as a hand-curated list at
-  first.
-- **Ruby / gem typosquat list** — same shape as Go.
-- **NuGet / Composer typosquat lists** — same shape, distinct
-  per-ecosystem rules (NuGet is case-sensitive in some places, etc.).
-- **GraphQL pagination for maintainer-age** — replaces the REST
-  last-page trick with a GraphQL query that returns the first commit
-  date directly. Cuts one round-trip per component.
-
-### Bigger ideas (no fixed timeline)
-
+- **GraphQL maintainer-age** — was investigated for v0.4 and deferred.
+  The current REST implementation already uses `?per_page=1` + Link-header
+  parsing for top contributor and contributor count. The remaining
+  round-trip cost is the per-author commit-history pagination, and
+  GitHub's GraphQL `history()` connection doesn't expose ASC ordering —
+  finding the oldest commit still requires cursor pagination. v0.5 may
+  approach this via `User.contributionsCollection` or accept that REST
+  is the right tool here.
 - **Custom rules / plugin system** — let consumers add
   organization-specific enrichers (e.g. "flag any dep from
   internal-mirror.example.com without a SHA-256 attestation").

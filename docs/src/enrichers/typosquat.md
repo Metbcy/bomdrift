@@ -1,8 +1,9 @@
 # Typosquat detection
 
 The typosquat enricher flags newly added components whose names are
-suspiciously close to a popular package in the same ecosystem. v0.3 covers
-**npm**, **PyPI**, **Cargo**, and **Maven** with rules tuned per ecosystem.
+suspiciously close to a popular package in the same ecosystem. v0.4 covers
+**npm**, **PyPI**, **Cargo**, **Maven**, **Go**, **RubyGems**, **NuGet**,
+and **Composer** with rules tuned per ecosystem.
 
 ## The signal
 
@@ -37,6 +38,10 @@ below).
 | PyPI | PEP 503 (lowercase, `-`/`_`/`.` collapse) | `-`, `_`, `.` | Jaro-Winkler + suffix boost |
 | Cargo | lowercase | `-` | Jaro-Winkler + suffix boost |
 | Maven | lowercase | (n/a) | Levenshtein ≤ 2 on `artifactId` only |
+| Go | lowercase | `-`, `/` | Jaro-Winkler on **last path segment** |
+| Gem | lowercase | `-`, `_` | Jaro-Winkler + suffix boost |
+| NuGet | lowercase (case-insensitive per spec) | `.` | Jaro-Winkler + suffix boost |
+| Composer | lowercase | `-`, `/` | Jaro-Winkler on **package portion** |
 
 #### Filtering rules (npm / PyPI / Cargo)
 
@@ -58,6 +63,30 @@ below).
    character drift like `cross-env → crossenv` (~0.98) or
    `express → expresss` (~0.97), while `react → react-router`
    (~0.88) stays below the threshold.
+
+#### Match-form rules (Go and Composer)
+
+Go and Composer share an additional structural rule: the user-visible
+coordinate has a stable, long prefix (Go's `host/owner/`, Composer's
+`vendor/`) that's duplicated across many legitimate packages. Including
+the prefix in Jaro-Winkler scoring would inflate similarity past
+anything useful — every Spring artifact would score 0.95+ against every
+other Spring artifact, every Symfony package against every other
+Symfony package.
+
+Both ecosystems extract a **match form** from the canonicalized
+coordinate before scoring:
+
+- **Go**: the **last path segment** of `host/owner/repo` (e.g.
+  `github.com/spf13/cobra` → `cobra`).
+- **Composer**: the **package portion** of `vendor/package` (e.g.
+  `symfony/console` → `console`).
+
+Comparison happens on match forms. When two distinct full coordinates
+collapse to the same match form (`github.com/spf13/cobra` and
+`github.com/myorg/cobra`), they're treated as legitimate forks and
+**not flagged**. Only typo'd match forms (`cobraa` vs `cobra`) trip the
+JW similarity threshold.
 
 #### Maven rules
 
@@ -101,19 +130,25 @@ Embedded snapshots ship in the binary:
 | `data/pypi-top200.txt` | [hugovk/top-pypi-packages](https://hugovk.github.io/top-pypi-packages/) | 200 |
 | `data/cargo-top200.txt` | crates.io API `?sort=downloads` | 200 |
 | `data/maven-top100.txt` | mvnrepository.com Most Popular (curated) | ~100 |
+| `data/go-top200.txt` | pkg.go.dev + awesome-go (curated) | ~140 |
+| `data/gem-top200.txt` | rubygems.org popular gems (curated) | ~185 |
+| `data/nuget-top200.txt` | nuget.org v3 search API `?orderby=totalDownloads` | 200 |
+| `data/composer-top200.txt` | packagist.org popular categories (curated) | ~140 |
 
-The lists are intentionally smaller than `npm-top1k.txt` for the v0.2
-ship: the algorithm is identical across ecosystems, so a smaller seed
-proves the signal end-to-end. Lists grow in subsequent releases without
-code changes — only the embedded snapshot does.
+Lists are intentionally smaller than `npm-top1k.txt` for the multi-
+ecosystem ships (v0.2 + v0.4): the algorithm is identical across
+ecosystems, so a smaller seed still proves the signal end-to-end. Lists
+grow in subsequent releases without code changes — only the embedded
+snapshot does.
 
 ### Refreshing
 
 ```bash
-bomdrift refresh-typosquat                  # all ecosystems with a wired fetcher
+bomdrift refresh-typosquat                    # all eight ecosystems
 bomdrift refresh-typosquat --ecosystem npm
 bomdrift refresh-typosquat --ecosystem pypi
 bomdrift refresh-typosquat --ecosystem cargo
+bomdrift refresh-typosquat --ecosystem nuget
 ```
 
 Refreshed lists are written to
@@ -121,10 +156,13 @@ Refreshed lists are written to
 atomic rename. The enricher prefers cache files over the embedded
 snapshot when present and parseable.
 
-`--ecosystem maven` is accepted but emits a notice: Maven Central has
-no canonical "top N" feed analogous to the others. The curated list
-is the source of truth; refreshing means editing
-`data/maven-top100.txt` and rebuilding bomdrift.
+`--ecosystem maven|go|gem|composer` are accepted but emit a notice:
+Maven Central, pkg.go.dev, RubyGems, and Packagist all lack stable
+public popularity feeds (or have had ones that went through breaking
+changes). The curated lists shipped in the binary remain the source
+of truth; refreshing those means editing `data/<eco>-top*.txt` and
+rebuilding bomdrift. PRs adding names to the curated lists are
+welcome.
 
 ## False-positive management
 
