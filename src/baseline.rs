@@ -344,6 +344,8 @@ mod tests {
                 id: "CVE-1".into(),
                 severity: Severity::High,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
         apply(&mut cs, &mut e, &baseline);
@@ -370,11 +372,15 @@ mod tests {
                     id: "CVE-1".into(),
                     severity: Severity::High,
                     aliases: Vec::new(),
+                    epss_score: None,
+                    kev: false,
                 },
                 VulnRef {
                     id: "CVE-2".into(),
                     severity: Severity::Medium,
                     aliases: Vec::new(),
+                    epss_score: None,
+                    kev: false,
                 },
             ],
         );
@@ -399,6 +405,8 @@ mod tests {
                 id: "CVE-1".into(),
                 severity: Severity::High,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
         apply(&mut cs, &mut e, &baseline);
@@ -488,11 +496,15 @@ mod tests {
                     id: "GHSA-evil-1234".into(),
                     severity: Severity::Critical,
                     aliases: Vec::new(),
+                    epss_score: None,
+                    kev: false,
                 },
                 VulnRef {
                     id: "CVE-still-here".into(),
                     severity: Severity::Medium,
                     aliases: Vec::new(),
+                    epss_score: None,
+                    kev: false,
                 },
             ],
         );
@@ -502,6 +514,8 @@ mod tests {
                 id: "GHSA-evil-1234".into(),
                 severity: Severity::Critical,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
         apply(&mut cs, &mut e, &baseline);

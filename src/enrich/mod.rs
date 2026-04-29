@@ -10,6 +10,8 @@
 //! keep that contract or the JSON renderer will fail to compile.
 
 pub mod cache;
+pub mod epss;
+pub mod kev;
 pub mod maintainer;
 pub mod osv;
 pub mod typosquat;
@@ -49,6 +51,10 @@ pub struct Enrichment {
     /// younger than [`maintainer::YOUNG_MAINTAINER_DAYS`]. The xz/Jia Tan
     /// pattern. Always informational — never trips fail-on.
     pub maintainer_age: Vec<MaintainerAgeFinding>,
+    /// License-policy violations (Phase D, v0.8+). Distinct from
+    /// `cs.license_changed` which detects same-version license changes.
+    /// Empty when no `[license]` block is configured.
+    pub license_violations: Vec<LicenseViolation>,
 }
 
 impl Enrichment {
@@ -64,13 +70,41 @@ impl Enrichment {
             || !self.typosquats.is_empty()
             || !self.version_jumps.is_empty()
             || !self.maintainer_age.is_empty()
+            || !self.license_violations.is_empty()
     }
+}
+
+/// License-policy violation finding (Phase D). Distinct from a license
+/// *change* (same component, same version, different license) — this is
+/// "the configured policy says this license isn't allowed."
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LicenseViolation {
+    pub component: crate::model::Component,
+    /// Raw SPDX-ish string from the SBOM. May be a compound expression
+    /// (e.g. `(MIT OR GPL-3.0-only)`) when matched as ambiguous.
+    pub license: String,
+    /// Human-readable description of which rule fired (e.g.
+    /// `"deny: GPL-3.0-only"`, `"ambiguous: (MIT OR GPL-3.0)"`).
+    pub matched_rule: String,
+    pub kind: LicenseViolationKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LicenseViolationKind {
+    /// License explicitly on the deny list (or matched a deny glob).
+    Deny,
+    /// Compound expression that couldn't be safely evaluated against the
+    /// configured policy with `allow_ambiguous=false`.
+    Ambiguous,
+    /// Atomic license that wasn't on the allow list when `allow` was set.
+    NotAllowed,
 }
 
 /// A single advisory reference attached to a vulnerable component, with the
 /// best-known severity bucket. Built by [`osv::enrich`] from the
 /// `/v1/querybatch` advisory IDs plus per-advisory `/v1/vulns/{id}` lookups.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct VulnRef {
     /// Stable advisory identifier (`GHSA-…`, `CVE-…`, `MAL-…`, `OSV-…`).
     pub id: String,
@@ -84,6 +118,22 @@ pub struct VulnRef {
     /// from OSV's `aliases[]` field; empty when offline or pre-v0.8.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
+    /// EPSS probability of exploitation in the next 30 days (0.0–1.0)
+    /// from <https://www.first.org/epss/>. `None` when offline, when no
+    /// CVE alias resolves, or when the user passed `--no-epss`. Populated
+    /// in v0.8+ by the EPSS enricher post-OSV.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epss_score: Option<f32>,
+    /// CISA Known-Exploited-Vulnerabilities flag. `true` when any CVE
+    /// alias appears in the published KEV catalog. `false` otherwise
+    /// (including offline / `--no-kev`). Populated in v0.8+ by the KEV
+    /// enricher post-OSV.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub kev: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 impl VulnRef {
@@ -94,6 +144,8 @@ impl VulnRef {
             id: id.into(),
             severity,
             aliases: Vec::new(),
+            epss_score: None,
+            kev: false,
         }
     }
 

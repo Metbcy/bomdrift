@@ -150,6 +150,8 @@ fn enrich_with(
                     id,
                     severity,
                     aliases,
+                    epss_score: None,
+                    kev: false,
                 }
             })
             .collect();
@@ -163,6 +165,7 @@ fn enrich_with(
         typosquats: Vec::new(),
         version_jumps: Vec::new(),
         maintainer_age: Vec::new(),
+        license_violations: Vec::new(),
     })
 }
 
@@ -472,6 +475,8 @@ mod tests {
             id: "GHSA-xxxx-yyyy-zzzz".to_string(),
             severity: Severity::High,
             aliases: vec!["CVE-2025-1111".to_string(), "OSV-2025-1".to_string()],
+            epss_score: None,
+            kev: false,
         };
         let cves: Vec<&str> = v.cves().collect();
         assert_eq!(cves, vec!["CVE-2025-1111"]);
@@ -486,6 +491,8 @@ mod tests {
                 "GHSA-aaaa-bbbb-cccc".to_string(),
                 "CVE-2025-1111".to_string(),
             ],
+            epss_score: None,
+            kev: false,
         };
         let cves: Vec<&str> = v.cves().collect();
         assert_eq!(cves, vec!["CVE-2025-9999", "CVE-2025-1111"]);

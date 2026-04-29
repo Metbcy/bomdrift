@@ -19,6 +19,8 @@
 
 - [Overview](./enrichers/overview.md)
 - [OSV.dev CVE lookup](./enrichers/osv-cve.md)
+- [EPSS](./enrichers/epss.md)
+- [CISA KEV](./enrichers/kev.md)
 - [Typosquat detection](./enrichers/typosquat.md)
 - [Multi-major version jumps](./enrichers/version-jump.md)
 - [Maintainer age signal](./enrichers/maintainer-age.md)

@@ -117,6 +117,22 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
         }
     };
 
+    // EPSS / KEV enrichment piggyback on OSV's VulnRefs and only have
+    // anything to do when there are CVE-aliased advisories. Skip both if
+    // there are no vulns.
+    if !args.no_epss
+        && !enrichment.vulns.is_empty()
+        && let Err(err) = enrich::epss::enrich(&mut enrichment)
+    {
+        eprintln!("warning: EPSS enrichment failed, continuing without it: {err:#}");
+    }
+    if !args.no_kev
+        && !enrichment.vulns.is_empty()
+        && let Err(err) = enrich::kev::enrich(&mut enrichment)
+    {
+        eprintln!("warning: KEV enrichment failed, continuing without it: {err:#}");
+    }
+
     // Typosquat detection is pure-compute (embedded reference list) and always
     // runs, regardless of `--no-osv`. Findings are informational.
     enrichment.typosquats = enrich::typosquat::enrich(&cs);
@@ -239,7 +255,17 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
         );
     }
 
-    if tripped(&cs, &enrichment, fail_on) || budget_tripped {
+    let epss_tripped = args
+        .fail_on_epss
+        .is_some_and(|threshold| any_epss_at_or_above(&enrichment, threshold));
+    if epss_tripped {
+        let threshold = args.fail_on_epss.unwrap_or(0.0);
+        eprintln!(
+            "bomdrift: policy gate tripped: --fail-on-epss {threshold:.2} (one or more advisories at or above this score)"
+        );
+    }
+
+    if tripped(&cs, &enrichment, fail_on) || budget_tripped || epss_tripped {
         std::process::exit(FAIL_ON_EXIT_CODE);
     }
 
@@ -263,8 +289,23 @@ pub fn tripped(cs: &ChangeSet, e: &Enrichment, threshold: FailOn) -> bool {
         FailOn::CriticalCve => any_advisory_at_or_above(e, Severity::High),
         FailOn::Typosquat => !e.typosquats.is_empty(),
         FailOn::LicenseChange => !cs.license_changed.is_empty(),
-        FailOn::Any => e.has_findings() || !cs.license_changed.is_empty(),
+        FailOn::Kev => any_kev(e),
+        FailOn::LicenseViolation => !e.license_violations.is_empty(),
+        FailOn::Any => e.has_findings() || !cs.license_changed.is_empty() || any_kev(e),
     }
+}
+
+/// True when any advisory across all components has its CISA KEV flag set.
+pub fn any_kev(e: &Enrichment) -> bool {
+    e.vulns.values().any(|refs| refs.iter().any(|r| r.kev))
+}
+
+/// True when any advisory has an EPSS score >= the threshold.
+pub fn any_epss_at_or_above(e: &Enrichment, threshold: f32) -> bool {
+    e.vulns.values().any(|refs| {
+        refs.iter()
+            .any(|r| r.epss_score.is_some_and(|s| s >= threshold))
+    })
 }
 
 pub fn budget_tripped(
@@ -350,6 +391,28 @@ fn write_calibration_lines<W: std::io::Write>(
                 CalibrationThreshold::Text("high+"),
                 format,
             );
+            for cve in vuln.cves() {
+                if let Some(score) = vuln.epss_score {
+                    write_calibration_row(
+                        out,
+                        "epss",
+                        &format!("{purl}+{cve}"),
+                        CalibrationScore::Float(score as f64),
+                        CalibrationThreshold::Float(0.5),
+                        format,
+                    );
+                }
+                if vuln.kev {
+                    write_calibration_row(
+                        out,
+                        "kev",
+                        &format!("{purl}+{cve}"),
+                        CalibrationScore::Text("true"),
+                        CalibrationThreshold::Text("kev"),
+                        format,
+                    );
+                }
+            }
         }
     }
 }
@@ -550,6 +613,8 @@ mod tests {
                 id: "CVE-2025-1".into(),
                 severity,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
         Enrichment {
@@ -801,5 +866,45 @@ mod tests {
         assert_eq!(v["kind"], "cve");
         assert_eq!(v["score"], "HIGH");
         assert_eq!(v["threshold"], "high+");
+    }
+
+    #[test]
+    fn fail_on_kev_trips_when_any_advisory_kev_set() {
+        let mut e = enrichment_with_cve_at(Severity::Medium);
+        // Flip the kev flag on the single advisory.
+        for refs in e.vulns.values_mut() {
+            refs[0].kev = true;
+        }
+        assert!(tripped(&ChangeSet::default(), &e, FailOn::Kev));
+        assert!(!tripped(
+            &ChangeSet::default(),
+            &enrichment_with_cve_at(Severity::Medium),
+            FailOn::Kev
+        ));
+    }
+
+    #[test]
+    fn any_epss_threshold_gating() {
+        let mut e = enrichment_with_cve_at(Severity::Medium);
+        for refs in e.vulns.values_mut() {
+            refs[0].epss_score = Some(0.6);
+        }
+        assert!(any_epss_at_or_above(&e, 0.5));
+        assert!(any_epss_at_or_above(&e, 0.6));
+        assert!(!any_epss_at_or_above(&e, 0.7));
+    }
+
+    #[test]
+    fn calibration_emits_epss_and_kev_rows_when_set() {
+        let mut e = enrichment_with_cve_at(Severity::High);
+        for refs in e.vulns.values_mut() {
+            refs[0].epss_score = Some(0.87);
+            refs[0].kev = true;
+        }
+        let mut buf = Vec::new();
+        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Pipe);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("epss|"), "missing epss row: {s}");
+        assert!(s.contains("kev|"), "missing kev row: {s}");
     }
 }

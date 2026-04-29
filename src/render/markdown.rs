@@ -470,10 +470,17 @@ fn write_one_vuln_row(out: &mut String, c: &Component, enrichment: &Enrichment) 
     let advisories = sorted
         .iter()
         .map(|r| {
-            format!(
+            let mut s = format!(
                 "[{}](https://osv.dev/vulnerability/{}) `{}`",
                 r.id, r.id, r.severity
-            )
+            );
+            if let Some(score) = r.epss_score {
+                s.push_str(&format!(" · EPSS {score:.2}"));
+            }
+            if r.kev {
+                s.push_str(" · **KEV**");
+            }
+            s
         })
         .collect::<Vec<_>>()
         .join(", ");
@@ -618,6 +625,8 @@ mod tests {
                 id: "GHSA-xxxx-yyyy-zzzz".to_string(),
                 severity: crate::enrich::Severity::Critical,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
         let md = render(&cs, &e);
@@ -651,16 +660,22 @@ mod tests {
                     id: "CVE-2025-medium".to_string(),
                     severity: crate::enrich::Severity::Medium,
                     aliases: Vec::new(),
+                    epss_score: None,
+                    kev: false,
                 },
                 crate::enrich::VulnRef {
                     id: "CVE-2025-critical".to_string(),
                     severity: crate::enrich::Severity::Critical,
                     aliases: Vec::new(),
+                    epss_score: None,
+                    kev: false,
                 },
                 crate::enrich::VulnRef {
                     id: "CVE-2025-high".to_string(),
                     severity: crate::enrich::Severity::High,
                     aliases: Vec::new(),
+                    epss_score: None,
+                    kev: false,
                 },
             ],
         );
@@ -690,6 +705,8 @@ mod tests {
                 id: "GHSA-xxxx-yyyy-zzzz".to_string(),
                 severity: crate::enrich::Severity::Critical,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
         let summary = render_with_options(
@@ -751,6 +768,8 @@ mod tests {
                 id: "GHSA-xxxx-yyyy-zzzz".to_string(),
                 severity: crate::enrich::Severity::High,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
 
@@ -980,6 +999,8 @@ mod tests {
                 id: "GHSA-medium".into(),
                 severity: crate::enrich::Severity::Medium,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
         e.vulns.insert(
@@ -988,6 +1009,8 @@ mod tests {
                 id: "CVE-2025-critical".into(),
                 severity: crate::enrich::Severity::Critical,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
         let md = render(&cs, &e);
@@ -1024,6 +1047,8 @@ mod tests {
                 id: "GHSA-medium".into(),
                 severity: crate::enrich::Severity::Medium,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
         e.vulns.insert(
@@ -1032,6 +1057,8 @@ mod tests {
                 id: "CVE-2025-critical".into(),
                 severity: crate::enrich::Severity::Critical,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
         let md = render(&cs, &e);
@@ -1210,6 +1237,8 @@ mod tests {
                 id: "GHSA-x".into(),
                 severity: crate::enrich::Severity::High,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
         e.typosquats

@@ -26,6 +26,9 @@ pub struct DiffConfig {
     pub format: Option<InputFormat>,
     pub no_osv: Option<bool>,
     pub no_osv_cache: Option<bool>,
+    pub no_epss: Option<bool>,
+    pub no_kev: Option<bool>,
+    pub fail_on_epss: Option<f32>,
     pub baseline: Option<PathBuf>,
     pub no_maintainer_age: Option<bool>,
     pub fail_on: Option<FailOn>,
@@ -64,6 +67,11 @@ fn apply_loaded_diff_config(args: &mut DiffArgs, config: Config) {
     }
     args.no_osv |= diff.no_osv.unwrap_or(false);
     args.no_osv_cache |= diff.no_osv_cache.unwrap_or(false);
+    args.no_epss |= diff.no_epss.unwrap_or(false);
+    args.no_kev |= diff.no_kev.unwrap_or(false);
+    if args.fail_on_epss.is_none() {
+        args.fail_on_epss = diff.fail_on_epss;
+    }
     if args.baseline.is_none() {
         // Config-derived baseline paths are tolerant of a missing file.
         // `bomdrift init` ships `.bomdrift.toml` pointing at
@@ -144,6 +152,9 @@ mod tests {
             format: None,
             no_osv: false,
             no_osv_cache: false,
+            no_epss: false,
+            no_kev: false,
+            fail_on_epss: None,
             baseline: None,
             no_maintainer_age: false,
             fail_on: None,

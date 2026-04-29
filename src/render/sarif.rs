@@ -206,6 +206,24 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
         for advisory in advisories {
             let purl_str: &str = purl;
             let fp = fingerprint(&["bomdrift.cve", purl_str, &advisory.id]);
+            let mut props = serde_json::Map::new();
+            props.insert("purl".into(), Value::String(purl.clone()));
+            props.insert("advisoryId".into(), Value::String(advisory.id.clone()));
+            props.insert(
+                "severity".into(),
+                Value::String(advisory.severity.as_str().into()),
+            );
+            if let Some(score) = advisory.epss_score {
+                props.insert(
+                    "epssScore".into(),
+                    serde_json::Number::from_f64(score as f64)
+                        .map(Value::Number)
+                        .unwrap_or(Value::Null),
+                );
+            }
+            if advisory.kev {
+                props.insert("kev".into(), Value::Bool(true));
+            }
             out.push(json!({
                 "ruleId": "bomdrift.cve",
                 "level": sarif_level(advisory.severity),
@@ -219,11 +237,7 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
                 },
                 "locations": [synthetic_location()],
                 "partialFingerprints": { "primaryHash/v1": fp },
-                "properties": {
-                    "purl":        purl,
-                    "advisoryId":  advisory.id,
-                    "severity":    advisory.severity.as_str(),
-                },
+                "properties": Value::Object(props),
             }));
         }
     }
@@ -456,11 +470,15 @@ mod tests {
                     id: "GHSA-3p68-rc4w-qgx5".to_string(),
                     severity: crate::enrich::Severity::High,
                     aliases: Vec::new(),
+                    epss_score: None,
+                    kev: false,
                 },
                 crate::enrich::VulnRef {
                     id: "CVE-2025-99999".to_string(),
                     severity: crate::enrich::Severity::Medium,
                     aliases: Vec::new(),
+                    epss_score: None,
+                    kev: false,
                 },
             ],
         );
@@ -505,6 +523,8 @@ mod tests {
                 id: "OSV-2025-1".to_string(),
                 severity: crate::enrich::Severity::None,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
         let e = Enrichment {
@@ -528,6 +548,8 @@ mod tests {
                 id: "CVE-2025-1".to_string(),
                 severity: crate::enrich::Severity::Medium,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }]
         };
 
@@ -649,6 +671,8 @@ mod tests {
                 id: "CVE-2025-1".to_string(),
                 severity: crate::enrich::Severity::High,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
         let e = Enrichment {
@@ -691,6 +715,8 @@ mod tests {
                 id: "CVE-1".into(),
                 severity: crate::enrich::Severity::Medium,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
         let e = Enrichment {
@@ -737,6 +763,8 @@ mod tests {
                 id: "GHSA-3p68-rc4w-qgx5".to_string(),
                 severity: crate::enrich::Severity::High,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
         let e = Enrichment {
@@ -765,11 +793,15 @@ mod tests {
                     id: "CVE-2025-1".to_string(),
                     severity: crate::enrich::Severity::High,
                     aliases: Vec::new(),
+                    epss_score: None,
+                    kev: false,
                 },
                 crate::enrich::VulnRef {
                     id: "CVE-2025-2".to_string(),
                     severity: crate::enrich::Severity::High,
                     aliases: Vec::new(),
+                    epss_score: None,
+                    kev: false,
                 },
             ],
         );

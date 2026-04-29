@@ -262,6 +262,21 @@ pub struct DiffArgs {
     /// `typosquat`, `maintainer-age`, `version-jump`, `cve`. `score` is
     /// the underlying similarity / age / jump-size / CVSS value;
     /// `threshold` is the constant the finding was compared against.
+    /// Skip the EPSS enricher (FIRST.org) entirely. Useful for offline /
+    /// air-gapped CI where outbound HTTP is blocked, or when EPSS data is
+    /// not part of the team's risk model. Disables both the network call
+    /// and the disk cache lookup.
+    #[arg(long)]
+    pub no_epss: bool,
+    /// Skip the CISA KEV enricher entirely.
+    #[arg(long)]
+    pub no_kev: bool,
+    /// Trip exit-2 when any advisory's EPSS score is >= this threshold
+    /// (0.0 - 1.0). Recommended starting point: 0.5 (top decile of
+    /// actively-exploited CVEs). Implicit `--fail-on cve` semantics —
+    /// only advisories surface this; non-CVE findings are unaffected.
+    #[arg(long)]
+    pub fail_on_epss: Option<f32>,
     #[arg(long)]
     pub debug_calibration: bool,
     /// Format for `--debug-calibration` rows. `pipe` (default, back-compat
@@ -310,6 +325,13 @@ pub enum FailOn {
     Typosquat,
     /// Trip when at least one same-version license change is present.
     LicenseChange,
+    /// Trip when any advisory's CISA KEV flag is set (i.e. listed in the
+    /// Known Exploited Vulnerabilities catalog). KEV is a high-signal
+    /// "actively exploited in the wild" claim — narrower than `cve` but
+    /// less rigid than `critical-cve` (KEV entries can be Medium-severity).
+    Kev,
+    /// Trip on a license-policy violation (Phase D, v0.8+).
+    LicenseViolation,
     /// Trip on ANY finding (CVE, typosquat, version-jump, young-maintainer)
     /// OR any license-changed-without-version-bump pair (the suspicious case).
     Any,

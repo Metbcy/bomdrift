@@ -133,7 +133,16 @@ pub fn render_with_color(cs: &ChangeSet, enrichment: &Enrichment, color: ColorCh
             sorted.sort_by(|a, b| b.severity.cmp(&a.severity).then_with(|| a.id.cmp(&b.id)));
             let advisories = sorted
                 .iter()
-                .map(|r| format!("{} ({})", r.id, r.severity))
+                .map(|r| {
+                    let mut s = format!("{} ({})", r.id, r.severity);
+                    if let Some(score) = r.epss_score {
+                        s.push_str(&format!(" EPSS {score:.2}"));
+                    }
+                    if r.kev {
+                        s.push_str(" KEV");
+                    }
+                    s
+                })
                 .collect::<Vec<_>>()
                 .join(", ");
             let _ = writeln!(
@@ -311,6 +320,8 @@ mod tests {
                 id: "MAL-2026-2306".to_string(),
                 severity: crate::enrich::Severity::Critical,
                 aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
 
