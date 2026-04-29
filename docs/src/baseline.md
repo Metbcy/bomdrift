@@ -184,3 +184,113 @@ When this fails on a new finding, the maintainer either:
   *for now*", not "ignore this entire class".
 - **For findings you'll fix in the next PR.** A baseline is a long-lived
   artifact; for one-PR exceptions, just upgrade the dep.
+
+## Worked example: triaging a false positive
+
+Real-world false positives are the most common reason adopters reach
+for the baseline. A typical case looks like this on a PR:
+
+> **🚨 Typosquat candidate** — new dependency `colour-print` is within
+> Levenshtein distance 1 of well-known package `colorprint`. Review
+> for impersonation.
+
+In our example, `colour-print` is a deliberate British-English spelling
+maintained by a long-trusted internal team — this is the canonical
+"signal that's true in the abstract, wrong for our codebase" case. The
+Levenshtein heuristic *should* fire on this; what's wrong is the
+verdict, not the detection. Suppressing the whole `typosquat` class
+(via `--fail-on cve`) loses coverage on actually-malicious squats; a
+wildcard config field would over-suppress; what we want is exactly
+this finding suppressed.
+
+### Step 1 — capture the current finding shape
+
+Before deciding what to suppress, see what bomdrift saw. Run with
+`--output json` and pull out the typosquat finding:
+
+```bash
+bomdrift diff before.json after.json --output json \
+  | jq '.enrichment.typosquat[] | select(.purl | contains("colour-print"))'
+```
+
+Output:
+
+```json
+{
+  "purl": "pkg:npm/colour-print@2.1.0",
+  "candidate_for": "colorprint",
+  "distance": 1,
+  "ecosystem": "npm"
+}
+```
+
+The `purl_with_version` here is `pkg:npm/colour-print@2.1.0` — the
+match key for the typosquat entry per the table above.
+
+### Step 2 — write a per-component baseline entry
+
+Edit `.bomdrift/baseline.json` (the file `bomdrift init` scaffolds, or
+whatever path you pass to `--baseline`). The diff-output JSON shape
+takes precedence, so a hand-written entry uses the same fields the
+JSON output produces:
+
+```json
+{
+  "suppressed_advisories": [],
+  "findings": {
+    "typosquat": [
+      {
+        "purl": "pkg:npm/colour-print@2.1.0",
+        "candidate_for": "colorprint",
+        "ecosystem": "npm",
+        "_note": "British-English spelling, owned by team-foo since 2019. Re-evaluate on major-version bump."
+      }
+    ]
+  }
+}
+```
+
+The `_note` field is an underscore-prefixed extension; bomdrift
+preserves unknown fields verbatim on round-trip and never reads them
+back, so it's a safe place to capture the *why*. Future maintainers
+who read the baseline see the rationale without spelunking through
+git blame.
+
+### Step 3 — verify the suppression takes effect
+
+Re-run the diff with the baseline applied:
+
+```bash
+bomdrift diff before.json after.json \
+  --baseline .bomdrift/baseline.json
+```
+
+The `colour-print` finding is gone; everything else (including any
+*other* typosquat candidate that shows up the same week) still
+surfaces. That's the trade-off: a precise hand-written entry beats a
+wildcard or a class-wide opt-out, because the next typosquat against a
+new package still trips the gate.
+
+### Why a hand-edited entry beats `--fail-on` tuning
+
+It's tempting to "just" loosen `--fail-on typosquat` to `--fail-on
+critical-cve`. Don't:
+
+- The typosquat enricher is your earliest signal for malicious
+  packages — a real squat (`colorize` impersonating `colorise`) is
+  caught here before the OSV.dev advisory exists.
+- A baseline entry is auditable: `git log .bomdrift/baseline.json`
+  shows when this exception was made and by whom.
+- A wildcard config setting (e.g., a hypothetical
+  `[diff.typosquat] allow_distance_1 = true`) would also suppress
+  unrelated future squats. Per-component is the smallest possible
+  exception that still fixes this one PR.
+
+### When the bump is the false positive
+
+Sometimes the finding is a multi-major version jump on a package you
+*expect* to leap (a calver-style release schedule, a coordinated
+ecosystem-wide bump). The same per-component recipe works — replace
+the `typosquat` array with `version_jump`, key by the after-version's
+`purl`. Update the entry on the next jump.
+

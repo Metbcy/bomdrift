@@ -4,6 +4,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::Deserialize;
 
 use crate::model::SbomFormat;
+use crate::render::markdown;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -123,6 +124,43 @@ pub enum RefreshEcosystem {
     Composer,
 }
 
+/// Forge the rendered markdown is destined for. Drives the action-affordance
+/// footer in `render::markdown` and CI-side defaults (e.g. detection of
+/// `GITLAB_CI` / `CI_PROJECT_URL`).
+///
+/// Variants intentionally cover only forges with a wired-up footer
+/// implementation. New forges (Bitbucket, Gitea, ...) are an additive change.
+#[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Platform {
+    /// GitHub.com or GitHub Enterprise. Default — preserves the v0.5
+    /// footer shape for existing consumers.
+    #[default]
+    #[value(name = "github")]
+    GitHub,
+    /// GitLab.com or Self-Managed GitLab. The MR-note footer omits the
+    /// `/bomdrift suppress` hint and points at `bomdrift baseline add`
+    /// instead, because GitLab in-comment suppression is deferred to
+    /// v0.8 (note webhooks have a different model than GitHub PR
+    /// comments).
+    #[value(name = "gitlab")]
+    GitLab,
+}
+
+impl From<Platform> for markdown::Platform {
+    /// User-facing CLI / config enum maps 1:1 to the renderer's enum. The
+    /// two are kept separate so the renderer doesn't take a clap+serde
+    /// dependency, but the variants must stay in lockstep — the match
+    /// here is exhaustive on purpose: a new variant added to one side
+    /// fails the build on the other until both are updated.
+    fn from(value: Platform) -> Self {
+        match value {
+            Platform::GitHub => markdown::Platform::GitHub,
+            Platform::GitLab => markdown::Platform::GitLab,
+        }
+    }
+}
+
 #[derive(Args, Debug)]
 pub struct DiffArgs {
     /// Path to the "before" SBOM (CycloneDX, SPDX, or Syft JSON).
@@ -196,6 +234,14 @@ pub struct DiffArgs {
     /// use don't render dead links to bomdrift's own issue tracker.
     #[arg(long)]
     pub repo_url: Option<String>,
+    /// Forge the rendered markdown is destined for. Controls the action-
+    /// affordance footer shape (GitHub uses the `/bomdrift suppress`
+    /// comment-driven flow; GitLab points reviewers at the manual
+    /// `bomdrift baseline add` CLI flow). When omitted, auto-detects from
+    /// CI environment variables (`GITLAB_CI=true` → GitLab; default
+    /// otherwise is GitHub).
+    #[arg(long, value_enum)]
+    pub platform: Option<Platform>,
     /// Exit 2 when more than this many components are added in one diff.
     #[arg(long)]
     pub max_added: Option<usize>,
@@ -205,6 +251,19 @@ pub struct DiffArgs {
     /// Exit 2 when more than this many components change version in one diff.
     #[arg(long)]
     pub max_version_changed: Option<usize>,
+    /// Print one CSV-friendly stderr line per finding showing the score
+    /// and the threshold that gated it. Off by default. Used to gather
+    /// real-world calibration data — `SIMILARITY_THRESHOLD` for
+    /// typosquats, `YOUNG_MAINTAINER_DAYS` for maintainer-age — without
+    /// shipping telemetry. The output is opt-in and the user owns the
+    /// resulting CSV; pipe to a file with `2>calibration.csv`.
+    ///
+    /// Format: `kind|key|score|threshold` per line. `kind` is one of
+    /// `typosquat`, `maintainer-age`, `version-jump`, `cve`. `score` is
+    /// the underlying similarity / age / jump-size / CVSS value;
+    /// `threshold` is the constant the finding was compared against.
+    #[arg(long)]
+    pub debug_calibration: bool,
 }
 
 /// Threshold for `--fail-on` exit-code-2 behavior.

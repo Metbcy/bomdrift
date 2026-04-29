@@ -130,10 +130,18 @@ Embedded snapshots ship in the binary:
 | `data/pypi-top200.txt` | [hugovk/top-pypi-packages](https://hugovk.github.io/top-pypi-packages/) | 200 |
 | `data/cargo-top200.txt` | crates.io API `?sort=downloads` | 200 |
 | `data/maven-top100.txt` | mvnrepository.com Most Popular (curated) | ~100 |
-| `data/go-top200.txt` | pkg.go.dev + awesome-go (curated) | ~140 |
-| `data/gem-top200.txt` | rubygems.org popular gems (curated) | ~185 |
+| `data/go-top200.txt` | pkg.go.dev + awesome-go (curated) | ~180 |
+| `data/gem-top200.txt` | rubygems.org popular gems (curated) | ~245 |
 | `data/nuget-top200.txt` | nuget.org v3 search API `?orderby=totalDownloads` | 200 |
-| `data/composer-top200.txt` | packagist.org popular categories (curated) | ~140 |
+| `data/composer-top200.txt` | packagist.org popular categories (curated) | ~190 |
+
+v0.7 expanded the curated Go, Composer, and Gem lists — the
+ship-with-binary snapshots now cover the CNCF / HashiCorp / gRPC-
+ecosystem corners of Go, the Symfony / Laravel / Doctrine /
+testing / Packagist-popular tail of Composer, and the Rails /
+dry-rb / serializer / search corners of RubyGems. Each top-up is
+grouped under a `# --- v0.7 top-up: <category> (source: ...) ---`
+header in the data file so future curators can see provenance.
 
 Lists are intentionally smaller than `npm-top1k.txt` for the multi-
 ecosystem ships (v0.2 + v0.4): the algorithm is identical across

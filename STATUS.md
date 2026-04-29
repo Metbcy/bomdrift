@@ -11,9 +11,10 @@ keeping the project OSS-first: no hosted dashboard, no account, no telemetry.
 | GitHub.com pull requests | Supported through `Metbcy/bomdrift@v1` |
 | Local CLI | Supported on Linux x86_64/aarch64, macOS aarch64, Windows x86_64 |
 | SBOM formats | CycloneDX JSON, SPDX JSON, Syft JSON |
-| In-comment suppression | Supported through `Metbcy/bomdrift/comment-suppress@v1` |
+| In-comment suppression (GitHub) | Supported through `Metbcy/bomdrift/comment-suppress@v1` |
+| GitLab CI merge requests | Supported through the `examples/gitlab-ci/` template (v0.7+); in-comment suppression deferred to v0.8 |
 | GitHub Enterprise / self-hosted runners | Expected to work, not broadly tested yet |
-| GitLab / Bitbucket | Not supported |
+| Bitbucket | Not supported |
 | Hosted dashboard / SaaS | Not planned |
 
 ## Known limitations

@@ -208,7 +208,29 @@ generate_sbom() {
   fi
   local source_dir="${checkout_dir}/${clean}"
   if [ ! -d "$source_dir" ]; then
-    fail "scan path not found: ${source_dir} (resolved from input path='${subpath}')"
+    # Build an actionable error: what we tried, what's actually on disk
+    # at that level, and where to read about the monorepo pattern. The
+    # most common cause of this firing is a `path:` typo or a `path:`
+    # value that exists in `after-ref` but not `before-ref` (a directory
+    # added in the PR head). Show the first ~10 entries at the checkout
+    # root so the reviewer can see whether the directory is just
+    # misnamed (e.g. `services/api` vs `service/api`).
+    local actual
+    actual="$(cd "$checkout_dir" && ls -1 2>/dev/null | head -10 | sed 's/^/    /')"
+    if [ -z "$actual" ]; then
+      actual="    (checkout root is empty)"
+    fi
+    fail "scan path not found: ${source_dir}
+  Resolved from input path='${subpath}' against checkout '${checkout_dir}'.
+  The checkout root contains:
+${actual}
+
+  Common causes:
+    - typo in the 'path:' input (case-sensitive; 'Services/api' != 'services/api')
+    - the directory exists in after-ref but not before-ref (or vice versa)
+    - a monorepo split renamed the directory in the default branch since the PR was opened
+  See https://metbcy.github.io/bomdrift/github-action.html#monorepo-setup
+  for the matrix-per-service recipe."
   fi
 
   if ! command -v syft >/dev/null 2>&1; then

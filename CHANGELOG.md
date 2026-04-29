@@ -7,6 +7,96 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-30
+
+The "broaden the platform, polish the edges" milestone. v0.7 takes the
+v0.6 policy-config foundation and adds GitLab CI as a first-class
+target, closes the open issue backlog around adoption pain points,
+and lays groundwork for calibration tuning.
+
+### Added
+
+- **GitLab CI integration.** `bomdrift diff` now renders a
+  GitLab-shaped MR-note footer when `--platform gitlab` is set (or
+  when `GITLAB_CI=true` is auto-detected). A copy-paste-ready
+  template ships under `examples/gitlab-ci/` with a diff job
+  (curl + jq upsert against the GitLab notes API), a manual
+  suppression job, and a setup README covering the two-token model
+  and Self-Managed considerations. Full chapter at
+  [docs/src/gitlab-ci.md](docs/src/gitlab-ci.md).
+
+- **`--platform <github|gitlab>` flag** on `bomdrift diff` (also
+  loadable from `[diff] platform = "..."` in `.bomdrift.toml`).
+  Default is auto-detection from the CI environment with `github`
+  as the fallback. Explicit flag always wins.
+
+- **CI auto-detection on GitLab.** When `GITLAB_CI=true` is set,
+  bomdrift selects the GitLab footer shape; when `CI_PROJECT_URL`
+  is set and `--repo-url` / `BOMDRIFT_REPO_URL` are unset, it's
+  used as the footer link target.
+
+- **`--debug-calibration` flag.** Off by default. When set, the
+  diff command emits one pipe-delimited record per finding to
+  stderr (`kind|key|score|threshold`). Lets adopters dump a
+  calibration sample across many PRs and feed back tuning data on
+  `SIMILARITY_THRESHOLD`, `YOUNG_MAINTAINER_DAYS`, etc. No
+  telemetry — the user owns the file.
+
+- **Typosquat top-package data top-up** for Go (+35 entries from
+  CNCF / HashiCorp / gRPC ecosystem / awesome-go), Composer (+43
+  from Symfony / Laravel / Doctrine / testing communities), and
+  Gem (+44 from Rails ecosystem / dry-rb / API serializers).
+  Closes #6, #7, #8.
+
+### Changed
+
+- **Markdown renderer is now platform-aware.** Backward compatible:
+  the GitHub footer shape is preserved byte-for-byte for existing
+  callers. New `MarkdownOpts.platform` field controls the
+  switch; `Default` resolves to GitHub.
+
+- **Better "scan path not found" error in the GitHub Action.**
+  `entrypoint.sh` now lists what was actually checked out and
+  links to the new monorepo docs section instead of the prior
+  one-line "no such file" error. Closes #11.
+
+### Docs
+
+- **GitLab CI chapter** (`docs/src/gitlab-ci.md`) — quickstart,
+  token model, suppression paths, Self-Managed notes, what's
+  scoped out for v0.7.
+- **False-positive triage worked example** in
+  `docs/src/baseline.md` (a typosquat misfire with the exact
+  baseline entry that suppresses it). Closes #12.
+- **Monorepo setup section** in `docs/src/github-action.md`
+  covering matrix-per-service patterns and shared-baseline
+  pattern. Closes #9.
+- **Action-broke troubleshooting checklist** in
+  `docs/src/github-action.md` covering the top-N failure modes.
+  Closes #13.
+- **CLI reference** updated for `--platform`,
+  `--debug-calibration`, and the new `BOMDRIFT_REPO_URL` /
+  `GITLAB_CI` / `CI_PROJECT_URL` environment variables.
+
+### Tests
+
+- Regression test for `BOMDRIFT_REPO_URL` env-var → footer URL
+  plumbing (#10) — previously only the rendering function was
+  unit-tested, not the env-to-option plumbing in `lib.rs`.
+- E2E tests for `GITLAB_CI` auto-detection and `--platform`
+  override.
+- Smoke test for `--debug-calibration` stderr output.
+
+### Scope notes
+
+In-comment suppression on GitLab (`/bomdrift suppress <ID>` in an
+MR note) is **deferred to v0.8**. GitLab note webhooks have a
+different model than GitHub PR comments, and the safe wiring
+(rate-limit, fork-MR safety, command parsing, double-trigger
+debouncing) is materially harder. v0.7 ships the manual-job path
+in `examples/gitlab-ci/suppress.gitlab-ci.yml`, which covers the
+same user need without standing up a webhook handler.
+
 ## [0.6.1] - 2026-04-29
 
 ### Fixed

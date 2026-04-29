@@ -1,0 +1,146 @@
+# bomdrift on GitLab CI — copy-paste template (v0.7+)
+#
+# Posts an upserted MR note with the SBOM diff between the MR's target
+# branch and the MR's head SHA. Mirrors the GitHub Action UX:
+#   - Generates CycloneDX SBOMs via Syft for both refs.
+#   - Renders the diff to markdown with the GitLab footer shape
+#     (`/-/issues/new?...` + `bomdrift baseline add` hint).
+#   - Posts/updates a single note marked `<!-- bomdrift:diff -->` so
+#     subsequent pushes update the same note instead of accumulating.
+#
+# Tokens:
+#   * `CI_JOB_TOKEN` is read-only on most GitLab instances and CANNOT
+#     post MR notes. Provide a Project Access Token (PAT) with at least
+#     the `api` scope as a CI/CD variable named `BOMDRIFT_API_TOKEN`.
+#     Mark it "Masked" and "Protected" if your default branch is the
+#     only place suppression commits land.
+#
+# Self-Managed GitLab:
+#   * `CI_API_V4_URL` is exposed automatically; no rewriting needed.
+#   * If your runners can't reach Sigstore endpoints, set
+#     `BOMDRIFT_VERIFY_SIGNATURES: "false"` to skip cosign install.
+#
+# This template uses a single shell job for portability; nothing here
+# requires a sidecar service or a custom runner image.
+
+variables:
+  # Pin the bomdrift release the MR is checked against. Bump in lockstep
+  # with security-relevant feature flags. Floating `v1` is supported but
+  # the pin is recommended for reproducibility.
+  BOMDRIFT_VERSION: "v0.7.0"
+  BOMDRIFT_VERIFY_SIGNATURES: "true"
+  # Where the marker comment lands. Keep in sync with the GitHub Action's
+  # `<!-- bomdrift:diff -->` so cross-platform tooling can grep one shape.
+  BOMDRIFT_MARKER: "<!-- bomdrift:diff -->"
+
+bomdrift:diff:
+  stage: test
+  image: alpine:3.20
+  rules:
+    # MR pipelines only — push pipelines on protected branches don't
+    # have a target ref to diff against.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  before_script:
+    - apk add --no-cache bash curl jq git tar gzip ca-certificates
+  script:
+    - |
+      set -euo pipefail
+      bash <<'BOMDRIFT'
+
+      # --- Detect arch & download bomdrift ---------------------------------
+      ARCH="$(uname -m)"
+      case "$ARCH" in
+        x86_64)  ARCH="x86_64-unknown-linux-musl" ;;
+        aarch64) ARCH="aarch64-unknown-linux-musl" ;;
+        *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
+      esac
+      BOMDRIFT_TARBALL="bomdrift-${BOMDRIFT_VERSION}-${ARCH}.tar.gz"
+      BOMDRIFT_URL="https://github.com/Metbcy/bomdrift/releases/download/${BOMDRIFT_VERSION}/${BOMDRIFT_TARBALL}"
+      curl -fsSL -o "${BOMDRIFT_TARBALL}" "${BOMDRIFT_URL}"
+
+      # --- Optional: cosign-verify the release archive ---------------------
+      if [ "${BOMDRIFT_VERIFY_SIGNATURES}" = "true" ]; then
+        if command -v cosign >/dev/null 2>&1; then
+          curl -fsSL -o "${BOMDRIFT_TARBALL}.sig"  "${BOMDRIFT_URL}.sig"
+          curl -fsSL -o "${BOMDRIFT_TARBALL}.pem"  "${BOMDRIFT_URL}.pem"
+          cosign verify-blob \
+            --certificate "${BOMDRIFT_TARBALL}.pem" \
+            --signature   "${BOMDRIFT_TARBALL}.sig" \
+            --certificate-identity-regexp 'https://github.com/Metbcy/bomdrift/.*' \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${BOMDRIFT_TARBALL}"
+        else
+          echo "WARN: cosign not on PATH; skipping signature verification (set BOMDRIFT_VERIFY_SIGNATURES=false to silence)" >&2
+        fi
+      fi
+
+      tar -xzf "${BOMDRIFT_TARBALL}"
+      chmod +x ./bomdrift
+
+      # --- Install Syft ----------------------------------------------------
+      curl -fsSL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+        | sh -s -- -b /usr/local/bin
+
+      # --- Generate the two SBOMs ------------------------------------------
+      # CI_MERGE_REQUEST_DIFF_BASE_SHA is the actual merge-base, which is
+      # what we want for "what does this MR change?" rather than the tip
+      # of the target branch (which can drift).
+      BEFORE_REF="${CI_MERGE_REQUEST_DIFF_BASE_SHA}"
+      AFTER_REF="${CI_COMMIT_SHA}"
+
+      # Worktrees keep the active checkout untouched and give us two
+      # filesystem snapshots Syft can scan independently. Both share the
+      # same .git so this is cheap.
+      git worktree add ../bomdrift-before "${BEFORE_REF}"
+      git worktree add ../bomdrift-after  "${AFTER_REF}"
+
+      syft scan "dir:../bomdrift-before" -o "cyclonedx-json=before.cdx.json" --quiet
+      syft scan "dir:../bomdrift-after"  -o "cyclonedx-json=after.cdx.json"  --quiet
+
+      # --- Run bomdrift diff ----------------------------------------------
+      # --platform gitlab swaps the footer to the GitLab shape; the env
+      # CI_PROJECT_URL is auto-honored as repo_url.
+      ./bomdrift diff before.cdx.json after.cdx.json \
+        --platform gitlab \
+        --output markdown \
+        > diff.md
+
+      # --- Post / update the MR note --------------------------------------
+      if [ -z "${BOMDRIFT_API_TOKEN:-}" ]; then
+        echo "BOMDRIFT_API_TOKEN not set; skipping note upsert (workflow log still has the diff above)" >&2
+        cat diff.md
+        exit 0
+      fi
+
+      NOTES_URL="${CI_API_V4_URL}/projects/${CI_MERGE_REQUEST_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
+      EXISTING_ID="$(curl -fsSL --header "PRIVATE-TOKEN: ${BOMDRIFT_API_TOKEN}" "${NOTES_URL}?per_page=100" \
+        | jq --arg marker "${BOMDRIFT_MARKER}" \
+            '[.[] | select(.body | startswith($marker))][0].id // empty')"
+
+      # Prepend the marker so future runs find this exact note.
+      BODY="$(printf '%s\n\n%s' "${BOMDRIFT_MARKER}" "$(cat diff.md)")"
+      JSON_BODY="$(jq -nc --arg b "${BODY}" '{body:$b}')"
+
+      if [ -n "${EXISTING_ID}" ]; then
+        curl -fsSL --request PUT \
+          --header "PRIVATE-TOKEN: ${BOMDRIFT_API_TOKEN}" \
+          --header "Content-Type: application/json" \
+          --data "${JSON_BODY}" \
+          "${NOTES_URL}/${EXISTING_ID}" >/dev/null
+        echo "Updated existing bomdrift note (id=${EXISTING_ID})"
+      else
+        curl -fsSL --request POST \
+          --header "PRIVATE-TOKEN: ${BOMDRIFT_API_TOKEN}" \
+          --header "Content-Type: application/json" \
+          --data "${JSON_BODY}" \
+          "${NOTES_URL}" >/dev/null
+        echo "Posted new bomdrift note"
+      fi
+      BOMDRIFT
+  artifacts:
+    when: always
+    paths:
+      - diff.md
+      - before.cdx.json
+      - after.cdx.json
+    expire_in: 7 days

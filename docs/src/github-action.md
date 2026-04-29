@@ -234,3 +234,114 @@ When the zero-config flow runs (no explicit `before-sbom` / `after-sbom`):
 The new behavior costs about 30 MB of one-time tool cache and 3–5s of
 cold-cache wall time per first invocation. Subsequent runs in the same
 job (or in repos that share the runner's tool cache) reuse Syft.
+
+## Monorepo setup
+
+When a single repo owns N services with independent dependency trees
+(`services/api`, `services/worker`, `apps/web`, ...), running one
+bomdrift job per service gives each PR a focused, per-service comment
+without merging unrelated diff churn into a single 65k-char wall.
+
+### Pattern A — `path:` per matrix entry
+
+The simplest setup uses a job matrix and the action's `path` input:
+
+```yaml
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  diff:
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, worker, web]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: Metbcy/bomdrift@v1
+        with:
+          path: services/${{ matrix.service }}
+          fail-on: critical-cve
+```
+
+Each matrix leg posts (or upserts) **its own PR comment**, distinguished
+by the rendered title (e.g. "SBOM diff — services/api"). The
+`<!-- bomdrift:diff -->` upsert marker is namespaced internally by
+`path:`, so leg N's comment doesn't clobber leg N-1's.
+
+`fail-fast: false` is recommended: a vulnerability in `worker` shouldn't
+hide an emergent `api` finding from the same PR.
+
+### Pattern B — share a baseline across services
+
+Most monorepos *do* want one shared exception list (the same false
+positive will show up in any service that depends on the same
+package). Point each leg at the same file:
+
+```yaml
+- uses: Metbcy/bomdrift@v1
+  with:
+    path: services/${{ matrix.service }}
+    baseline: .bomdrift/baseline.json
+```
+
+The baseline file is keyed by `(purl_with_version, advisory_id)` — see
+[Match keys](./baseline.md#match-keys) — so a suppression for
+`pkg:npm/colour-print@2.1.0` covers every service that pulls in that
+exact version. New versions still surface (intentional; that's the
+point of the version-pinned key).
+
+When services pin different versions of the same dep, you'll get
+per-version baseline entries. That's working-as-intended — a known-fine
+finding at v1.0.0 should still get a fresh review at v1.1.0.
+
+### Pattern C — per-service `.bomdrift.toml`
+
+When the policy itself differs (worker has a stricter `fail-on`,
+docs-site has a generous `max-added`), drop a `.bomdrift.toml` per
+service:
+
+```yaml
+- uses: Metbcy/bomdrift@v1
+  with:
+    path:   services/${{ matrix.service }}
+    config: services/${{ matrix.service }}/.bomdrift.toml
+```
+
+The auto-discovery only checks the repo root, so an explicit
+`config:` is required for nested files.
+
+### What to scope per service vs. globally
+
+| Setting | Scope | Why |
+|---|---|---|
+| `fail-on`, `max-*` budgets | Per-service | Worker's risk surface ≠ web's |
+| `baseline` | **Shared** | Same false positives across services |
+| `comment-on-pr`, `output` | Per-service | Diff-only legs vs. PR-comment legs |
+| `verify-signatures` | Global | Runner-image property, not service property |
+
+## Action-broke troubleshooting checklist
+
+When a previously-working bomdrift action job starts failing — typically
+right after a merge to your default branch, a token rotation, or a
+runner-image upgrade — work through these in order. Each row is **one
+symptom, one fix** so you can grep your job log for the symptom and
+land on the recipe.
+
+| Symptom (in the job log) | Likely cause | Fix |
+|---|---|---|
+| `403 Resource not accessible by integration` on the comment-upsert step | `pull-requests: write` permission missing on the workflow / job | Add `permissions: { pull-requests: write, contents: read }` at the workflow or job level. PR comments need `pull-requests: write`; the action's internal checkouts need `contents: read`. |
+| `Forks cannot post PR comments` warning, exit 0 | PR is from a fork; default `GITHUB_TOKEN` on `pull_request` events is read-only | Switch the trigger to `pull_request_target` (and harden — see [GitHub's guidance][prtarget]), or accept that fork PRs only get the workflow step summary, not a PR comment. |
+| `Could not find SBOM at services/api` after a green earlier run | Default branch protection bumped the merge-base; `before-ref` now points at a commit that predates the `services/api` directory | Either move the `path:` value to match the new layout, or pin `before-ref` explicitly to a known-good commit (`before-ref: main`). |
+| `cosign: signature verification failed` after a release-archive rotation | Cached release archive in the runner's tool cache is stale and predates a rotation | Bump to the latest patch tag (e.g. `Metbcy/bomdrift@v1` re-resolves to the floating tag), or set `verify-signatures: false` on a self-hosted runner you've pinned manually. |
+| `path: services/api` warning + empty SBOM | The path doesn't exist post-checkout — typo, or the directory was renamed in `before-ref` only | bomdrift v0.7+ surfaces an actionable error pointing at this exact case. See the [monorepo section](#monorepo-setup) for the matrix recipe; double-check `${{ matrix.service }}` substitution. |
+| "Comment exceeds 65,536 characters" 422 from GitHub | A massive diff blew past the size cap; the v0.3 fallback to `--summary-only` was disabled (`comment-size-limit: 0`) | Re-enable the fallback (drop `comment-size-limit` to use the default, or set it to `60000`). The full body is preserved in the workflow step summary. |
+| Action runs, no PR comment appears, exit 0 | Workflow event isn't `pull_request` (the comment path is gated on PR events), or `comment-on-pr: false` was set explicitly | For `push`/`schedule` events, the comment path is intentionally skipped — use the step summary or upload the markdown as an artifact. |
+
+[prtarget]: https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions#using-pull_request_target
+
+If you hit a failure mode not in the table above, please [open an
+issue](https://github.com/Metbcy/bomdrift/issues/new?labels=action-broke)
+with the failing job log — the troubleshooting table grows from real
+reports.

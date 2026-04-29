@@ -136,3 +136,56 @@ roots/wordpress
 wpackagist-plugin/jetpack
 wpackagist-plugin/wordpress-seo
 wpackagist-plugin/akismet
+
+# --- v0.7 top-up: Symfony components (source: packagist.org top installs) ---
+symfony/security-bundle
+symfony/security-core
+symfony/form
+symfony/messenger
+symfony/mailer
+symfony/framework-bundle
+symfony/options-resolver
+symfony/config
+symfony/dotenv
+symfony/error-handler
+symfony/css-selector
+symfony/dom-crawler
+symfony/expression-language
+
+# --- v0.7 top-up: Laravel ecosystem (source: packagist.org top installs) ---
+laravel/sail
+laravel/pint
+laravel/telescope
+laravel/octane
+laravel/dusk
+laravel/serializable-closure
+
+# --- v0.7 top-up: Doctrine (source: packagist.org top installs) ---
+doctrine/migrations
+doctrine/doctrine-bundle
+doctrine/persistence
+doctrine/event-manager
+doctrine/deprecations
+
+# --- v0.7 top-up: testing & static analysis (source: packagist.org top installs) ---
+behat/behat
+phpspec/phpspec
+infection/infection
+rector/rector
+phpmd/phpmd
+
+# --- v0.7 top-up: misc popular (source: packagist.org top installs) ---
+nesbot/carbon
+predis/predis
+intervention/image
+aws/aws-sdk-php
+vlucas/phpdotenv
+erusev/parsedown
+dompdf/dompdf
+phpoffice/phpspreadsheet
+maatwebsite/excel
+barryvdh/laravel-debugbar
+barryvdh/laravel-ide-helper
+league/fractal
+league/route
+mtdowling/jmespath.php

@@ -147,18 +147,50 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
         baseline::apply(&mut cs, &mut enrichment, &baseline);
     }
 
+    // Calibration tap. Off by default; opt-in via `--debug-calibration`.
+    // Emits one CSV-friendly line per finding to stderr so an adopter
+    // can run the flag across a representative N PRs and feed the
+    // resulting CSV back as tuning data (issue #5). The output is
+    // deliberately plain — no JSON, no schema versioning — because the
+    // intended consumer is a one-off awk/jq pipeline, not a long-lived
+    // integration. Format: `kind|key|score|threshold`. No telemetry: the
+    // user owns the bytes and pipes them wherever they want.
+    if args.debug_calibration {
+        write_calibration_lines(&enrichment, &mut std::io::stderr());
+    }
+
     // CLI flag wins; otherwise the env var supplies the default. Empty
     // strings are treated as unset to match shell-script callers that
     // pass `BOMDRIFT_REPO_URL=` to clear the value rather than `unset`.
+    // GitLab CI exposes the project URL as `CI_PROJECT_URL` (analog of
+    // GitHub's `GITHUB_REPOSITORY`-derived URL); honor it as a third
+    // fallback so users on the GitLab template don't have to plumb
+    // `BOMDRIFT_REPO_URL` themselves.
     let repo_url = args
         .repo_url
         .clone()
         .or_else(|| std::env::var("BOMDRIFT_REPO_URL").ok())
+        .or_else(|| std::env::var("CI_PROJECT_URL").ok())
         .filter(|s| !s.is_empty());
+
+    // Platform precedence: explicit `--platform` (or `[diff] platform`
+    // in `.bomdrift.toml`, already merged into `args.platform`) wins;
+    // otherwise auto-detect from CI env. `GITLAB_CI=true` is GitLab's
+    // canonical CI marker — set unconditionally on every job in every
+    // GitLab pipeline. Fall through to `Platform::GitHub` (the default)
+    // so existing GitHub Action consumers see no behavior change.
+    let platform = args.platform.unwrap_or_else(|| {
+        if std::env::var("GITLAB_CI").is_ok_and(|v| v == "true") {
+            crate::cli::Platform::GitLab
+        } else {
+            crate::cli::Platform::GitHub
+        }
+    });
     let md_options = render::markdown::Options {
         summary_only: args.summary_only,
         findings_only: args.findings_only,
         repo_url,
+        platform: platform.into(),
     };
     let rendered = match output {
         OutputFormat::Terminal => {
@@ -234,6 +266,77 @@ pub fn budget_tripped(
     max_added.is_some_and(|max| cs.added.len() > max)
         || max_removed.is_some_and(|max| cs.removed.len() > max)
         || max_version_changed.is_some_and(|max| cs.version_changed.len() > max)
+}
+
+/// Emit one CSV-friendly line per finding to the given writer, capturing
+/// the score and the constant it was compared against. Off by default
+/// (driven by `--debug-calibration`); when set, the user pipes stderr
+/// to a file and feeds the resulting CSV back as tuning data.
+///
+/// Schema: `kind|key|score|threshold` — pipe-delimited because purls
+/// already contain commas (`pkg:npm/@scope/name`) which would force CSV
+/// quoting. `kind` ∈ {`typosquat`, `version-jump`, `maintainer-age`,
+/// `cve`}. `score` is the underlying numeric the enricher computed
+/// (similarity for typosquat, major-version delta for version-jump,
+/// days-old for maintainer-age, max CVSS-equivalent for cve);
+/// `threshold` is the constant the score was gated against. CVE rows
+/// surface every advisory (no internal threshold) so adopters can see
+/// the score distribution before tuning `--fail-on critical-cve`.
+fn write_calibration_lines<W: std::io::Write>(e: &Enrichment, out: &mut W) {
+    use crate::enrich::maintainer::YOUNG_MAINTAINER_DAYS;
+    use crate::enrich::typosquat::SIMILARITY_THRESHOLD;
+    use crate::enrich::version_jump::MIN_MAJOR_DELTA;
+
+    for f in &e.typosquats {
+        let _ = writeln!(
+            out,
+            "typosquat|{}|{:.4}|{:.4}",
+            f.component
+                .purl
+                .as_deref()
+                .unwrap_or(f.component.name.as_str()),
+            f.score,
+            SIMILARITY_THRESHOLD,
+        );
+    }
+    for f in &e.version_jumps {
+        let _ = writeln!(
+            out,
+            "version-jump|{}|{}|{}",
+            f.after.purl.as_deref().unwrap_or(f.after.name.as_str()),
+            f.after_major.saturating_sub(f.before_major),
+            MIN_MAJOR_DELTA,
+        );
+    }
+    for f in &e.maintainer_age {
+        let _ = writeln!(
+            out,
+            "maintainer-age|{}|{}|{}",
+            f.component
+                .purl
+                .as_deref()
+                .unwrap_or(f.component.name.as_str()),
+            f.days_old,
+            YOUNG_MAINTAINER_DAYS,
+        );
+    }
+    for (purl, refs) in &e.vulns {
+        for vuln in refs {
+            // Severity has no numeric score in our model; emit the
+            // bucket label as a non-numeric "score" so the CSV row is
+            // still well-formed. Adopters who want raw CVSS can grep
+            // the JSON output instead — the calibration tap is for the
+            // ranked-bucket choice (cve vs critical-cve), not for
+            // reverse-engineering CVSS.
+            let _ = writeln!(
+                out,
+                "cve|{}#{}|{}|high+",
+                purl,
+                vuln.id,
+                vuln.severity.as_str(),
+            );
+        }
+    }
 }
 
 fn log_budget_trips(

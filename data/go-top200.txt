@@ -141,3 +141,48 @@ github.com/cli/cli
 github.com/charmbracelet/bubbletea
 github.com/charmbracelet/lipgloss
 github.com/charmbracelet/glamour
+
+# --- v0.7 top-up: CNCF / containers (source: cncf.io graduated + sandbox lists) ---
+github.com/containerd/containerd
+github.com/opencontainers/runc
+github.com/opencontainers/image-spec
+github.com/argoproj/argo-cd
+github.com/fluxcd/flux2
+github.com/istio/istio
+github.com/cilium/cilium
+github.com/grafana/grafana
+github.com/grafana/loki
+github.com/jaegertracing/jaeger
+github.com/open-telemetry/opentelemetry-collector
+github.com/thanos-io/thanos
+github.com/minio/minio
+github.com/minio/minio-go
+
+# --- v0.7 top-up: HashiCorp (source: github.com/hashicorp top repos) ---
+github.com/hashicorp/terraform
+github.com/hashicorp/vault
+github.com/hashicorp/consul
+github.com/hashicorp/nomad
+github.com/hashicorp/hcl
+github.com/hashicorp/raft
+
+# --- v0.7 top-up: gRPC ecosystem (source: github.com/grpc-ecosystem) ---
+github.com/grpc-ecosystem/grpc-gateway
+github.com/grpc-ecosystem/go-grpc-middleware
+github.com/twitchtv/twirp
+
+# --- v0.7 top-up: data / search / storage (source: awesome-go databases) ---
+github.com/elastic/go-elasticsearch
+github.com/cockroachdb/cockroach
+github.com/cockroachdb/pebble
+github.com/influxdata/influxdb
+github.com/syndtr/goleveldb
+
+# --- v0.7 top-up: utility / awesome-go (source: awesome-go popular libs) ---
+github.com/klauspost/compress
+github.com/cespare/xxhash
+github.com/yuin/goldmark
+github.com/PuerkitoBio/goquery
+github.com/google/cel-go
+go.uber.org/goleak
+github.com/DATA-DOG/go-sqlmock

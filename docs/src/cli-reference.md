@@ -88,7 +88,33 @@ max_version_changed = 10
 Supported `[diff]` keys map to the CLI flags: `output`, `format`,
 `no_osv`, `no_osv_cache`, `baseline`, `no_maintainer_age`, `fail_on`,
 `summary_only`, `findings_only`, `include_file_components`, `repo_url`,
-`max_added`, `max_removed`, and `max_version_changed`.
+`platform`, `max_added`, `max_removed`, and `max_version_changed`.
+
+### Forge / CI integration
+
+#### `--platform <PLATFORM>`
+
+`github` (default) or `gitlab`. Drives the rendered markdown
+comment's footer:
+
+- `github` — `/issues/new?...` URL shape, `/bomdrift suppress <ID>`
+  comment-driven flow (requires the [comment-suppress
+  sub-action](./baseline.md#in-comment-suppression-v05)).
+- `gitlab` — `/-/issues/new?issuable_template=false-positive` URL
+  shape, points reviewers at `bomdrift baseline add <ID>` instead
+  (the v0.5 `/bomdrift suppress` comment-driven flow on GitLab is
+  deferred to v0.8).
+
+When the flag is omitted, bomdrift auto-detects from CI environment
+variables: `GITLAB_CI=true` flips to GitLab; otherwise GitHub. The
+explicit flag always wins. Also configurable via `[diff] platform =
+"gitlab"` in `.bomdrift.toml`.
+
+Set in lockstep with `--repo-url` (or `BOMDRIFT_REPO_URL`, or — on
+GitLab CI — `CI_PROJECT_URL`). Without a URL the footer is omitted
+entirely; the platform flag controls only the footer's *shape*.
+
+See [GitLab CI](./gitlab-ci.md) for the full template.
 
 ### Enrichment flags
 
@@ -196,6 +222,39 @@ Refreshed lists are written to `<XDG_CACHE_HOME>/bomdrift/typosquat/<eco>.txt`
 via temp-file + atomic rename. The typosquat enricher prefers cache files
 over the embedded snapshot when present and parseable.
 
+## Calibration
+
+#### `--debug-calibration`
+
+Off by default. When set, `bomdrift diff` writes one
+pipe-delimited line to stderr per finding it considers, with the
+schema:
+
+```
+kind|key|score|threshold
+```
+
+`kind` is one of `typosquat`, `version-jump`, `maintainer-age`, or
+`cve`. `key` is a stable identifier (the package purl, advisory ID,
+etc.). `score` and `threshold` are the numeric inputs to the
+gating decision — for `cve` the score column carries the severity
+bucket label rather than a numeric CVSS score (bomdrift doesn't
+parse CVSS numerically).
+
+Pipe-delimited because purls contain commas. The flag is purely
+diagnostic — it doesn't change which findings get rendered. Pipe
+to a file:
+
+```bash
+bomdrift diff old.cdx.json new.cdx.json --debug-calibration 2> calibration.tsv
+```
+
+If you collect a calibration sample across many PRs and have a
+hunch on a better default for `SIMILARITY_THRESHOLD` /
+`YOUNG_MAINTAINER_DAYS`, please share on issue
+[#5](https://github.com/Metbcy/bomdrift/issues/5) — there is no
+telemetry; you own the file.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -210,6 +269,9 @@ over the embedded snapshot when present and parseable.
 | Variable | Purpose |
 |---|---|
 | `GITHUB_TOKEN` | Bumps the GitHub REST rate limit from 60/hr unauth to 5000/hr authenticated, used by the maintainer-age enricher. |
+| `BOMDRIFT_REPO_URL` | Fallback for `--repo-url` when the flag isn't passed. Used to render the comment footer's "Report this finding" / "Suppress" links. |
+| `GITLAB_CI` | When `true`, auto-selects `--platform gitlab` (unless overridden). |
+| `CI_PROJECT_URL` | On GitLab CI, used as a final fallback for `--repo-url` after `BOMDRIFT_REPO_URL`. |
 | `XDG_CACHE_HOME` | Cache root for the OSV severity cache and the refreshed typosquat lists. Defaults to `~/.cache` on Linux. |
 | `NO_COLOR` | Honored by the terminal renderer; falls back to plain output. |
 | `CLICOLOR_FORCE` | Honored by the terminal renderer; forces ANSI even on a non-TTY. |
