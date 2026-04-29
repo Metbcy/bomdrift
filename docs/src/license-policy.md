@@ -74,3 +74,47 @@ suppression key. The v0.8 `expires` + `reason` fields work the same
 way.
 
 [GitHub Dependency Review Action]: https://github.com/actions/dependency-review-action
+
+## SPDX expression evaluation (v0.9+)
+
+bomdrift evaluates each license string as a full SPDX expression via
+the `spdx` crate. Evaluation outcomes:
+
+| Expression | Allow | Deny | Outcome |
+|---|---|---|---|
+| `MIT` | `[MIT]` | — | Permitted (allow exact match) |
+| `(MIT OR Apache-2.0)` | `[MIT]` | — | Permitted (one branch allowed) |
+| `(MIT AND GPL-3.0-only)` | `[MIT]` | `[GPL-3.0-only]` | Violation (deny wins) |
+| `(GPL-3.0-only OR MIT) AND BSD-3-Clause` | `[MIT, BSD-3-Clause]` | `[GPL-3.0-only]` | Violation (denial path could resolve to GPL) |
+| `Apache-2.0 WITH LLVM-exception` | `[Apache-2.0]` | — | Permitted (base license allowed; exception identity is currently informational only) |
+| `Custom` (non-SPDX) | `[MIT]` | — | Falls back to atomic match → not in allow list |
+| `NOASSERTION` / `OTHER` / empty | `[MIT]` | — | Ambiguous → violation (fail-closed) |
+
+### Precedence
+
+1. **Deny wins** — any required atomic on the deny list (including any
+   OR-branch) trips a violation, because the resolved license could be
+   the denied alternative.
+2. **Glob** — `*` suffix patterns work in both lists (e.g. `AGPL-*`
+   matches every `AGPL-*-only` family member).
+3. **Allow** — when the allow list is non-empty, the SPDX expression
+   must `evaluate` to true under a closure that returns true for
+   allow-listed atomics.
+4. **Non-SPDX strings** — fall through to the v0.8 atomic-string
+   matcher so vendor-specific license strings keep working.
+
+### Deprecated: `allow_ambiguous`
+
+The v0.8 `allow_ambiguous` flag flipped fail-closed behavior on
+compound expressions. v0.9's evaluator handles compounds correctly,
+so the flag is now a no-op when SPDX parsing succeeds. A one-time
+deprecation warning is printed to stderr per run when the flag is
+set. The flag still works on the fallback path (non-SPDX strings) for
+back-compat; it will be removed in v1.0.
+
+### `WITH` (exception) granularity
+
+`WITH <exception>` parses cleanly and the base license is checked
+against allow/deny. Per-exception allow/deny granularity (e.g.
+"allow `Apache-2.0 WITH LLVM-exception` but not other Apache-with-X
+combos") is a future ask — not in v0.9 scope.

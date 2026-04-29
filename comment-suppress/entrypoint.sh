@@ -72,6 +72,11 @@ fi
 # is preserved alongside the advisory id. Pattern matches the start of
 # any line (case-insensitive) so reviewers can write
 # `reason: awaiting upstream patch (issue #42)` on a continuation line.
+#
+# This shell parser MUST stay in lockstep with the Rust
+# `baseline::parse_comment_directive` parser used by the GitLab
+# webhook bridge (`bomdrift baseline add --from-comment`). Any
+# grammar change has to land in both places.
 reason="$(printf '%s\n' "$comment_body" \
   | grep -iE '^\s*reason:\s*' \
   | head -n1 \

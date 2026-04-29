@@ -41,6 +41,10 @@ pub enum Platform {
     /// `/bomdrift suppress` hint and points at `bomdrift baseline add`
     /// instead.
     GitLab,
+    /// Bitbucket Cloud or Bitbucket Data Center.
+    Bitbucket,
+    /// Azure DevOps Repos.
+    AzureDevOps,
 }
 
 /// Renderer toggles. Defaults match v0.2 behavior so existing callers keep
@@ -123,6 +127,30 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
             out,
             "| License violations | {} |",
             enrichment.license_violations.len()
+        );
+    }
+    if !enrichment.recently_published.is_empty() {
+        let _ = writeln!(
+            out,
+            "| Recently published | {} |",
+            enrichment.recently_published.len()
+        );
+    }
+    if !enrichment.deprecated.is_empty() {
+        let _ = writeln!(out, "| Deprecated | {} |", enrichment.deprecated.len());
+    }
+    if !enrichment.maintainer_set_changed.is_empty() {
+        let _ = writeln!(
+            out,
+            "| Maintainer set changed | {} |",
+            enrichment.maintainer_set_changed.len()
+        );
+    }
+    if enrichment.vex_suppressed_count > 0 {
+        let _ = writeln!(
+            out,
+            "| Suppressed by VEX | {} |",
+            enrichment.vex_suppressed_count
         );
     }
     out.push('\n');
@@ -335,6 +363,94 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
         section_close(&mut out);
     }
 
+    if !enrichment.recently_published.is_empty() {
+        section_open(
+            &mut out,
+            "Recently published (added deps)",
+            enrichment.recently_published.len(),
+            None,
+        );
+        out.push_str(
+            "These newly added dependencies were published to their registry within the \
+             configured threshold (default 14 days). Recent publishes correlate with \
+             takeover swaps and namespace-reuse attacks. \
+             [Why this matters](https://metbcy.github.io/bomdrift/enrichers/registry.html)\n\n",
+        );
+        out.push_str("| Ecosystem | Name | Version | Published | Days |\n|---|---|---|---|---:|\n");
+        for f in &enrichment.recently_published {
+            let _ = writeln!(
+                out,
+                "| {} | {} | {} | {} | {} |",
+                f.component.ecosystem,
+                f.component.name,
+                f.component.version,
+                f.published_at,
+                f.days_old,
+            );
+        }
+        section_close(&mut out);
+    }
+
+    if !enrichment.deprecated.is_empty() {
+        section_open(
+            &mut out,
+            "Deprecated upstream",
+            enrichment.deprecated.len(),
+            None,
+        );
+        out.push_str(
+            "These dependencies are flagged deprecated or yanked by their package registry. \
+             [Why this matters](https://metbcy.github.io/bomdrift/enrichers/registry.html)\n\n",
+        );
+        out.push_str("| Ecosystem | Name | Version | Message |\n|---|---|---|---|\n");
+        for f in &enrichment.deprecated {
+            let _ = writeln!(
+                out,
+                "| {} | {} | {} | {} |",
+                f.component.ecosystem,
+                f.component.name,
+                f.component.version,
+                f.message.as_deref().unwrap_or("(deprecated upstream)"),
+            );
+        }
+        section_close(&mut out);
+    }
+
+    if !enrichment.maintainer_set_changed.is_empty() {
+        section_open(
+            &mut out,
+            "Maintainer set changed (npm)",
+            enrichment.maintainer_set_changed.len(),
+            None,
+        );
+        out.push_str(
+            "These npm dependencies have a different set of maintainers compared to the \
+             previous version. New publish-rights are a classic takeover-attack precursor. \
+             [Why this matters](https://metbcy.github.io/bomdrift/enrichers/registry.html)\n\n",
+        );
+        out.push_str("| Name | Before | After | Added | Removed |\n|---|---|---|---|---|\n");
+        for f in &enrichment.maintainer_set_changed {
+            let _ = writeln!(
+                out,
+                "| {} | {} | {} | {} | {} |",
+                f.after.name,
+                f.before.version,
+                f.after.version,
+                if f.added.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    f.added.join(", ")
+                },
+                if f.removed.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    f.removed.join(", ")
+                },
+            );
+        }
+        section_close(&mut out);
+    }
+
     write_footer(&mut out, &opts);
 
     out
@@ -390,17 +506,36 @@ fn write_footer(out: &mut String, opts: &Options) {
             );
         }
         Platform::GitLab => {
-            // GitLab issue creation uses `/-/issues/new` (the `-/` is the
-            // namespace separator GitLab inserts between the project URL
-            // and the issue tracker route). `issuable_template=` selects a
-            // saved description template if the project has one named
-            // `false-positive`; projects without that template still get
-            // a working "new issue" form.
             let _ = writeln!(
                 out,
                 "<sub>**False positive?** [Report it]({repo}/-/issues/new?issuable_template=false-positive) · \
                  **Suppress a finding?** Run `bomdrift baseline add <ID>` and commit \
                  `.bomdrift/baseline.json` to your MR branch · \
+                 [Docs](https://metbcy.github.io/bomdrift/)</sub>",
+            );
+        }
+        Platform::Bitbucket => {
+            // Bitbucket Cloud uses `/issues/new` (no labels query string).
+            // Comment-driven suppress is not in scope for v0.9 — point
+            // reviewers at the manual CLI flow.
+            let _ = writeln!(
+                out,
+                "<sub>**False positive?** [Report it]({repo}/issues/new) · \
+                 **Suppress a finding?** Run `bomdrift baseline add <ID>` and commit \
+                 `.bomdrift/baseline.json` to your PR branch · \
+                 [Docs](https://metbcy.github.io/bomdrift/)</sub>",
+            );
+        }
+        Platform::AzureDevOps => {
+            // Azure DevOps work items use the `/_workitems/create`
+            // route. `templateName` is honored when the project has a
+            // matching work-item template; projects without one still
+            // get the default form.
+            let _ = writeln!(
+                out,
+                "<sub>**False positive?** [Report it]({repo}/_workitems/create?templateName=false-positive) · \
+                 **Suppress a finding?** Run `bomdrift baseline add <ID>` and commit \
+                 `.bomdrift/baseline.json` to your PR branch · \
                  [Docs](https://metbcy.github.io/bomdrift/)</sub>",
             );
         }
@@ -515,6 +650,13 @@ fn write_one_vuln_row(out: &mut String, c: &Component, enrichment: &Enrichment) 
             }
             if r.kev {
                 s.push_str(" · **KEV**");
+            }
+            let key = format!("cve:{}:{}", c.purl.as_deref().unwrap_or(""), r.id);
+            if let Some(ann) = enrichment.vex_annotations.get(&key) {
+                s.push_str(&format!(" · VEX:{}", ann.status));
+                if let Some(j) = &ann.justification {
+                    s.push_str(&format!(" ({j})"));
+                }
             }
             s
         })
@@ -1253,6 +1395,51 @@ mod tests {
         );
         assert!(md.contains("/issues/new?labels=false-positive"));
         assert!(md.contains("/bomdrift suppress"));
+    }
+
+    #[test]
+    fn footer_renders_bitbucket_shape() {
+        let cs = ChangeSet {
+            added: vec![comp("a", "1.0", Ecosystem::Npm, None)],
+            ..Default::default()
+        };
+        let md = render_with_options(
+            &cs,
+            &Enrichment::default(),
+            Options {
+                repo_url: Some("https://bitbucket.org/team/proj".to_string()),
+                platform: Platform::Bitbucket,
+                ..Default::default()
+            },
+        );
+        assert!(
+            md.contains("https://bitbucket.org/team/proj/issues/new"),
+            "expected Bitbucket /issues/new URL; got:\n{md}"
+        );
+        assert!(md.contains("bomdrift baseline add"));
+        assert!(!md.contains("/bomdrift suppress"));
+    }
+
+    #[test]
+    fn footer_renders_azure_devops_shape() {
+        let cs = ChangeSet {
+            added: vec![comp("a", "1.0", Ecosystem::Npm, None)],
+            ..Default::default()
+        };
+        let md = render_with_options(
+            &cs,
+            &Enrichment::default(),
+            Options {
+                repo_url: Some("https://dev.azure.com/org/project/_git/repo".to_string()),
+                platform: Platform::AzureDevOps,
+                ..Default::default()
+            },
+        );
+        assert!(
+            md.contains("/_workitems/create?templateName=false-positive"),
+            "expected Azure DevOps work-item URL; got:\n{md}"
+        );
+        assert!(md.contains("bomdrift baseline add"));
     }
 
     #[test]

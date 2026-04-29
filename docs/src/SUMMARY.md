@@ -7,12 +7,15 @@
 - [Quickstart](./quickstart.md)
 - [GitHub Action](./github-action.md)
 - [GitLab CI](./gitlab-ci.md)
+- [Bitbucket Pipelines](./bitbucket.md)
+- [Azure DevOps Pipelines](./azure-devops.md)
 - [CLI reference](./cli-reference.md)
 
 # Output
 
 - [Output formats](./output-formats.md)
 - [SARIF + Code Scanning](./sarif.md)
+- [VEX](./vex.md)
 - [License policy](./license-policy.md)
 - [Baseline & suppression](./baseline.md)
 
@@ -25,6 +28,7 @@
 - [Typosquat detection](./enrichers/typosquat.md)
 - [Multi-major version jumps](./enrichers/version-jump.md)
 - [Maintainer age signal](./enrichers/maintainer-age.md)
+- [Registry metadata (npm/PyPI/crates.io)](./enrichers/registry.md)
 
 # Operations
 

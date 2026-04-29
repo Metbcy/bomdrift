@@ -1,0 +1,46 @@
+# Bitbucket Pipelines template for bomdrift.
+#
+# Required variables:
+#   - BOMDRIFT_API_TOKEN: App Password with `pullrequest:write` scope.
+
+image: rust:1.88
+
+definitions:
+  steps:
+    - step: &bomdrift-diff
+        name: bomdrift diff
+        caches:
+          - cargo
+        script:
+          - export BOMDRIFT_VERSION="0.9.0"
+          - apt-get update -qq && apt-get install -y -qq curl jq
+          - curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          - cargo install bomdrift --locked --version "$BOMDRIFT_VERSION"
+          - git fetch origin "$BITBUCKET_PR_DESTINATION_BRANCH"
+          - git worktree add ../before "origin/$BITBUCKET_PR_DESTINATION_BRANCH"
+          - syft dir:../before -o cyclonedx-json=before.cdx.json
+          - syft dir:. -o cyclonedx-json=after.cdx.json
+          - bomdrift diff before.cdx.json after.cdx.json --output markdown --platform bitbucket > comment.md
+          - echo "" >> comment.md
+          - echo "<!-- bomdrift:diff -->" >> comment.md
+          - REPO="$BITBUCKET_REPO_FULL_NAME"
+          - PR_ID="$BITBUCKET_PR_ID"
+          - API="https://api.bitbucket.org/2.0/repositories/$REPO/pullrequests/$PR_ID/comments"
+          - |
+            EXISTING=$(curl -s -u "x-token-auth:$BOMDRIFT_API_TOKEN" "$API?pagelen=100" \
+              | jq -r '.values[] | select(.content.raw | test("<!-- bomdrift:diff -->")) | .id' | head -n1)
+          - |
+            BODY=$(jq -Rs '{content:{raw: .}}' < comment.md)
+          - |
+            if [ -n "$EXISTING" ]; then
+              curl -s -u "x-token-auth:$BOMDRIFT_API_TOKEN" -X PUT -H "Content-Type: application/json" \
+                "$API/$EXISTING" -d "$BODY" >/dev/null
+            else
+              curl -s -u "x-token-auth:$BOMDRIFT_API_TOKEN" -X POST -H "Content-Type: application/json" \
+                "$API" -d "$BODY" >/dev/null
+            fi
+
+pipelines:
+  pull-requests:
+    "**":
+      - step: *bomdrift-diff

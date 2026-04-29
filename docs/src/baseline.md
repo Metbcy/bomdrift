@@ -145,6 +145,24 @@ bomdrift baseline add CVE-2026-12345 --path custom/baseline.json
 
 The command is idempotent — re-adding an existing ID is a no-op.
 
+### `--from-comment` (v0.9+)
+
+When the GitLab comment-suppress bridge (or any other webhook
+handler) hands you a raw note body, pass it via `--from-comment`
+and let bomdrift extract the directive:
+
+```bash
+bomdrift baseline add --from-comment "Looks fine. /bomdrift suppress GHSA-mwcw-c2x4-8c55 reason: vendor PR #42 already merged"
+```
+
+The flag accepts the entire comment body. bomdrift parses the first
+`/bomdrift suppress <ID>[ reason: <text>]` line, validates the ID
+shape, and either appends the entry (writing object-form when a
+reason is present) or exits non-zero with a clear stderr message
+when no directive is found. The grammar is identical to the GitHub
+`comment-suppress` sub-action — the two parsers are deliberately
+kept in lockstep.
+
 ## Workflow integration
 
 A typical CI pattern commits the baseline alongside the source code and

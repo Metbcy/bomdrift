@@ -8,6 +8,7 @@ pub mod model;
 pub mod parse;
 pub mod refresh;
 pub mod render;
+pub mod vex;
 
 use std::fs;
 use std::io::IsTerminal;
@@ -26,7 +27,7 @@ pub const FAIL_ON_EXIT_CODE: i32 = 2;
 
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Command::Diff(args) => run_diff(args),
+        Command::Diff(args) => run_diff(*args),
         Command::RefreshTyposquat(args) => refresh::run(args),
         Command::Baseline { action } => run_baseline(action),
         Command::Init(args) => run_init(args),
@@ -74,24 +75,49 @@ fn run_baseline(action: BaselineAction) -> Result<()> {
                 clock::parse_ymd(s)
                     .with_context(|| format!("--expires must be YYYY-MM-DD, got {s:?}"))?;
             }
+
+            // --from-comment overrides positional id/reason. Used by the
+            // GitLab webhook bridge (Phase L). Non-zero exit when the
+            // body has no directive — silent no-op would let mis-configured
+            // bridges look like they worked.
+            let (id, reason_owned) = if let Some(body) = &args.from_comment {
+                match baseline::parse_comment_directive(body)? {
+                    Some((id, reason)) => (id, reason),
+                    None => {
+                        eprintln!(
+                            "bomdrift: --from-comment body contained no `/bomdrift suppress <ID>` directive"
+                        );
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                let Some(id) = args.id.clone() else {
+                    eprintln!(
+                        "bomdrift baseline add: missing required ADVISORY_ID (use a positional argument or --from-comment <BODY>)"
+                    );
+                    std::process::exit(2);
+                };
+                (id, args.reason.clone())
+            };
+
             let outcome = baseline::add_suppression_full(
                 &args.path,
-                &args.id,
+                &id,
                 args.expires.as_deref(),
-                args.reason.as_deref(),
+                reason_owned.as_deref(),
             )?;
             match outcome {
                 baseline::AddOutcome::Added => {
                     eprintln!(
                         "bomdrift: added '{id}' to {path}",
-                        id = args.id.trim(),
+                        id = id.trim(),
                         path = args.path.display(),
                     );
                 }
                 baseline::AddOutcome::AlreadyPresent => {
                     eprintln!(
                         "bomdrift: '{id}' already present in {path}; no change",
-                        id = args.id.trim(),
+                        id = id.trim(),
                         path = args.path.display(),
                     );
                 }
@@ -176,10 +202,20 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
     };
     enrichment.license_violations = enrich::license::enrich(&cs, &license_policy);
 
+    // Registry-metadata enrichers (Phase K, v0.9). Best-effort — a
+    // registry timeout returns Ok with no findings.
+    if !args.no_registry {
+        let findings = enrich::registry::enrich(&cs, args.recently_published_days);
+        enrichment.recently_published = findings.recently_published;
+        enrichment.deprecated = findings.deprecated;
+        enrichment.maintainer_set_changed = findings.maintainer_set_changed;
+    }
+
     // Apply the baseline AFTER all enrichers run — suppression operates on
     // the realized finding set, not on intermediate inputs. This keeps the
     // baseline file format stable as new enrichers are added: a new finding
     // type that the baseline doesn't know about simply isn't suppressed.
+    let mut baseline_entries: Vec<crate::baseline::BaselineEntry> = Vec::new();
     if let Some(path) = &args.baseline {
         let baseline = baseline::Baseline::load(path)?;
         for ent in &baseline.expired_entries {
@@ -199,7 +235,50 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
                     .unwrap_or_default(),
             );
         }
+        baseline_entries = baseline.entries.clone();
         baseline::apply(&mut cs, &mut enrichment, &baseline);
+    }
+
+    // VEX consumption (Phase G, v0.9). Applied AFTER baseline so VEX
+    // statements operate on the post-baseline view — this matches what
+    // a downstream tool would see and avoids double-counting "already
+    // suppressed" findings in the VEX-suppressed tally.
+    if !args.vex.is_empty() {
+        match vex::load(&args.vex) {
+            Ok(stmts) => {
+                let idx = vex::VexIndex::build(stmts);
+                vex::apply(&mut enrichment, &idx);
+            }
+            Err(err) => {
+                eprintln!("warning: VEX load failed, continuing without VEX filtering: {err:#}");
+            }
+        }
+    }
+
+    // VEX emission (Phase H, v0.9). Writes a single OpenVEX 0.2.0 doc
+    // to the requested path, covering baseline-suppressed entries and
+    // un-suppressed findings. Byte-deterministic when SOURCE_DATE_EPOCH
+    // is set.
+    if let Some(path) = &args.emit_vex {
+        let author = args
+            .vex_author
+            .clone()
+            .or_else(|| args.repo_url.clone())
+            .or_else(|| std::env::var("BOMDRIFT_REPO_URL").ok())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "bomdrift".to_string());
+        let default_just = args
+            .vex_default_justification
+            .clone()
+            .unwrap_or_else(|| "vulnerable_code_not_in_execute_path".to_string());
+        let opts = vex::EmitOptions {
+            author: &author,
+            default_justification: &default_just,
+            baseline_entries: &baseline_entries,
+        };
+        let body = vex::emit(&cs, &enrichment, &opts);
+        std::fs::write(path, body)
+            .with_context(|| format!("writing --emit-vex {}", path.display()))?;
     }
 
     // Calibration tap. Off by default; opt-in via `--debug-calibration`.
@@ -230,17 +309,22 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
         .clone()
         .or_else(|| std::env::var("BOMDRIFT_REPO_URL").ok())
         .or_else(|| std::env::var("CI_PROJECT_URL").ok())
+        .or_else(|| std::env::var("BITBUCKET_GIT_HTTP_ORIGIN").ok())
+        .or_else(|| std::env::var("BUILD_REPOSITORY_URI").ok())
         .filter(|s| !s.is_empty());
 
     // Platform precedence: explicit `--platform` (or `[diff] platform`
     // in `.bomdrift.toml`, already merged into `args.platform`) wins;
-    // otherwise auto-detect from CI env. `GITLAB_CI=true` is GitLab's
-    // canonical CI marker — set unconditionally on every job in every
-    // GitLab pipeline. Fall through to `Platform::GitHub` (the default)
-    // so existing GitHub Action consumers see no behavior change.
+    // otherwise auto-detect from CI env. Detection order: GitLab
+    // (`GITLAB_CI=true`), Bitbucket (`BITBUCKET_BUILD_NUMBER`), Azure
+    // DevOps (`TF_BUILD`), then default GitHub.
     let platform = args.platform.unwrap_or_else(|| {
         if std::env::var("GITLAB_CI").is_ok_and(|v| v == "true") {
             crate::cli::Platform::GitLab
+        } else if std::env::var("BITBUCKET_BUILD_NUMBER").is_ok() {
+            crate::cli::Platform::Bitbucket
+        } else if std::env::var("TF_BUILD").is_ok() {
+            crate::cli::Platform::AzureDevOps
         } else {
             crate::cli::Platform::GitHub
         }
@@ -329,6 +413,8 @@ pub fn tripped(cs: &ChangeSet, e: &Enrichment, threshold: FailOn) -> bool {
         FailOn::LicenseChange => !cs.license_changed.is_empty(),
         FailOn::Kev => any_kev(e),
         FailOn::LicenseViolation => !e.license_violations.is_empty(),
+        FailOn::RecentlyPublished => !e.recently_published.is_empty(),
+        FailOn::Deprecated => !e.deprecated.is_empty(),
         FailOn::Any => e.has_findings() || !cs.license_changed.is_empty() || any_kev(e),
     }
 }
@@ -467,6 +553,42 @@ fn write_calibration_lines<W: std::io::Write>(
                 crate::enrich::LicenseViolationKind::Ambiguous => "ambiguous",
                 crate::enrich::LicenseViolationKind::NotAllowed => "not-allowed",
             }),
+            format,
+        );
+    }
+    for f in &e.recently_published {
+        write_calibration_row(
+            out,
+            "recently-published",
+            f.component
+                .purl
+                .as_deref()
+                .unwrap_or(f.component.name.as_str()),
+            CalibrationScore::Int(f.days_old),
+            CalibrationThreshold::Int(crate::enrich::registry::MIN_PUBLISHED_AGE_DAYS),
+            format,
+        );
+    }
+    for f in &e.deprecated {
+        write_calibration_row(
+            out,
+            "deprecated",
+            f.component
+                .purl
+                .as_deref()
+                .unwrap_or(f.component.name.as_str()),
+            CalibrationScore::Text(f.message.as_deref().unwrap_or("(deprecated)")),
+            CalibrationThreshold::Text("any"),
+            format,
+        );
+    }
+    for f in &e.maintainer_set_changed {
+        write_calibration_row(
+            out,
+            "maintainer-set-changed",
+            f.after.purl.as_deref().unwrap_or(f.after.name.as_str()),
+            CalibrationScore::Int((f.added.len() + f.removed.len()) as i64),
+            CalibrationThreshold::Int(1),
             format,
         );
     }

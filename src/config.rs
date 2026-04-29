@@ -57,6 +57,16 @@ pub struct DiffConfig {
     pub debug_calibration: Option<bool>,
     pub debug_calibration_format: Option<DebugFormat>,
     pub output_file: Option<PathBuf>,
+    /// VEX `author` field for `--emit-vex`. Falls back to `repo_url`,
+    /// then to the literal `"bomdrift"`.
+    pub vex_author: Option<String>,
+    /// Default OpenVEX justification when an entry doesn't supply one.
+    /// Defaults to `"vulnerable_code_not_in_execute_path"`.
+    pub vex_default_justification: Option<String>,
+    /// Skip registry-metadata enrichers (npm/PyPI/crates.io). v0.9+.
+    pub no_registry: Option<bool>,
+    /// Override the default 14-day recently-published threshold. v0.9+.
+    pub recently_published_days: Option<i64>,
 }
 
 pub fn apply_diff_config(args: &mut DiffArgs) -> Result<()> {
@@ -131,6 +141,16 @@ fn apply_loaded_diff_config(args: &mut DiffArgs, config: Config) {
     if args.output_file.is_none() {
         args.output_file = diff.output_file;
     }
+    if args.vex_author.is_none() {
+        args.vex_author = diff.vex_author.filter(|s| !s.is_empty());
+    }
+    if args.vex_default_justification.is_none() {
+        args.vex_default_justification = diff.vex_default_justification.filter(|s| !s.is_empty());
+    }
+    args.no_registry |= diff.no_registry.unwrap_or(false);
+    if args.recently_published_days.is_none() {
+        args.recently_published_days = diff.recently_published_days;
+    }
 
     // [license] block: CLI flags override (not merge) when set. Mirrors
     // Dependency Review Action semantics so users moving between bomdrift
@@ -199,6 +219,12 @@ mod tests {
             allow_licenses: Vec::new(),
             deny_licenses: Vec::new(),
             allow_ambiguous_licenses: false,
+            vex: Vec::new(),
+            emit_vex: None,
+            vex_author: None,
+            vex_default_justification: None,
+            no_registry: false,
+            recently_published_days: None,
         }
     }
 

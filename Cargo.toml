@@ -1,6 +1,6 @@
 [package]
 name = "bomdrift"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 rust-version = "1.88"
 description = "SBOM diff with supply-chain risk signals (CVEs, typosquats, maintainer-age)."
@@ -33,6 +33,7 @@ directories = "6"
 toml = "0.8"
 time = { version = "0.3", default-features = false, features = ["serde", "parsing", "formatting", "macros", "std"] }
 sha2 = { version = "0.10", default-features = false }
+spdx = { version = "0.10", default-features = false }
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["html_reports"] }

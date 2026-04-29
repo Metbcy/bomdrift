@@ -151,6 +151,38 @@ fn rules() -> Value {
              advisory heuristic).",
             "https://metbcy.github.io/bomdrift/license-policy.html",
         ),
+        rule(
+            "bomdrift.recently-published",
+            "recently-published",
+            "Newly added component was published to its registry recently",
+            "The component's most recent registry publish timestamp is \
+             younger than the configured threshold (default 14 days). \
+             Recent publishes correlate with takeover swaps and \
+             namespace-reuse attacks. Always informational severity \
+             (`warning`).",
+            "https://metbcy.github.io/bomdrift/enrichers/registry.html",
+        ),
+        rule(
+            "bomdrift.deprecated",
+            "deprecated",
+            "Component is deprecated or yanked upstream",
+            "The component's package registry (npm / PyPI / crates.io) \
+             marks this version (or the package) as deprecated, yanked, \
+             or inactive. Severity `error` because the upstream signal \
+             is unambiguous.",
+            "https://metbcy.github.io/bomdrift/enrichers/registry.html",
+        ),
+        rule(
+            "bomdrift.maintainer-set-changed",
+            "maintainer-set-changed",
+            "npm package's maintainer set changed across the version bump",
+            "The set of npm maintainers listed for the new version \
+             differs from the maintainer set listed for the old \
+             version. New maintainers gaining publish rights is a \
+             classic takeover-attack precursor (cf. xz / Jia Tan). \
+             Severity `warning`.",
+            "https://metbcy.github.io/bomdrift/enrichers/registry.html",
+        ),
     ])
 }
 
@@ -223,6 +255,13 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
             }
             if advisory.kev {
                 props.insert("kev".into(), Value::Bool(true));
+            }
+            let vex_key = format!("cve:{purl_str}:{}", advisory.id);
+            if let Some(ann) = e.vex_annotations.get(&vex_key) {
+                props.insert("vexStatus".into(), Value::String(ann.status.clone()));
+                if let Some(j) = &ann.justification {
+                    props.insert("vexJustification".into(), Value::String(j.clone()));
+                }
             }
             out.push(json!({
                 "ruleId": "bomdrift.cve",
@@ -412,6 +451,90 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
         }));
     }
 
+    // ---- bomdrift.recently-published ----
+    for f in &e.recently_published {
+        let name = &f.component.name;
+        let purl_or_name = f.component.purl.as_deref().unwrap_or(name);
+        let fp = fingerprint(&["bomdrift.recently-published", purl_or_name, &f.published_at]);
+        out.push(json!({
+            "ruleId": "bomdrift.recently-published",
+            "level": "warning",
+            "message": {
+                "text": format!(
+                    "`{name}` was published {} day(s) ago ({}). Recent publishes correlate with takeover swaps.",
+                    f.days_old, f.published_at,
+                ),
+            },
+            "locations": [synthetic_location()],
+            "partialFingerprints": { "primaryHash/v1": fp },
+            "properties": {
+                "purl":         f.component.purl,
+                "name":         name,
+                "version":      f.component.version,
+                "publishedAt":  f.published_at,
+                "daysOld":      f.days_old,
+            },
+        }));
+    }
+
+    // ---- bomdrift.deprecated ----
+    for f in &e.deprecated {
+        let name = &f.component.name;
+        let purl_or_name = f.component.purl.as_deref().unwrap_or(name);
+        let msg = f.message.as_deref().unwrap_or("(deprecated upstream)");
+        let fp = fingerprint(&["bomdrift.deprecated", purl_or_name, msg]);
+        out.push(json!({
+            "ruleId": "bomdrift.deprecated",
+            "level": "error",
+            "message": {
+                "text": format!("`{name}` is deprecated upstream: {msg}"),
+            },
+            "locations": [synthetic_location()],
+            "partialFingerprints": { "primaryHash/v1": fp },
+            "properties": {
+                "purl":    f.component.purl,
+                "name":    name,
+                "version": f.component.version,
+                "message": msg,
+            },
+        }));
+    }
+
+    // ---- bomdrift.maintainer-set-changed ----
+    for f in &e.maintainer_set_changed {
+        let name = &f.after.name;
+        let purl_or_name = f.after.purl.as_deref().unwrap_or(name);
+        let added = f.added.join(",");
+        let removed = f.removed.join(",");
+        let fp = fingerprint(&[
+            "bomdrift.maintainer-set-changed",
+            purl_or_name,
+            &added,
+            &removed,
+        ]);
+        out.push(json!({
+            "ruleId": "bomdrift.maintainer-set-changed",
+            "level": "warning",
+            "message": {
+                "text": format!(
+                    "`{name}` maintainer set changed: +{} / -{}.",
+                    if added.is_empty() { "(none)".into() } else { added.clone() },
+                    if removed.is_empty() { "(none)".into() } else { removed.clone() },
+                ),
+            },
+            "locations": [synthetic_location()],
+            "partialFingerprints": { "primaryHash/v1": fp },
+            "properties": {
+                "purl":    f.after.purl,
+                "name":    name,
+                "before":  f.before.version,
+                "after":   f.after.version,
+                "added":   f.added,
+                "removed": f.removed,
+            },
+        }));
+    }
+
     Value::Array(out)
 }
 
@@ -484,6 +607,9 @@ mod tests {
                 "bomdrift.young-maintainer",
                 "bomdrift.license-change",
                 "bomdrift.license-violation",
+                "bomdrift.recently-published",
+                "bomdrift.deprecated",
+                "bomdrift.maintainer-set-changed",
             ],
             "rule IDs are stable public API — order also stable for byte-determinism",
         );

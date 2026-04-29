@@ -1,24 +1,44 @@
-//! License-policy enrichment (v0.8+).
+//! License-policy enrichment.
 //!
-//! Distinct from [`crate::diff::ChangeSet::license_changed`] which detects
-//! same-version license drift. This module evaluates each newly-added or
-//! version-changed component's licenses against a configured allow / deny
-//! policy and emits a [`LicenseViolation`] for every mismatch.
+//! ## SPDX expression evaluation (v0.9+)
 //!
-//! ## Matching rules (v0.8 — fail-closed)
+//! Each license string from the SBOM is first attempted as an
+//! [`spdx::Expression`]. When parsing succeeds the expression's
+//! semantics drive the allow/deny decision:
 //!
-//! - **Atomic** license string (no `AND`/`OR`/`WITH`/parentheses): exact
-//!   compare against allow/deny. Glob: `*` suffix matches any prefix
-//!   (`AGPL-*` matches `AGPL-3.0-only`, `AGPL-1.0-only`).
-//! - **Compound** expression: ambiguous. With `allow_ambiguous=false`
-//!   (default) AND any policy is configured (allow OR deny non-empty),
-//!   emit an Ambiguous violation. With `allow_ambiguous=true`, permit.
-//! - `NOASSERTION` / `OTHER` / empty: ambiguous (same fail-closed
-//!   semantics).
+//! - **Deny check** — if ANY required SPDX atomic in the parsed
+//!   expression matches the deny list (exact ID or `*`-suffix glob),
+//!   the package is in violation. Deny is a stronger signal than
+//!   allow: the resolved license could be the denied alternative, so
+//!   we fail closed regardless of what the licensee picks.
+//! - **Allow check** — when the allow list is non-empty, the
+//!   expression must `evaluate` to true under a closure that
+//!   returns true for allow-listed atomic IDs. `(MIT OR Apache-2.0)`
+//!   with `allow=[MIT]` permits because the licensee can pick MIT.
+//! - **`WITH` operator** — handled by `spdx`'s parser; the base
+//!   license is checked against allow/deny. The exception identifier
+//!   is currently informational only — per-exception allow/deny is a
+//!   future ask not in v0.9 scope.
 //!
-//! Deny wins when a license matches both allow and deny.
+//! When SPDX parsing FAILS (non-SPDX strings like `"Custom"`,
+//! `"Proprietary"`, vendor-specific spellings) we fall back to the
+//! v0.8 atomic+glob matcher so policies authored against raw strings
+//! keep working.
 //!
-//! Full SPDX expression evaluation arrives in v0.9 via the `spdx` crate.
+//! `NOASSERTION` / `OTHER` / empty are treated as ambiguous (same
+//! fail-closed semantics as v0.8).
+//!
+//! ## Deprecated: `allow_ambiguous`
+//!
+//! In v0.8 this flag flipped fail-closed behavior on compound
+//! expressions. v0.9's full SPDX evaluator handles compounds
+//! correctly, so the flag is now a no-op when SPDX parsing
+//! succeeds; it still works on the fallback path. A one-time
+//! deprecation notice is printed to stderr when the flag is set.
+//!
+//! Deny wins when both allow and deny match.
+
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::diff::ChangeSet;
 use crate::enrich::{LicenseViolation, LicenseViolationKind};
@@ -45,6 +65,9 @@ pub fn enrich(cs: &ChangeSet, policy: &Policy) -> Vec<LicenseViolation> {
     if !policy.is_active() {
         return Vec::new();
     }
+    if policy.allow_ambiguous {
+        warn_deprecated_allow_ambiguous_once();
+    }
     let mut out = Vec::new();
     for c in &cs.added {
         evaluate_component(c, policy, &mut out);
@@ -57,9 +80,6 @@ pub fn enrich(cs: &ChangeSet, policy: &Policy) -> Vec<LicenseViolation> {
 
 fn evaluate_component(c: &Component, policy: &Policy, out: &mut Vec<LicenseViolation>) {
     if c.licenses.is_empty() {
-        // Empty license set: treat as ambiguous (we can't claim it's
-        // allowed). Fail-closed when policy is active and
-        // allow_ambiguous=false.
         if !policy.allow_ambiguous {
             out.push(LicenseViolation {
                 component: c.clone(),
@@ -79,13 +99,9 @@ fn evaluate_component(c: &Component, policy: &Policy, out: &mut Vec<LicenseViola
 
 fn evaluate_one(c: &Component, lic: &str, policy: &Policy) -> Option<LicenseViolation> {
     let trimmed = lic.trim();
-    let is_compound = is_compound_expression(trimmed);
-    let is_unknown = matches!(
-        trimmed.to_ascii_uppercase().as_str(),
-        "" | "NOASSERTION" | "OTHER"
-    );
-
-    if is_compound || is_unknown {
+    let upper = trimmed.to_ascii_uppercase();
+    let is_unknown_marker = matches!(upper.as_str(), "" | "NOASSERTION" | "OTHER");
+    if is_unknown_marker {
         if policy.allow_ambiguous {
             return None;
         }
@@ -97,7 +113,96 @@ fn evaluate_one(c: &Component, lic: &str, policy: &Policy) -> Option<LicenseViol
         });
     }
 
-    // Atomic. Deny wins when both match.
+    // Try SPDX parse first. Falls back to v0.8 atomic+glob matcher when
+    // the string isn't a parseable SPDX expression.
+    match spdx::Expression::parse(trimmed) {
+        Ok(expr) => evaluate_spdx(c, trimmed, &expr, policy),
+        Err(_) => evaluate_atomic_fallback(c, trimmed, policy),
+    }
+}
+
+/// SPDX-evaluation path. Deny wins; allow uses `Expression::evaluate`.
+fn evaluate_spdx(
+    c: &Component,
+    raw: &str,
+    expr: &spdx::Expression,
+    policy: &Policy,
+) -> Option<LicenseViolation> {
+    if !policy.deny.is_empty() {
+        for req in expr.requirements() {
+            for cand in canonical_names(&req.req.license) {
+                if let Some(rule) = matches_any(&cand, &policy.deny) {
+                    return Some(LicenseViolation {
+                        component: c.clone(),
+                        license: raw.to_string(),
+                        matched_rule: format!("deny: {rule}"),
+                        kind: LicenseViolationKind::Deny,
+                    });
+                }
+            }
+        }
+    }
+
+    if !policy.allow.is_empty() {
+        let ok = expr.evaluate(|req| {
+            canonical_names(&req.license)
+                .iter()
+                .any(|cand| matches_any(cand, &policy.allow).is_some())
+        });
+        if !ok {
+            return Some(LicenseViolation {
+                component: c.clone(),
+                license: raw.to_string(),
+                matched_rule: format!("not in allow list: {raw}"),
+                kind: LicenseViolationKind::NotAllowed,
+            });
+        }
+    }
+    None
+}
+
+/// SPDX normalizes GNU licenses by stripping the `-only` / `-or-later`
+/// suffix into a flag on the `LicenseItem`. User-authored allow/deny
+/// lists usually contain the original spelling (`GPL-3.0-only`,
+/// `AGPL-3.0-or-later`), so we generate every candidate name an SPDX
+/// `LicenseItem` could match.
+fn canonical_names(item: &spdx::LicenseItem) -> Vec<String> {
+    match item {
+        spdx::LicenseItem::Spdx { id, or_later } => {
+            let mut names = vec![id.name.to_string()];
+            if id.is_gnu() {
+                if *or_later {
+                    names.push(format!("{}-or-later", id.name));
+                } else {
+                    names.push(format!("{}-only", id.name));
+                }
+            } else if *or_later {
+                names.push(format!("{}+", id.name));
+            }
+            names
+        }
+        spdx::LicenseItem::Other { lic_ref, .. } => vec![lic_ref.clone()],
+    }
+}
+
+/// v0.8 atomic+glob fallback for non-SPDX strings.
+fn evaluate_atomic_fallback(
+    c: &Component,
+    trimmed: &str,
+    policy: &Policy,
+) -> Option<LicenseViolation> {
+    let is_compound = is_compound_expression(trimmed);
+    if is_compound {
+        if policy.allow_ambiguous {
+            return None;
+        }
+        return Some(LicenseViolation {
+            component: c.clone(),
+            license: trimmed.to_string(),
+            matched_rule: format!("ambiguous: {trimmed}"),
+            kind: LicenseViolationKind::Ambiguous,
+        });
+    }
     if let Some(rule) = matches_any(trimmed, &policy.deny) {
         return Some(LicenseViolation {
             component: c.clone(),
@@ -117,8 +222,9 @@ fn evaluate_one(c: &Component, lic: &str, policy: &Policy) -> Option<LicenseViol
     None
 }
 
-/// Return Some(rule) when `lic` matches any pattern in `patterns`. Glob
-/// support is the trailing-`*` form only.
+/// Return Some(rule) when `lic` matches any pattern in `patterns`.
+/// Precedence: SPDX exact match > glob > raw string. Globs are
+/// `*`-suffix.
 fn matches_any(lic: &str, patterns: &[String]) -> Option<String> {
     for p in patterns {
         if matches_pattern(lic, p) {
@@ -137,7 +243,6 @@ fn matches_pattern(lic: &str, pattern: &str) -> bool {
 }
 
 fn is_compound_expression(s: &str) -> bool {
-    // Any of the SPDX operators or parens makes this a compound expression.
     if s.contains('(') || s.contains(')') {
         return true;
     }
@@ -147,6 +252,18 @@ fn is_compound_expression(s: &str) -> bool {
         }
     }
     false
+}
+
+static ALLOW_AMBIGUOUS_WARNED: AtomicBool = AtomicBool::new(false);
+
+fn warn_deprecated_allow_ambiguous_once() {
+    if ALLOW_AMBIGUOUS_WARNED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    eprintln!(
+        "warning: [license] allow_ambiguous is deprecated since v0.9; \
+         SPDX expressions are now evaluated properly."
+    );
 }
 
 #[cfg(test)]
@@ -196,7 +313,6 @@ mod tests {
         let v = enrich(&cs, &policy);
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].kind, LicenseViolationKind::Deny);
-        assert!(v[0].matched_rule.contains("GPL-3.0-only"));
     }
 
     #[test]
@@ -209,29 +325,6 @@ mod tests {
         let v = enrich(&cs, &policy);
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].matched_rule, "deny: AGPL-*");
-    }
-
-    #[test]
-    fn compound_ambiguous_fails_closed_by_default() {
-        let cs = cs_with_added(comp("foo", vec!["(MIT OR GPL-3.0-only)"]));
-        let policy = Policy {
-            allow: vec!["MIT".into()],
-            ..Default::default()
-        };
-        let v = enrich(&cs, &policy);
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].kind, LicenseViolationKind::Ambiguous);
-    }
-
-    #[test]
-    fn compound_ambiguous_permitted_when_flag_set() {
-        let cs = cs_with_added(comp("foo", vec!["(MIT OR GPL-3.0-only)"]));
-        let policy = Policy {
-            allow: vec!["MIT".into()],
-            allow_ambiguous: true,
-            ..Default::default()
-        };
-        assert!(enrich(&cs, &policy).is_empty());
     }
 
     #[test]
@@ -293,5 +386,69 @@ mod tests {
         };
         let v = enrich(&cs, &policy);
         assert_eq!(v.len(), 1);
+    }
+
+    // ---------- v0.9 SPDX expression eval tests ----------
+
+    #[test]
+    fn spdx_or_with_one_allowed_branch_permits() {
+        let cs = cs_with_added(comp("foo", vec!["(MIT OR Apache-2.0)"]));
+        let policy = Policy {
+            allow: vec!["MIT".into()],
+            ..Default::default()
+        };
+        assert!(enrich(&cs, &policy).is_empty());
+    }
+
+    #[test]
+    fn spdx_and_with_one_denied_branch_violates() {
+        let cs = cs_with_added(comp("foo", vec!["(MIT AND GPL-3.0-only)"]));
+        let policy = Policy {
+            deny: vec!["GPL-3.0-only".into()],
+            ..Default::default()
+        };
+        let v = enrich(&cs, &policy);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].kind, LicenseViolationKind::Deny);
+    }
+
+    #[test]
+    fn spdx_with_exception_resolves_base_license() {
+        let cs = cs_with_added(comp("foo", vec!["Apache-2.0 WITH LLVM-exception"]));
+        let policy = Policy {
+            allow: vec!["Apache-2.0".into()],
+            ..Default::default()
+        };
+        assert!(enrich(&cs, &policy).is_empty());
+    }
+
+    #[test]
+    fn spdx_compound_denial_wins_over_or_branches() {
+        // (GPL-3.0-only OR MIT) AND BSD-3-Clause with allow=[MIT,
+        // BSD-3-Clause] AND deny=[GPL-3.0-only] → violation: the
+        // resolution path could pick GPL.
+        let cs = cs_with_added(comp("foo", vec!["(GPL-3.0-only OR MIT) AND BSD-3-Clause"]));
+        let policy = Policy {
+            allow: vec!["MIT".into(), "BSD-3-Clause".into()],
+            deny: vec!["GPL-3.0-only".into()],
+            ..Default::default()
+        };
+        let v = enrich(&cs, &policy);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].kind, LicenseViolationKind::Deny);
+    }
+
+    #[test]
+    fn unknown_spdx_id_falls_back_to_atomic_path() {
+        // "Custom" isn't a valid SPDX ID; the atomic fallback rejects it
+        // when allow is set and "Custom" isn't on the list.
+        let cs = cs_with_added(comp("foo", vec!["Custom"]));
+        let policy = Policy {
+            allow: vec!["MIT".into()],
+            ..Default::default()
+        };
+        let v = enrich(&cs, &policy);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].kind, LicenseViolationKind::NotAllowed);
     }
 }

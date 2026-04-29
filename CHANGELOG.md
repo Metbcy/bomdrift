@@ -7,6 +7,107 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-05-01
+
+The "interoperability + breadth" milestone. v0.9 adds VEX (Vulnerability
+Exploitability eXchange) consumption + emission, full SPDX expression
+evaluation, multi-SCM templates (Bitbucket Pipelines + Azure DevOps),
+registry-metadata enrichers (npm/PyPI/crates.io), and a security-reviewed
+GitLab comment-driven suppression bridge.
+
+### Added
+
+- **VEX consume (`--vex <path>`, repeatable).** Auto-detects OpenVEX
+  0.2.0 vs CycloneDX VEX 1.6 per file. Statements with status
+  `not_affected` / `fixed` suppress matching findings (counted in the
+  new "Suppressed by VEX" markdown summary row); `under_investigation`
+  annotates with a `VEX:` badge in markdown and
+  `properties.vexStatus` in SARIF; `affected` annotates as a no-op.
+  Match keys are `(VulnRef.id OR alias, purl_with_version)` with a
+  documented synthetic-id convention for non-CVE finding kinds
+  (`bomdrift.<kind>:<purl>:<discriminator>`).
+- **VEX emit (`--emit-vex <path>`).** Writes a single OpenVEX 0.2.0
+  document covering baseline-suppressed entries (status from the
+  per-entry `vex_status`, defaulting to `under_investigation` —
+  baseline ≠ "not affected", never auto-promoted) and un-suppressed
+  findings (status `affected` with `status_notes` describing the
+  finding kind). New baseline fields `vex_status` and
+  `vex_justification`. New `[diff] vex_author` and
+  `[diff] vex_default_justification` config keys.
+- **Full SPDX expression evaluator** via the `spdx = "0.10"` crate.
+  Replaces v0.8's atomic+glob matcher: `(MIT OR Apache-2.0)` with
+  `allow=[MIT]` permits; `(MIT AND GPL-3.0-only)` with
+  `deny=[GPL-3.0-only]` violates; `Apache-2.0 WITH LLVM-exception`
+  parses cleanly (base license checked, exception identity
+  informational only). Non-SPDX strings fall back to the v0.8
+  atomic+glob path. `allow_ambiguous` is deprecated with a one-time
+  stderr warning.
+- **Bitbucket Pipelines + Azure DevOps Pipelines** support.
+  `Platform::Bitbucket` and `Platform::AzureDevOps` variants on the
+  CLI; auto-detection via `BITBUCKET_BUILD_NUMBER` and `TF_BUILD`
+  envs; `BITBUCKET_GIT_HTTP_ORIGIN` and `BUILD_REPOSITORY_URI`
+  honored as `--repo-url` fallbacks. Per-platform footer URL shapes
+  (`/issues/new` for Bitbucket; `/_workitems/create` for Azure
+  DevOps). Drop-in templates with READMEs in
+  `examples/bitbucket-pipelines/` and `examples/azure-devops/`.
+- **Registry-metadata enrichers (`src/enrich/registry.rs`).** Three
+  best-effort fetchers — npm, PyPI, crates.io — with disk cache at
+  `<XDG_CACHE>/bomdrift/registry/<eco>/<pkg>.json` (24h TTL,
+  atomic temp-file + rename). Three new finding kinds:
+  `RecentlyPublished` (default <14d threshold, tunable via
+  `--recently-published-days`), `Deprecated` (npm
+  `versions[].deprecated`, PyPI `info.yanked` + Inactive
+  classifiers, crates.io `versions[].yanked`), and
+  `MaintainerSetChanged` (npm only — PyPI/crates.io don't expose
+  per-version maintainers cleanly). New `--no-registry` flag and
+  `[diff] no_registry = true` config key. New `--fail-on
+  recently-published` and `--fail-on deprecated` thresholds. New
+  SARIF rules `bomdrift.recently-published`, `bomdrift.deprecated`,
+  `bomdrift.maintainer-set-changed` with stable
+  `partialFingerprints.primaryHash/v1`.
+- **GitLab comment-driven suppress.** `bomdrift baseline add
+  --from-comment <BODY>` parses the raw note body, extracts the
+  first `/bomdrift suppress <ID>[ reason: <text>]` directive, and
+  fails non-zero with a clear stderr message when no directive is
+  found (so a misconfigured webhook bridge fails loudly).
+  `examples/gitlab-ci/comment-bridge/` ships a Cloudflare Worker
+  reference implementation enforcing five guards: webhook secret
+  (constant-time compare), event-type filter, project-ID
+  allowlist, commenter access_level >= 30, and an MR-context
+  guard that rejects fork-MR exfiltration. Vercel/Netlify/Lambda
+  port note included.
+- **Explicit non-goals + pair-with recommendations** in README,
+  STATUS, and the roadmap. Reachability, tarball static analysis,
+  auto-fix PR generation, continuous monitoring, container
+  scanning, SAST/secrets, risk-score dashboards, and closed-source
+  advisory feeds are deliberately out of scope; each is paired with
+  a recommended complementary tool.
+
+### Changed
+
+- OSV cache schema extended with `aliases: Vec<String>` so cache
+  hits no longer drop alias data. Old cache entries without the
+  field deserialize with an empty vec (graceful migration).
+- `Command::Diff` argument is now boxed (`Box<DiffArgs>`) to satisfy
+  clippy's large-enum-variant lint after the v0.9 flag growth.
+  Internal-only change; no user-facing impact.
+- `BaselineAddArgs.id` becomes optional (`Option<String>`) to allow
+  `--from-comment` invocations without a positional ID. Existing
+  positional callers are unchanged.
+
+### Scope notes (deferred)
+
+- **Per-exception SPDX allow/deny** — the WITH-exception identifier
+  is currently informational only; allow/deny narrows to the base
+  license.
+- **PyPI / crates.io maintainer-set-changed** — blocked on per-version
+  maintainer data in upstream APIs.
+- **Bitbucket / Azure DevOps comment-driven suppression** — only the
+  diff path ships in v0.9; comment-suppress is GitHub-only (and
+  GitLab via the bridge).
+- **VEX vocabulary beyond OpenVEX's 8 justifications** — bomdrift
+  uses the spec enum verbatim; no extension yet.
+
 ## [0.8.0] - 2026-04-29
 
 The "supply-chain hardening" milestone. v0.8 finishes SARIF for GitHub
