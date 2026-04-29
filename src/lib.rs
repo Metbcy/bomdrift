@@ -40,7 +40,7 @@ fn run_diff(args: DiffArgs) -> Result<()> {
     } else {
         // OSV enrichment is best-effort. Network failures must not block the diff
         // from rendering — a PR review is still useful without CVE data.
-        match enrich::osv::enrich(&cs) {
+        match enrich::osv::enrich_cached(&cs, args.no_osv_cache) {
             Ok(e) => e,
             Err(err) => {
                 eprintln!("warning: OSV enrichment failed, continuing without it: {err:#}");

@@ -9,6 +9,7 @@
 //! output (see `crate::render::json`). Every finding type added here MUST
 //! keep that contract or the JSON renderer will fail to compile.
 
+pub mod cache;
 pub mod maintainer;
 pub mod osv;
 pub mod typosquat;
@@ -16,7 +17,7 @@ pub mod version_jump;
 
 use std::collections::HashMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use maintainer::MaintainerAgeFinding;
 use typosquat::TyposquatFinding;
@@ -97,7 +98,7 @@ pub struct VulnRef {
 ///    [`Severity::None`] when missing.)
 /// 3. [`Severity::None`] otherwise. The advisory still surfaces; it just
 ///    doesn't trip `--fail-on critical-cve`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Severity {
     /// No severity available (offline, no GHSA tag, etc). Renders as `NONE`.

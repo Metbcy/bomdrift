@@ -74,6 +74,12 @@ pub struct DiffArgs {
     /// Skip OSV.dev CVE enrichment (offline mode, faster, deterministic).
     #[arg(long)]
     pub no_osv: bool,
+    /// Skip the on-disk OSV severity cache (`<XDG_CACHE_HOME>/bomdrift/osv/`).
+    /// Useful for reproducibility audits and the rare case where a stale
+    /// cached severity (within the 24-hour TTL) is actively misleading. Has
+    /// no effect when `--no-osv` is set.
+    #[arg(long)]
+    pub no_osv_cache: bool,
     /// Skip the maintainer-age enricher (no GitHub API calls). Use for offline
     /// runs and tests; required when `GITHUB_TOKEN` is unset and the unauth
     /// rate limit (60/hr) is too low for the diff being analyzed.
