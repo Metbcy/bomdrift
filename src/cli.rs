@@ -27,6 +27,39 @@ pub enum Command {
     /// typosquat enricher will pick up the cache file in subsequent runs,
     /// overlaying the snapshot baked into the binary at compile time.
     RefreshTyposquat(RefreshArgs),
+    /// Manage the suppression baseline file (v0.5+).
+    ///
+    /// The comment-suppress sub-action invokes `bomdrift baseline add <id>`
+    /// when a reviewer comments `/bomdrift suppress <id>` on a PR; the
+    /// subcommand is also useful from the command line for hand-curating a
+    /// baseline without editing JSON directly.
+    Baseline {
+        #[command(subcommand)]
+        action: BaselineAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum BaselineAction {
+    /// Append an advisory ID to the baseline's `suppressed_advisories` list.
+    /// The file is created if it doesn't exist; existing fields are preserved.
+    /// Idempotent — re-adding an existing ID is a no-op (exit 0).
+    Add(BaselineAddArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct BaselineAddArgs {
+    /// Advisory identifier to suppress (GHSA-..., CVE-..., MAL-...). Suppresses
+    /// the advisory across ALL components in subsequent diffs — a wildcard
+    /// match by ID. Use the diff-output baseline format (the JSON shape
+    /// emitted by `bomdrift diff --output json`) for finer per-purl
+    /// suppression instead.
+    pub id: String,
+
+    /// Path to the baseline file. Created if missing; parent directory is
+    /// created if missing.
+    #[arg(long, default_value = ".bomdrift/baseline.json")]
+    pub path: PathBuf,
 }
 
 #[derive(Args, Debug)]

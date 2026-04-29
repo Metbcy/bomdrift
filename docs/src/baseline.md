@@ -66,6 +66,85 @@ As of v0.4, the action ships a `baseline:` input that plumbs straight
 through to `--baseline` — no need for a custom step calling the
 binary directly.
 
+## In-comment suppression (v0.5+)
+
+Editing `.bomdrift/baseline.json` by hand on every accepted finding is
+friction. v0.5 ships a comment-driven flow: a reviewer comments
+`/bomdrift suppress <ADVISORY-ID>` on a PR, and a companion sub-action
+appends the ID to the baseline file and commits it to the PR's head
+branch. The next bomdrift run on the same PR sees the finding as
+suppressed.
+
+### Setup
+
+Add a second workflow alongside your normal bomdrift one:
+
+```yaml
+# .github/workflows/bomdrift-suppress.yml
+name: bomdrift suppress
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write       # to commit the baseline file
+  pull-requests: write  # to react with 👀 / 👍 on the trigger comment
+
+jobs:
+  suppress:
+    if: |
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/bomdrift suppress ')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: Metbcy/bomdrift/comment-suppress@v1
+```
+
+The `if:` filter is conservative — it gates on both
+`github.event.issue.pull_request` (so issue comments don't trigger)
+and the comment-body prefix. The sub-action also re-validates both
+internally and exits cleanly on non-matching events, so the filter is
+defense-in-depth, not load-bearing.
+
+### What it does
+
+1. Parses the comment body for `/bomdrift suppress <id>`. The ID must
+   match a GHSA / CVE / MAL pattern.
+2. Reacts with 👀 to acknowledge.
+3. Resolves the PR's head ref via the GitHub API.
+4. Downloads the latest bomdrift release archive and (by default)
+   verifies its cosign signature.
+5. Clones the PR's head branch into a sibling worktree.
+6. Runs `bomdrift baseline add <id> --path <baseline-path>`, which
+   appends the ID to the `suppressed_advisories` array in the
+   baseline file (creating the file if missing).
+7. Commits + pushes the baseline change with message
+   `chore(bomdrift): suppress <id>`.
+8. Reacts with 👍 on success / 👎 on failure.
+
+### What it suppresses
+
+The v0.5 in-comment flow uses a **wildcard advisory match**: the
+specified ID is suppressed across **all** components, not just the
+one the comment was attached to. This is intentional — the typical
+case is "this advisory is a known false positive in our environment
+regardless of which dep pulls it in." For per-component suppression,
+hand-edit the baseline using the existing diff-output JSON shape
+(see [Match keys](#match-keys) above) — both shapes coexist in the
+same file.
+
+### CLI equivalent
+
+The same operation is available from the command line for users who
+want to curate a baseline outside CI:
+
+```bash
+bomdrift baseline add GHSA-xxxx-yyyy-zzzz
+bomdrift baseline add CVE-2026-12345 --path custom/baseline.json
+```
+
+The command is idempotent — re-adding an existing ID is a no-op.
+
 ## Workflow integration
 
 A typical CI pattern commits the baseline alongside the source code and
