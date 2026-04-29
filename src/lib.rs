@@ -150,15 +150,35 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
     // CLI flag wins; otherwise the env var supplies the default. Empty
     // strings are treated as unset to match shell-script callers that
     // pass `BOMDRIFT_REPO_URL=` to clear the value rather than `unset`.
+    // GitLab CI exposes the project URL as `CI_PROJECT_URL` (analog of
+    // GitHub's `GITHUB_REPOSITORY`-derived URL); honor it as a third
+    // fallback so users on the GitLab template don't have to plumb
+    // `BOMDRIFT_REPO_URL` themselves.
     let repo_url = args
         .repo_url
         .clone()
         .or_else(|| std::env::var("BOMDRIFT_REPO_URL").ok())
+        .or_else(|| std::env::var("CI_PROJECT_URL").ok())
         .filter(|s| !s.is_empty());
+
+    // Platform precedence: explicit `--platform` (or `[diff] platform`
+    // in `.bomdrift.toml`, already merged into `args.platform`) wins;
+    // otherwise auto-detect from CI env. `GITLAB_CI=true` is GitLab's
+    // canonical CI marker — set unconditionally on every job in every
+    // GitLab pipeline. Fall through to `Platform::GitHub` (the default)
+    // so existing GitHub Action consumers see no behavior change.
+    let platform = args.platform.unwrap_or_else(|| {
+        if std::env::var("GITLAB_CI").is_ok_and(|v| v == "true") {
+            crate::cli::Platform::GitLab
+        } else {
+            crate::cli::Platform::GitHub
+        }
+    });
     let md_options = render::markdown::Options {
         summary_only: args.summary_only,
         findings_only: args.findings_only,
         repo_url,
+        platform: platform.into(),
     };
     let rendered = match output {
         OutputFormat::Terminal => {

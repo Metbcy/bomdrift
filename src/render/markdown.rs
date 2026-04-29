@@ -26,6 +26,23 @@ use crate::enrich::typosquat::TyposquatFinding;
 use crate::enrich::version_jump::VersionJumpFinding;
 use crate::model::Component;
 
+/// Which forge the rendered markdown is destined for. Drives the action-
+/// affordance footer: GitHub uses the v0.5 `/bomdrift suppress` comment-driven
+/// flow and `/issues/new?...` URL shape; GitLab uses the project's
+/// `/-/issues/new` shape and points reviewers at the manual `bomdrift baseline
+/// add` CLI flow because GitLab in-comment suppression is deferred to v0.8.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Platform {
+    /// GitHub.com or GitHub Enterprise. Default — preserves the v0.5
+    /// footer shape for existing consumers.
+    #[default]
+    GitHub,
+    /// GitLab.com or Self-Managed GitLab. The MR-note footer omits the
+    /// `/bomdrift suppress` hint and points at `bomdrift baseline add`
+    /// instead.
+    GitLab,
+}
+
 /// Renderer toggles. Defaults match v0.2 behavior so existing callers keep
 /// working unchanged.
 #[derive(Debug, Default, Clone)]
@@ -41,13 +58,18 @@ pub struct Options {
     /// keeps PR comments focused on review decisions while preserving the
     /// counts that show how large the dependency change is.
     pub findings_only: bool,
-    /// Repository URL — `https://github.com/<owner>/<repo>` form, no
-    /// trailing slash. When supplied, the renderer appends a footer
-    /// linking to a pre-filled "Report this finding" issue and the
-    /// `/bomdrift suppress <id>` comment-affordance hint. When `None`,
-    /// the footer is omitted entirely so forks / standalone CLI use
-    /// don't render dead links to bomdrift's own issue tracker.
+    /// Repository URL — `https://github.com/<owner>/<repo>` (or
+    /// `https://gitlab.com/<group>/<project>`) form, no trailing slash.
+    /// When supplied, the renderer appends a footer linking to a
+    /// pre-filled "Report this finding" issue and a suppression hint.
+    /// When `None`, the footer is omitted entirely so forks / standalone
+    /// CLI use don't render dead links to bomdrift's own issue tracker.
     pub repo_url: Option<String>,
+    /// Forge that the rendered markdown is destined for. Defaults to
+    /// `GitHub` so existing consumers keep their v0.5 footer shape with
+    /// no migration. The CLI flips this to `GitLab` when `--platform
+    /// gitlab` is passed or the `GITLAB_CI` environment variable is set.
+    pub platform: Platform,
 }
 
 pub fn render(cs: &ChangeSet, enrichment: &Enrichment) -> String {
@@ -309,19 +331,44 @@ fn section_close(out: &mut String) {
 /// when `repo_url` is `None` so forks / standalone CLI use don't render
 /// dead links to a repo they don't own. Wrapped in `<sub>` so it doesn't
 /// compete visually with the section bodies.
+///
+/// Footer shape branches on [`Options::platform`]. GitHub points reviewers
+/// at the v0.5 `/bomdrift suppress <ID>` companion-action flow; GitLab
+/// points them at the manual `bomdrift baseline add <ID>` CLI flow because
+/// GitLab in-comment suppression is deferred to v0.8 (note webhooks are a
+/// different model than GitHub PR comments).
 fn write_footer(out: &mut String, opts: &Options) {
     let Some(repo) = opts.repo_url.as_deref() else {
         return;
     };
     let repo = repo.trim_end_matches('/');
     out.push_str("---\n");
-    let _ = writeln!(
-        out,
-        "<sub>**False positive?** [Report it]({repo}/issues/new?labels=false-positive&template=false-positive.md) · \
-         **Suppress a finding?** Comment `/bomdrift suppress <ID>` (requires the \
-         [comment-suppress sub-action]({repo})) · \
-         [Docs](https://metbcy.github.io/bomdrift/)</sub>",
-    );
+    match opts.platform {
+        Platform::GitHub => {
+            let _ = writeln!(
+                out,
+                "<sub>**False positive?** [Report it]({repo}/issues/new?labels=false-positive&template=false-positive.md) · \
+                 **Suppress a finding?** Comment `/bomdrift suppress <ID>` (requires the \
+                 [comment-suppress sub-action]({repo})) · \
+                 [Docs](https://metbcy.github.io/bomdrift/)</sub>",
+            );
+        }
+        Platform::GitLab => {
+            // GitLab issue creation uses `/-/issues/new` (the `-/` is the
+            // namespace separator GitLab inserts between the project URL
+            // and the issue tracker route). `issuable_template=` selects a
+            // saved description template if the project has one named
+            // `false-positive`; projects without that template still get
+            // a working "new issue" form.
+            let _ = writeln!(
+                out,
+                "<sub>**False positive?** [Report it]({repo}/-/issues/new?issuable_template=false-positive) · \
+                 **Suppress a finding?** Run `bomdrift baseline add <ID>` and commit \
+                 `.bomdrift/baseline.json` to your MR branch · \
+                 [Docs](https://metbcy.github.io/bomdrift/)</sub>",
+            );
+        }
+    }
 }
 
 /// Cross-component vulnerability ordering: components affected by the
@@ -645,8 +692,7 @@ mod tests {
             &e,
             Options {
                 summary_only: true,
-                findings_only: false,
-                repo_url: None,
+                ..Default::default()
             },
         );
         // Summary table is preserved (the load-bearing part of the comment).
@@ -671,8 +717,7 @@ mod tests {
             &Enrichment::default(),
             Options {
                 summary_only: true,
-                findings_only: false,
-                repo_url: None,
+                ..Default::default()
             },
         );
         assert!(out.contains("_No dependency changes._"));
@@ -707,9 +752,8 @@ mod tests {
             &cs,
             &e,
             Options {
-                summary_only: false,
                 findings_only: true,
-                repo_url: None,
+                ..Default::default()
             },
         );
 
@@ -1049,9 +1093,8 @@ mod tests {
             &cs,
             &Enrichment::default(),
             Options {
-                summary_only: false,
-                findings_only: false,
                 repo_url: Some("https://github.com/example/proj".to_string()),
+                ..Default::default()
             },
         );
         assert!(md.contains("False positive?"));
@@ -1072,13 +1115,71 @@ mod tests {
             &cs,
             &Enrichment::default(),
             Options {
-                summary_only: false,
-                findings_only: false,
                 repo_url: Some("https://github.com/example/proj/".to_string()),
+                ..Default::default()
             },
         );
         assert!(md.contains("https://github.com/example/proj/issues/new"));
         assert!(!md.contains("proj//issues"));
+    }
+
+    #[test]
+    fn footer_renders_gitlab_shape_when_platform_is_gitlab() {
+        // Platform::GitLab swaps two things: the issue-creation URL uses
+        // GitLab's `/-/issues/new?issuable_template=...` shape, and the
+        // suppression hint points at `bomdrift baseline add` instead of
+        // the `/bomdrift suppress` comment-driven flow (deferred to v0.8
+        // for GitLab).
+        let cs = ChangeSet {
+            added: vec![comp("a", "1.0", Ecosystem::Npm, None)],
+            ..Default::default()
+        };
+        let md = render_with_options(
+            &cs,
+            &Enrichment::default(),
+            Options {
+                repo_url: Some("https://gitlab.com/group/project".to_string()),
+                platform: Platform::GitLab,
+                ..Default::default()
+            },
+        );
+        assert!(md.contains("False positive?"));
+        assert!(
+            md.contains("https://gitlab.com/group/project/-/issues/new"),
+            "expected GitLab `/-/issues/new` URL shape; got:\n{md}"
+        );
+        assert!(
+            md.contains("bomdrift baseline add"),
+            "expected GitLab footer to point at `bomdrift baseline add`; got:\n{md}"
+        );
+        assert!(
+            !md.contains("/bomdrift suppress"),
+            "GitLab footer must NOT mention the GitHub-only `/bomdrift suppress` comment flow; got:\n{md}"
+        );
+        assert!(md.contains("https://metbcy.github.io/bomdrift/"));
+    }
+
+    #[test]
+    fn footer_default_platform_preserves_github_shape() {
+        // Backward-compat guarantee: callers that don't set `platform`
+        // explicitly (i.e. v0.5 / v0.6 consumers compiled against the
+        // pre-v0.7 Options struct after migration) get the GitHub footer
+        // they had before. `Platform::default()` is GitHub.
+        assert_eq!(Platform::default(), Platform::GitHub);
+        let cs = ChangeSet {
+            added: vec![comp("a", "1.0", Ecosystem::Npm, None)],
+            ..Default::default()
+        };
+        let md = render_with_options(
+            &cs,
+            &Enrichment::default(),
+            Options {
+                repo_url: Some("https://github.com/example/proj".to_string()),
+                ..Default::default()
+            },
+        );
+        assert!(md.contains("/issues/new?labels=false-positive"));
+        assert!(md.contains("/bomdrift suppress"));
     }
 
     #[test]

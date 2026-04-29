@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use crate::cli::{DiffArgs, FailOn, InputFormat, OutputFormat};
+use crate::cli::{DiffArgs, FailOn, InputFormat, OutputFormat, Platform};
 
 const DEFAULT_CONFIG_PATH: &str = ".bomdrift.toml";
 
@@ -33,6 +33,7 @@ pub struct DiffConfig {
     pub findings_only: Option<bool>,
     pub include_file_components: Option<bool>,
     pub repo_url: Option<String>,
+    pub platform: Option<Platform>,
     pub max_added: Option<usize>,
     pub max_removed: Option<usize>,
     pub max_version_changed: Option<usize>,
@@ -81,6 +82,9 @@ fn apply_loaded_diff_config(args: &mut DiffArgs, config: Config) {
     args.include_file_components |= diff.include_file_components.unwrap_or(false);
     if args.repo_url.is_none() {
         args.repo_url = diff.repo_url.filter(|s| !s.is_empty());
+    }
+    if args.platform.is_none() {
+        args.platform = diff.platform;
     }
     if args.max_added.is_none() {
         args.max_added = diff.max_added;
@@ -133,6 +137,7 @@ mod tests {
             findings_only: false,
             include_file_components: false,
             repo_url: None,
+            platform: None,
             max_added: None,
             max_removed: None,
             max_version_changed: None,

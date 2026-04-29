@@ -843,3 +843,127 @@ fn diff_config_baseline_missing_file_does_not_error() {
 
     fs::remove_dir_all(dir).ok();
 }
+
+#[test]
+fn diff_renders_github_footer_when_only_repo_url_env_var_is_set() {
+    // Regression coverage for issue #10 (todo b5): the unit test in
+    // `render::markdown` covers the rendering function, but the env-var
+    // → `Options.repo_url` plumbing in `lib::run_diff` was previously
+    // exercised only by the GitHub Action E2E. This test pins the CLI
+    // path: pass the URL via env var (not `--repo-url`) and assert the
+    // footer renders the expected GitHub shape.
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .env_remove("GITLAB_CI")
+        .env_remove("CI_PROJECT_URL")
+        .env("BOMDRIFT_REPO_URL", "https://github.com/example/proj")
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(
+        out.status.success(),
+        "exit code: {}\nstderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    assert!(
+        stdout.contains("https://github.com/example/proj/issues/new"),
+        "expected GitHub footer URL from BOMDRIFT_REPO_URL env var; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("/bomdrift suppress"),
+        "GitHub footer must include the `/bomdrift suppress` hint; got:\n{stdout}"
+    );
+}
+
+#[test]
+fn diff_auto_detects_gitlab_when_gitlab_ci_env_is_true() {
+    // a2 acceptance: `GITLAB_CI=true` flips the rendered footer to the
+    // GitLab shape without requiring `--platform gitlab`. `CI_PROJECT_URL`
+    // doubles as the repo-URL source so users on the GitLab template
+    // don't have to plumb `BOMDRIFT_REPO_URL` themselves.
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .env_remove("BOMDRIFT_REPO_URL")
+        .env("GITLAB_CI", "true")
+        .env("CI_PROJECT_URL", "https://gitlab.com/group/project")
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(
+        out.status.success(),
+        "exit code: {}\nstderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    assert!(
+        stdout.contains("https://gitlab.com/group/project/-/issues/new"),
+        "expected GitLab `/-/issues/new` URL shape; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("bomdrift baseline add"),
+        "GitLab footer must point at `bomdrift baseline add`; got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("/bomdrift suppress"),
+        "GitLab footer must NOT mention the GitHub-only `/bomdrift suppress` flow; got:\n{stdout}"
+    );
+}
+
+#[test]
+fn diff_explicit_platform_flag_overrides_ci_env_detection() {
+    // Precedence: explicit `--platform github` wins even if `GITLAB_CI=true`
+    // happens to be set in the caller's shell. Same shape guarantee as
+    // the env-var test above, but with the flag forcing GitHub.
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .env("GITLAB_CI", "true")
+        .env_remove("BOMDRIFT_REPO_URL")
+        .env_remove("CI_PROJECT_URL")
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--platform",
+            "github",
+            "--repo-url",
+            "https://github.com/example/proj",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(
+        out.status.success(),
+        "exit code: {}\nstderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    assert!(
+        stdout.contains("https://github.com/example/proj/issues/new"),
+        "expected GitHub footer URL from explicit --platform github + --repo-url; got:\n{stdout}"
+    );
+    assert!(stdout.contains("/bomdrift suppress"));
+    assert!(
+        !stdout.contains("/-/issues/new"),
+        "explicit --platform github must override GITLAB_CI auto-detection; got:\n{stdout}"
+    );
+}
