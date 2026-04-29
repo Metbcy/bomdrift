@@ -1,0 +1,28 @@
+[book]
+title = "bomdrift"
+description = "SBOM diff with supply-chain risk signals"
+authors = ["Amir B."]
+language = "en"
+src = "src"
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/Metbcy/bomdrift"
+edit-url-template = "https://github.com/Metbcy/bomdrift/edit/main/docs/{path}"
+site-url = "/bomdrift/"
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.search]
+enable = true
+limit-results = 30
+teaser-word-count = 30
+use-boolean-and = true
+boost-title = 2
+boost-hierarchy = 1
+boost-paragraph = 1
+expand = true
+heading-split-level = 3

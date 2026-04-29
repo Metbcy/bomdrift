@@ -1,0 +1,32 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:00000000-0000-0000-0000-000000000004",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-04-28T00:00:00Z"
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/lodash@4.17.21",
+      "name": "lodash",
+      "version": "4.17.21",
+      "purl": "pkg:npm/lodash@4.17.21"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/clap@4.5.0",
+      "name": "clap",
+      "version": "4.5.0",
+      "purl": "pkg:cargo/clap@4.5.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/django@5.0.0",
+      "name": "django",
+      "version": "5.0.0",
+      "purl": "pkg:pypi/django@5.0.0"
+    }
+  ]
+}

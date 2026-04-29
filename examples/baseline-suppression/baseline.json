@@ -1,0 +1,97 @@
+{
+  "changes": {
+    "added": [
+      {
+        "bom_ref": "pkg:npm/plain-crypto-js@4.2.1",
+        "ecosystem": "npm",
+        "hashes": [],
+        "licenses": [
+          "MIT"
+        ],
+        "name": "plain-crypto-js",
+        "purl": "pkg:npm/plain-crypto-js@4.2.1",
+        "relationship": "unknown",
+        "source_url": null,
+        "supplier": null,
+        "version": "4.2.1"
+      }
+    ],
+    "license_changed": [],
+    "removed": [
+      {
+        "bom_ref": null,
+        "ecosystem": "library",
+        "hashes": [],
+        "licenses": [],
+        "name": "no-purl-component",
+        "purl": null,
+        "relationship": "unknown",
+        "source_url": null,
+        "supplier": null,
+        "version": "0.1.0"
+      }
+    ],
+    "version_changed": [
+      [
+        {
+          "bom_ref": "pkg:npm/axios@1.14.0",
+          "ecosystem": "npm",
+          "hashes": [
+            {
+              "alg": "sha256",
+              "value": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            }
+          ],
+          "licenses": [
+            "MIT"
+          ],
+          "name": "axios",
+          "purl": "pkg:npm/axios@1.14.0",
+          "relationship": "unknown",
+          "source_url": "https://github.com/axios/axios",
+          "supplier": "Matt Zabriskie",
+          "version": "1.14.0"
+        },
+        {
+          "bom_ref": "pkg:npm/axios@1.14.1",
+          "ecosystem": "npm",
+          "hashes": [],
+          "licenses": [
+            "MIT"
+          ],
+          "name": "axios",
+          "purl": "pkg:npm/axios@1.14.1",
+          "relationship": "unknown",
+          "source_url": "https://github.com/axios/axios",
+          "supplier": "Matt Zabriskie",
+          "version": "1.14.1"
+        }
+      ]
+    ]
+  },
+  "enrichment": {
+    "maintainer_age": [],
+    "typosquats": [
+      {
+        "closest": "crypto-js",
+        "component": {
+          "bom_ref": "pkg:npm/plain-crypto-js@4.2.1",
+          "ecosystem": "npm",
+          "hashes": [],
+          "licenses": [
+            "MIT"
+          ],
+          "name": "plain-crypto-js",
+          "purl": "pkg:npm/plain-crypto-js@4.2.1",
+          "relationship": "unknown",
+          "source_url": null,
+          "supplier": null,
+          "version": "4.2.1"
+        },
+        "score": 0.95
+      }
+    ],
+    "version_jumps": [],
+    "vulns": {}
+  }
+}
