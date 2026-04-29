@@ -34,12 +34,14 @@ jobs:
           format: cyclonedx-json
           output-file: after.json
         env:
-          # Limit Syft to the Rust-relevant catalogers; the default set
-          # also walks the filesystem cataloger and emits each YAML
-          # workflow + lockfile as a `file:`-ecosystem component, which
-          # noises up the diff with non-supply-chain entries that change
-          # path between the PR head and the base-ref checkout dir.
-          SYFT_DEFAULT_CATALOGERS: rust-cargo-lock,rust-modules
+          # Remove the `file` cataloger from Syft's default selection.
+          # Without this, every YAML workflow + lockfile shows up as a
+          # `file:`-ecosystem component and the path difference between
+          # the PR-head checkout and the base-ref checkout (./base/...)
+          # produces phantom add/remove pairs in the diff. The `-file`
+          # syntax is the documented "subtract from defaults" form
+          # (Syft prints the hint when it tries to add `file` itself).
+          SYFT_DEFAULT_CATALOGERS: -file
 
       # Sibling checkout of the base ref so the SBOM generator sees a
       # clean snapshot of main without the PR's diff applied.
@@ -56,7 +58,7 @@ jobs:
           format: cyclonedx-json
           output-file: before.json
         env:
-          SYFT_DEFAULT_CATALOGERS: rust-cargo-lock,rust-modules
+          SYFT_DEFAULT_CATALOGERS: -file
 
       - name: Run bomdrift
         uses: Metbcy/bomdrift@v1
