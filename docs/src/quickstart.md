@@ -25,7 +25,7 @@ jobs:
 ```
 
 The `@v1` mutable tag tracks the latest v0.x release. Pin to a specific
-version (`@v0.7.0`) if you prefer reproducible builds. See
+version (`@v0.8.0`) if you prefer reproducible builds. See
 [GitHub Action](./github-action.md) for every input.
 
 If you prefer a checked-in policy file, install the binary and run
@@ -39,7 +39,7 @@ Pre-built binaries cover Linux x86_64 + aarch64, macOS aarch64, and
 Windows x86_64. Each archive is cosign-signed via Sigstore + GitHub OIDC.
 
 ```bash
-VERSION=v0.7.0
+VERSION=v0.8.0
 TARGET=x86_64-unknown-linux-gnu
 curl -sSL -o bomdrift.tar.gz \
   "https://github.com/Metbcy/bomdrift/releases/download/${VERSION}/bomdrift-${VERSION}-${TARGET}.tar.gz"
@@ -56,7 +56,7 @@ To verify the archive's signature before you trust the binary, see
 ## From source
 
 ```bash
-cargo install --locked --git https://github.com/Metbcy/bomdrift --tag v0.7.0 bomdrift
+cargo install --locked --git https://github.com/Metbcy/bomdrift --tag v0.8.0 bomdrift
 ```
 
 Requires Rust 1.85+ (the project uses edition 2024).

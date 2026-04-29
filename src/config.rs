@@ -11,7 +11,20 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use crate::cli::{DiffArgs, FailOn, InputFormat, OutputFormat, Platform};
+use crate::cli::{DebugFormat, DiffArgs, FailOn, InputFormat, OutputFormat, Platform};
+
+/// `[license]` block in `.bomdrift.toml`. CLI flags
+/// (`--allow-licenses`/`--deny-licenses`) override this block when set
+/// (override, not merge — matches the Dependency Review Action).
+#[derive(Debug, Default, Deserialize)]
+pub struct LicenseConfig {
+    #[serde(default)]
+    pub allow: Vec<String>,
+    #[serde(default)]
+    pub deny: Vec<String>,
+    #[serde(default)]
+    pub allow_ambiguous: bool,
+}
 
 const DEFAULT_CONFIG_PATH: &str = ".bomdrift.toml";
 
@@ -26,6 +39,10 @@ pub struct DiffConfig {
     pub format: Option<InputFormat>,
     pub no_osv: Option<bool>,
     pub no_osv_cache: Option<bool>,
+    pub no_epss: Option<bool>,
+    pub no_kev: Option<bool>,
+    pub fail_on_epss: Option<f32>,
+    pub license: Option<LicenseConfig>,
     pub baseline: Option<PathBuf>,
     pub no_maintainer_age: Option<bool>,
     pub fail_on: Option<FailOn>,
@@ -37,6 +54,9 @@ pub struct DiffConfig {
     pub max_added: Option<usize>,
     pub max_removed: Option<usize>,
     pub max_version_changed: Option<usize>,
+    pub debug_calibration: Option<bool>,
+    pub debug_calibration_format: Option<DebugFormat>,
+    pub output_file: Option<PathBuf>,
 }
 
 pub fn apply_diff_config(args: &mut DiffArgs) -> Result<()> {
@@ -61,6 +81,11 @@ fn apply_loaded_diff_config(args: &mut DiffArgs, config: Config) {
     }
     args.no_osv |= diff.no_osv.unwrap_or(false);
     args.no_osv_cache |= diff.no_osv_cache.unwrap_or(false);
+    args.no_epss |= diff.no_epss.unwrap_or(false);
+    args.no_kev |= diff.no_kev.unwrap_or(false);
+    if args.fail_on_epss.is_none() {
+        args.fail_on_epss = diff.fail_on_epss;
+    }
     if args.baseline.is_none() {
         // Config-derived baseline paths are tolerant of a missing file.
         // `bomdrift init` ships `.bomdrift.toml` pointing at
@@ -94,6 +119,30 @@ fn apply_loaded_diff_config(args: &mut DiffArgs, config: Config) {
     }
     if args.max_version_changed.is_none() {
         args.max_version_changed = diff.max_version_changed;
+    }
+    args.debug_calibration |= diff.debug_calibration.unwrap_or(false);
+    if let Some(fmt) = diff.debug_calibration_format {
+        // Only override the default when the config explicitly sets a value;
+        // CLI flag still wins because it's the explicit form.
+        if args.debug_calibration_format == DebugFormat::default() {
+            args.debug_calibration_format = fmt;
+        }
+    }
+    if args.output_file.is_none() {
+        args.output_file = diff.output_file;
+    }
+
+    // [license] block: CLI flags override (not merge) when set. Mirrors
+    // Dependency Review Action semantics so users moving between bomdrift
+    // and DRA don't get surprises.
+    if let Some(lic) = diff.license {
+        if args.allow_licenses.is_empty() {
+            args.allow_licenses = lic.allow;
+        }
+        if args.deny_licenses.is_empty() {
+            args.deny_licenses = lic.deny;
+        }
+        args.allow_ambiguous_licenses |= lic.allow_ambiguous;
     }
 }
 
@@ -130,6 +179,9 @@ mod tests {
             format: None,
             no_osv: false,
             no_osv_cache: false,
+            no_epss: false,
+            no_kev: false,
+            fail_on_epss: None,
             baseline: None,
             no_maintainer_age: false,
             fail_on: None,
@@ -142,6 +194,11 @@ mod tests {
             max_removed: None,
             max_version_changed: None,
             debug_calibration: false,
+            debug_calibration_format: DebugFormat::default(),
+            output_file: None,
+            allow_licenses: Vec::new(),
+            deny_licenses: Vec::new(),
+            allow_ambiguous_licenses: false,
         }
     }
 

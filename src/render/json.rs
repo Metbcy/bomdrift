@@ -181,6 +181,9 @@ mod tests {
             vec![crate::enrich::VulnRef {
                 id: "GHSA-3p68-rc4w-qgx5".to_string(),
                 severity: crate::enrich::Severity::High,
+                aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
 
@@ -200,6 +203,8 @@ mod tests {
             typosquats,
             version_jumps: Vec::new(),
             maintainer_age: Vec::new(),
+
+            license_violations: Vec::new(),
         };
         let cs = ChangeSet::default();
 

@@ -294,3 +294,72 @@ ecosystem-wide bump). The same per-component recipe works — replace
 the `typosquat` array with `version_jump`, key by the after-version's
 `purl`. Update the entry on the next jump.
 
+
+## Time-boxed suppressions (`expires` + `reason`)
+
+v0.8 adds two optional fields on each `suppressed_advisories` entry:
+
+```json
+{
+  "suppressed_advisories": [
+    {
+      "id": "GHSA-evil-1234",
+      "purl": "pkg:npm/foo",
+      "expires": "2026-12-31",
+      "reason": "Awaiting upstream patch (issue #42)"
+    },
+    "GHSA-old-school"
+  ]
+}
+```
+
+Both fields are optional. String entries (the v0.5 form) keep working —
+the array is a union of both shapes.
+
+### Behavior
+
+- **Active entry** (`expires` is today or in the future, OR no `expires`):
+  finding is suppressed as before.
+- **Expired entry** (`expires` is strictly before today): finding
+  surfaces, and bomdrift prints one warning line per expired entry to
+  stderr:
+
+  ```
+  warning: baseline entry GHSA-evil-1234 (pkg:npm/foo) expired 2026-04-29; finding will surface in this run — was: Awaiting upstream patch (issue #42)
+  ```
+
+- **Malformed `expires`** (e.g. `2026/12/31`): bomdrift refuses to load
+  the baseline rather than silently treating it as never-expiring. Use
+  strict `YYYY-MM-DD` zero-padded.
+
+The "today" comparison honors `SOURCE_DATE_EPOCH` so reproducible-build
+contexts stay deterministic.
+
+### CLI
+
+```bash
+bomdrift baseline add GHSA-evil-1234 \
+  --expires 2026-12-31 \
+  --reason "Awaiting upstream patch (issue #42)"
+```
+
+The `comment-suppress` companion action also picks up an optional
+`reason: <text>` line in the triggering comment body:
+
+```
+/bomdrift suppress GHSA-evil-1234
+reason: Awaiting upstream patch (issue #42)
+```
+
+### Worked rotation example
+
+Six months ago the team accepted GHSA-evil-1234 with a 6-month
+expiry. Today the warning fires:
+
+```
+warning: baseline entry GHSA-evil-1234 expired 2026-04-29 …
+```
+
+The reviewer either renews the suppression (new PR, new expiry +
+reason) or removes the entry and merges the upstream patch.
+Suppressions become reviewed work-items, not silent forever-state.

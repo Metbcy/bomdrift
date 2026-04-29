@@ -26,7 +26,7 @@ fn load(path: &str) -> Sbom {
 fn synth_component(i: usize, version_offset: usize) -> Component {
     let name = format!("pkg-{i:04}");
     let mut version = format!("1.{}.0", i % 50);
-    if i % 2 == 0 {
+    if i.is_multiple_of(2) {
         version = format!("1.{}.0", (i % 50) + version_offset);
     }
     let purl = format!("pkg:npm/{name}@{version}");

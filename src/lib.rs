@@ -1,5 +1,6 @@
 pub mod baseline;
 pub mod cli;
+pub mod clock;
 pub mod config;
 pub mod diff;
 pub mod enrich;
@@ -67,7 +68,18 @@ fn write_scaffold_file(path: &Path, contents: &str, force: bool) -> Result<()> {
 fn run_baseline(action: BaselineAction) -> Result<()> {
     match action {
         BaselineAction::Add(args) => {
-            let outcome = baseline::add_suppression(&args.path, &args.id)?;
+            // Validate --expires upfront so a typo'd date doesn't write a
+            // bad entry that errors on the NEXT diff load.
+            if let Some(s) = &args.expires {
+                clock::parse_ymd(s)
+                    .with_context(|| format!("--expires must be YYYY-MM-DD, got {s:?}"))?;
+            }
+            let outcome = baseline::add_suppression_full(
+                &args.path,
+                &args.id,
+                args.expires.as_deref(),
+                args.reason.as_deref(),
+            )?;
             match outcome {
                 baseline::AddOutcome::Added => {
                     eprintln!(
@@ -116,6 +128,22 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
         }
     };
 
+    // EPSS / KEV enrichment piggyback on OSV's VulnRefs and only have
+    // anything to do when there are CVE-aliased advisories. Skip both if
+    // there are no vulns.
+    if !args.no_epss
+        && !enrichment.vulns.is_empty()
+        && let Err(err) = enrich::epss::enrich(&mut enrichment)
+    {
+        eprintln!("warning: EPSS enrichment failed, continuing without it: {err:#}");
+    }
+    if !args.no_kev
+        && !enrichment.vulns.is_empty()
+        && let Err(err) = enrich::kev::enrich(&mut enrichment)
+    {
+        eprintln!("warning: KEV enrichment failed, continuing without it: {err:#}");
+    }
+
     // Typosquat detection is pure-compute (embedded reference list) and always
     // runs, regardless of `--no-osv`. Findings are informational.
     enrichment.typosquats = enrich::typosquat::enrich(&cs);
@@ -138,12 +166,39 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
         }
     }
 
+    // License-policy enrichment (Phase D, v0.8). Pure-compute, runs after
+    // OSV/EPSS/KEV. Empty allow + empty deny means "no policy" — the
+    // enricher returns no violations.
+    let license_policy = enrich::license::Policy {
+        allow: args.allow_licenses.clone(),
+        deny: args.deny_licenses.clone(),
+        allow_ambiguous: args.allow_ambiguous_licenses,
+    };
+    enrichment.license_violations = enrich::license::enrich(&cs, &license_policy);
+
     // Apply the baseline AFTER all enrichers run — suppression operates on
     // the realized finding set, not on intermediate inputs. This keeps the
     // baseline file format stable as new enrichers are added: a new finding
     // type that the baseline doesn't know about simply isn't suppressed.
     if let Some(path) = &args.baseline {
         let baseline = baseline::Baseline::load(path)?;
+        for ent in &baseline.expired_entries {
+            eprintln!(
+                "warning: baseline entry {id}{purl} expired {expires}; finding will surface in this run{reason}",
+                id = ent.id,
+                purl = ent
+                    .purl
+                    .as_deref()
+                    .map(|p| format!(" ({p})"))
+                    .unwrap_or_default(),
+                expires = ent.expires,
+                reason = ent
+                    .reason
+                    .as_deref()
+                    .map(|r| format!(" — was: {r}"))
+                    .unwrap_or_default(),
+            );
+        }
         baseline::apply(&mut cs, &mut enrichment, &baseline);
     }
 
@@ -156,7 +211,11 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
     // integration. Format: `kind|key|score|threshold`. No telemetry: the
     // user owns the bytes and pipes them wherever they want.
     if args.debug_calibration {
-        write_calibration_lines(&enrichment, &mut std::io::stderr());
+        write_calibration_lines(
+            &enrichment,
+            &mut std::io::stderr(),
+            args.debug_calibration_format,
+        );
     }
 
     // CLI flag wins; otherwise the env var supplies the default. Empty
@@ -210,7 +269,12 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
         OutputFormat::Sarif => render::sarif::render(&cs, &enrichment),
     };
 
-    print!("{rendered}");
+    if let Some(path) = &args.output_file {
+        std::fs::write(path, &rendered)
+            .with_context(|| format!("writing --output-file {}", path.display()))?;
+    } else {
+        print!("{rendered}");
+    }
 
     // Body must be fully written before we exit-2 — the action's `tee`
     // wrapper still wants the comment posted even when fail-on trips.
@@ -229,7 +293,17 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
         );
     }
 
-    if tripped(&cs, &enrichment, fail_on) || budget_tripped {
+    let epss_tripped = args
+        .fail_on_epss
+        .is_some_and(|threshold| any_epss_at_or_above(&enrichment, threshold));
+    if epss_tripped {
+        let threshold = args.fail_on_epss.unwrap_or(0.0);
+        eprintln!(
+            "bomdrift: policy gate tripped: --fail-on-epss {threshold:.2} (one or more advisories at or above this score)"
+        );
+    }
+
+    if tripped(&cs, &enrichment, fail_on) || budget_tripped || epss_tripped {
         std::process::exit(FAIL_ON_EXIT_CODE);
     }
 
@@ -253,8 +327,23 @@ pub fn tripped(cs: &ChangeSet, e: &Enrichment, threshold: FailOn) -> bool {
         FailOn::CriticalCve => any_advisory_at_or_above(e, Severity::High),
         FailOn::Typosquat => !e.typosquats.is_empty(),
         FailOn::LicenseChange => !cs.license_changed.is_empty(),
-        FailOn::Any => e.has_findings() || !cs.license_changed.is_empty(),
+        FailOn::Kev => any_kev(e),
+        FailOn::LicenseViolation => !e.license_violations.is_empty(),
+        FailOn::Any => e.has_findings() || !cs.license_changed.is_empty() || any_kev(e),
     }
+}
+
+/// True when any advisory across all components has its CISA KEV flag set.
+pub fn any_kev(e: &Enrichment) -> bool {
+    e.vulns.values().any(|refs| refs.iter().any(|r| r.kev))
+}
+
+/// True when any advisory has an EPSS score >= the threshold.
+pub fn any_epss_at_or_above(e: &Enrichment, threshold: f32) -> bool {
+    e.vulns.values().any(|refs| {
+        refs.iter()
+            .any(|r| r.epss_score.is_some_and(|s| s >= threshold))
+    })
 }
 
 pub fn budget_tripped(
@@ -282,59 +371,164 @@ pub fn budget_tripped(
 /// `threshold` is the constant the score was gated against. CVE rows
 /// surface every advisory (no internal threshold) so adopters can see
 /// the score distribution before tuning `--fail-on critical-cve`.
-fn write_calibration_lines<W: std::io::Write>(e: &Enrichment, out: &mut W) {
+fn write_calibration_lines<W: std::io::Write>(
+    e: &Enrichment,
+    out: &mut W,
+    format: crate::cli::DebugFormat,
+) {
     use crate::enrich::maintainer::YOUNG_MAINTAINER_DAYS;
     use crate::enrich::typosquat::SIMILARITY_THRESHOLD;
     use crate::enrich::version_jump::MIN_MAJOR_DELTA;
 
     for f in &e.typosquats {
-        let _ = writeln!(
+        write_calibration_row(
             out,
-            "typosquat|{}|{:.4}|{:.4}",
+            "typosquat",
             f.component
                 .purl
                 .as_deref()
                 .unwrap_or(f.component.name.as_str()),
-            f.score,
-            SIMILARITY_THRESHOLD,
+            CalibrationScore::Float(f.score),
+            CalibrationThreshold::Float(SIMILARITY_THRESHOLD),
+            format,
         );
     }
     for f in &e.version_jumps {
-        let _ = writeln!(
+        write_calibration_row(
             out,
-            "version-jump|{}|{}|{}",
+            "version-jump",
             f.after.purl.as_deref().unwrap_or(f.after.name.as_str()),
-            f.after_major.saturating_sub(f.before_major),
-            MIN_MAJOR_DELTA,
+            CalibrationScore::Int(f.after_major.saturating_sub(f.before_major) as i64),
+            CalibrationThreshold::Int(MIN_MAJOR_DELTA as i64),
+            format,
         );
     }
     for f in &e.maintainer_age {
-        let _ = writeln!(
+        write_calibration_row(
             out,
-            "maintainer-age|{}|{}|{}",
+            "maintainer-age",
             f.component
                 .purl
                 .as_deref()
                 .unwrap_or(f.component.name.as_str()),
-            f.days_old,
-            YOUNG_MAINTAINER_DAYS,
+            CalibrationScore::Int(f.days_old),
+            CalibrationThreshold::Int(YOUNG_MAINTAINER_DAYS),
+            format,
         );
     }
     for (purl, refs) in &e.vulns {
         for vuln in refs {
-            // Severity has no numeric score in our model; emit the
-            // bucket label as a non-numeric "score" so the CSV row is
-            // still well-formed. Adopters who want raw CVSS can grep
-            // the JSON output instead — the calibration tap is for the
-            // ranked-bucket choice (cve vs critical-cve), not for
-            // reverse-engineering CVSS.
-            let _ = writeln!(
+            // Severity has no numeric score in our model; emit the bucket
+            // label as a non-numeric "score" so the row stays well-formed
+            // (string in JSONL, plain token in pipe).
+            write_calibration_row(
                 out,
-                "cve|{}#{}|{}|high+",
-                purl,
-                vuln.id,
-                vuln.severity.as_str(),
+                "cve",
+                &format!("{purl}#{}", vuln.id),
+                CalibrationScore::Text(vuln.severity.as_str()),
+                CalibrationThreshold::Text("high+"),
+                format,
             );
+            for cve in vuln.cves() {
+                if let Some(score) = vuln.epss_score {
+                    write_calibration_row(
+                        out,
+                        "epss",
+                        &format!("{purl}+{cve}"),
+                        CalibrationScore::Float(score as f64),
+                        CalibrationThreshold::Float(0.5),
+                        format,
+                    );
+                }
+                if vuln.kev {
+                    write_calibration_row(
+                        out,
+                        "kev",
+                        &format!("{purl}+{cve}"),
+                        CalibrationScore::Text("true"),
+                        CalibrationThreshold::Text("kev"),
+                        format,
+                    );
+                }
+            }
+        }
+    }
+    for v in &e.license_violations {
+        write_calibration_row(
+            out,
+            "license",
+            v.component
+                .purl
+                .as_deref()
+                .unwrap_or(v.component.name.as_str()),
+            CalibrationScore::Text(&v.license),
+            CalibrationThreshold::Text(match v.kind {
+                crate::enrich::LicenseViolationKind::Deny => "deny",
+                crate::enrich::LicenseViolationKind::Ambiguous => "ambiguous",
+                crate::enrich::LicenseViolationKind::NotAllowed => "not-allowed",
+            }),
+            format,
+        );
+    }
+}
+
+/// Numeric or symbolic score for a calibration row. Float/Int rendered
+/// without quotes in JSONL; Text rendered as a JSON string.
+pub(crate) enum CalibrationScore<'a> {
+    Float(f64),
+    Int(i64),
+    Text(&'a str),
+}
+
+pub(crate) enum CalibrationThreshold<'a> {
+    Float(f64),
+    Int(i64),
+    Text(&'a str),
+}
+
+/// Single dispatch point for both pipe and JSONL calibration formats.
+/// Adding a new finding kind is one call site, not two — the format
+/// branches stay localized to this helper.
+pub(crate) fn write_calibration_row<W: std::io::Write>(
+    out: &mut W,
+    kind: &str,
+    key: &str,
+    score: CalibrationScore<'_>,
+    threshold: CalibrationThreshold<'_>,
+    format: crate::cli::DebugFormat,
+) {
+    match format {
+        crate::cli::DebugFormat::Pipe => {
+            let score_s = match score {
+                CalibrationScore::Float(v) => format!("{v:.4}"),
+                CalibrationScore::Int(v) => v.to_string(),
+                CalibrationScore::Text(s) => s.to_string(),
+            };
+            let thr_s = match threshold {
+                CalibrationThreshold::Float(v) => format!("{v:.4}"),
+                CalibrationThreshold::Int(v) => v.to_string(),
+                CalibrationThreshold::Text(s) => s.to_string(),
+            };
+            let _ = writeln!(out, "{kind}|{key}|{score_s}|{thr_s}");
+        }
+        crate::cli::DebugFormat::Jsonl => {
+            let score_v = match score {
+                CalibrationScore::Float(v) => serde_json::Value::from(v),
+                CalibrationScore::Int(v) => serde_json::Value::from(v),
+                CalibrationScore::Text(s) => serde_json::Value::from(s),
+            };
+            let thr_v = match threshold {
+                CalibrationThreshold::Float(v) => serde_json::Value::from(v),
+                CalibrationThreshold::Int(v) => serde_json::Value::from(v),
+                CalibrationThreshold::Text(s) => serde_json::Value::from(s),
+            };
+            let line = serde_json::json!({
+                "kind": kind,
+                "key": key,
+                "score": score_v,
+                "threshold": thr_v,
+            });
+            let _ = writeln!(out, "{line}");
         }
     }
 }
@@ -473,6 +667,9 @@ mod tests {
             vec![VulnRef {
                 id: "CVE-2025-1".into(),
                 severity,
+                aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
         Enrichment {
@@ -683,5 +880,105 @@ mod tests {
         assert!(budget_tripped(&cs, None, Some(0), None));
         assert!(budget_tripped(&cs, None, None, Some(0)));
         assert!(!budget_tripped(&cs, Some(2), Some(1), Some(1)));
+    }
+
+    #[test]
+    fn calibration_pipe_format_matches_v0_7_layout() {
+        let e = enrichment_with_typosquat();
+        let mut buf = Vec::new();
+        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Pipe);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.starts_with("typosquat|"), "got: {s}");
+        assert_eq!(
+            s.matches('|').count(),
+            3,
+            "pipe row has 4 fields → 3 separators; got: {s}"
+        );
+    }
+
+    #[test]
+    fn calibration_jsonl_format_emits_one_object_per_line() {
+        let e = enrichment_with_typosquat();
+        let mut buf = Vec::new();
+        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Jsonl);
+        let s = String::from_utf8(buf).unwrap();
+        let lines: Vec<&str> = s.lines().collect();
+        assert_eq!(lines.len(), 1);
+        let v: serde_json::Value = serde_json::from_str(lines[0]).expect("valid jsonl");
+        assert_eq!(v["kind"], "typosquat");
+        assert!(v["score"].is_number(), "numeric score in jsonl");
+        assert!(v["threshold"].is_number());
+        assert!(v["key"].is_string());
+    }
+
+    #[test]
+    fn calibration_jsonl_keeps_severity_label_as_string() {
+        let e = enrichment_with_cve_at(Severity::High);
+        let mut buf = Vec::new();
+        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Jsonl);
+        let s = String::from_utf8(buf).unwrap();
+        let v: serde_json::Value = serde_json::from_str(s.trim()).unwrap();
+        assert_eq!(v["kind"], "cve");
+        assert_eq!(v["score"], "HIGH");
+        assert_eq!(v["threshold"], "high+");
+    }
+
+    #[test]
+    fn fail_on_kev_trips_when_any_advisory_kev_set() {
+        let mut e = enrichment_with_cve_at(Severity::Medium);
+        // Flip the kev flag on the single advisory.
+        for refs in e.vulns.values_mut() {
+            refs[0].kev = true;
+        }
+        assert!(tripped(&ChangeSet::default(), &e, FailOn::Kev));
+        assert!(!tripped(
+            &ChangeSet::default(),
+            &enrichment_with_cve_at(Severity::Medium),
+            FailOn::Kev
+        ));
+    }
+
+    #[test]
+    fn any_epss_threshold_gating() {
+        let mut e = enrichment_with_cve_at(Severity::Medium);
+        for refs in e.vulns.values_mut() {
+            refs[0].epss_score = Some(0.6);
+        }
+        assert!(any_epss_at_or_above(&e, 0.5));
+        assert!(any_epss_at_or_above(&e, 0.6));
+        assert!(!any_epss_at_or_above(&e, 0.7));
+    }
+
+    #[test]
+    fn calibration_emits_epss_and_kev_rows_when_set() {
+        let mut e = enrichment_with_cve_at(Severity::High);
+        for refs in e.vulns.values_mut() {
+            refs[0].epss_score = Some(0.87);
+            refs[0].kev = true;
+        }
+        let mut buf = Vec::new();
+        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Pipe);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("epss|"), "missing epss row: {s}");
+        assert!(s.contains("kev|"), "missing kev row: {s}");
+    }
+
+    #[test]
+    fn fail_on_license_violation_trips() {
+        use crate::enrich::{LicenseViolation, LicenseViolationKind};
+        let mut e = Enrichment::default();
+        e.license_violations.push(LicenseViolation {
+            component: comp("foo"),
+            license: "GPL-3.0-only".into(),
+            matched_rule: "deny: GPL-3.0-only".into(),
+            kind: LicenseViolationKind::Deny,
+        });
+        assert!(tripped(&ChangeSet::default(), &e, FailOn::LicenseViolation));
+        assert!(tripped(&ChangeSet::default(), &e, FailOn::Any));
+        assert!(!tripped(
+            &ChangeSet::default(),
+            &Enrichment::default(),
+            FailOn::LicenseViolation
+        ));
     }
 }

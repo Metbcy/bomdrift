@@ -125,6 +125,15 @@ inputs:
   github-token:
     description: Token used to post PR comments. Defaults to GITHUB_TOKEN.
     default: ${{ github.token }}
+  upload-to-code-scanning:
+    description: |
+      When `true` AND `output: sarif`, upload the rendered SARIF artifact
+      to GitHub Code Scanning via `github/codeql-action/upload-sarif@v3`.
+      Requires the calling workflow to have `permissions.security-events:
+      write`. Off by default for back-compat — v0.7 callers see no
+      behavior change. See
+      https://metbcy.github.io/bomdrift/sarif.html for wiring details.
+    default: 'false'
 
 runs:
   using: composite
@@ -192,3 +201,15 @@ runs:
         VERIFY_SIGNATURES: ${{ inputs.verify-signatures }}
         INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
         BOMDRIFT_REPO_URL: 'https://github.com/${{ github.repository }}'
+        UPLOAD_TO_CODE_SCANNING: ${{ inputs.upload-to-code-scanning }}
+
+    # Code Scanning upload is opt-in. Requires the calling workflow to grant
+    # `permissions.security-events: write`. We only run when the user
+    # explicitly asked for SARIF AND opted in — uploading any other format
+    # would 422 from the GitHub API.
+    - name: Upload SARIF to Code Scanning
+      if: inputs.upload-to-code-scanning == 'true' && inputs.output == 'sarif'
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ github.workspace }}/bomdrift.sarif
+        category: bomdrift

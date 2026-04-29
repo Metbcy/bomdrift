@@ -133,7 +133,16 @@ pub fn render_with_color(cs: &ChangeSet, enrichment: &Enrichment, color: ColorCh
             sorted.sort_by(|a, b| b.severity.cmp(&a.severity).then_with(|| a.id.cmp(&b.id)));
             let advisories = sorted
                 .iter()
-                .map(|r| format!("{} ({})", r.id, r.severity))
+                .map(|r| {
+                    let mut s = format!("{} ({})", r.id, r.severity);
+                    if let Some(score) = r.epss_score {
+                        s.push_str(&format!(" EPSS {score:.2}"));
+                    }
+                    if r.kev {
+                        s.push_str(" KEV");
+                    }
+                    s
+                })
                 .collect::<Vec<_>>()
                 .join(", ");
             let _ = writeln!(
@@ -157,6 +166,27 @@ pub fn render_with_color(cs: &ChangeSet, enrichment: &Enrichment, color: ColorCh
         );
         for f in &enrichment.typosquats {
             write_typosquat_line(&mut out, f, color);
+        }
+        out.push('\n');
+    }
+
+    if !enrichment.license_violations.is_empty() {
+        let _ = writeln!(
+            out,
+            "License violations ({}):",
+            enrichment.license_violations.len()
+        );
+        for v in &enrichment.license_violations {
+            let _ = writeln!(
+                out,
+                "  {} {}:{}@{} - {} [{}]",
+                tag("[LIC]", Tone::High, color),
+                v.component.ecosystem,
+                v.component.name,
+                v.component.version,
+                v.license,
+                v.matched_rule,
+            );
         }
         out.push('\n');
     }
@@ -310,6 +340,9 @@ mod tests {
             vec![crate::enrich::VulnRef {
                 id: "MAL-2026-2306".to_string(),
                 severity: crate::enrich::Severity::Critical,
+                aliases: Vec::new(),
+                epss_score: None,
+                kev: false,
             }],
         );
 

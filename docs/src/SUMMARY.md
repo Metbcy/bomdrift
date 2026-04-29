@@ -12,12 +12,16 @@
 # Output
 
 - [Output formats](./output-formats.md)
+- [SARIF + Code Scanning](./sarif.md)
+- [License policy](./license-policy.md)
 - [Baseline & suppression](./baseline.md)
 
 # Enrichers
 
 - [Overview](./enrichers/overview.md)
 - [OSV.dev CVE lookup](./enrichers/osv-cve.md)
+- [EPSS](./enrichers/epss.md)
+- [CISA KEV](./enrichers/kev.md)
 - [Typosquat detection](./enrichers/typosquat.md)
 - [Multi-major version jumps](./enrichers/version-jump.md)
 - [Maintainer age signal](./enrichers/maintainer-age.md)

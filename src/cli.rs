@@ -75,6 +75,19 @@ pub struct BaselineAddArgs {
     /// created if missing.
     #[arg(long, default_value = ".bomdrift/baseline.json")]
     pub path: PathBuf,
+
+    /// Optional expiry date (YYYY-MM-DD). Once today is past this date,
+    /// the entry stops suppressing and bomdrift prints a warning to
+    /// stderr. Useful for time-boxed risk acceptance ("ignore until
+    /// upstream ships a fix"). Strict format: zero-padded month/day.
+    #[arg(long)]
+    pub expires: Option<String>,
+
+    /// Optional human-readable reason recorded alongside the entry.
+    /// Surfaces in the v0.9 VEX export and in the warning printed when
+    /// the entry expires. Free-form text.
+    #[arg(long)]
+    pub reason: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -262,8 +275,60 @@ pub struct DiffArgs {
     /// `typosquat`, `maintainer-age`, `version-jump`, `cve`. `score` is
     /// the underlying similarity / age / jump-size / CVSS value;
     /// `threshold` is the constant the finding was compared against.
+    /// Skip the EPSS enricher (FIRST.org) entirely. Useful for offline /
+    /// air-gapped CI where outbound HTTP is blocked, or when EPSS data is
+    /// not part of the team's risk model. Disables both the network call
+    /// and the disk cache lookup.
+    #[arg(long)]
+    pub no_epss: bool,
+    /// Skip the CISA KEV enricher entirely.
+    #[arg(long)]
+    pub no_kev: bool,
+    /// Trip exit-2 when any advisory's EPSS score is >= this threshold
+    /// (0.0 - 1.0). Recommended starting point: 0.5 (top decile of
+    /// actively-exploited CVEs). Implicit `--fail-on cve` semantics —
+    /// only advisories surface this; non-CVE findings are unaffected.
+    #[arg(long)]
+    pub fail_on_epss: Option<f32>,
+    /// Comma-separated SPDX license identifiers (or `*`-suffix globs)
+    /// permitted by policy. May be repeated. CLI flag takes precedence
+    /// over `[license] allow` in `.bomdrift.toml` (override, not merge).
+    #[arg(long, value_delimiter = ',')]
+    pub allow_licenses: Vec<String>,
+    /// Comma-separated SPDX license identifiers (or `*`-suffix globs)
+    /// forbidden by policy. May be repeated. Deny wins when a license
+    /// matches both allow and deny.
+    #[arg(long, value_delimiter = ',')]
+    pub deny_licenses: Vec<String>,
+    /// When set, compound SPDX expressions like `(MIT OR GPL-3.0)` are
+    /// permitted (the v0.9 SPDX evaluator will replace this with proper
+    /// expression evaluation). Off by default — fail-closed.
+    #[arg(long)]
+    pub allow_ambiguous_licenses: bool,
     #[arg(long)]
     pub debug_calibration: bool,
+    /// Format for `--debug-calibration` rows. `pipe` (default, back-compat
+    /// with v0.7) emits `kind|key|score|threshold` per line; `jsonl` emits
+    /// one JSON object per line for downstream tooling that doesn't want
+    /// to maintain a custom CSV-ish parser.
+    #[arg(long, value_enum, default_value_t = DebugFormat::Pipe)]
+    pub debug_calibration_format: DebugFormat,
+    /// Write the chosen `--output` format to this path instead of stdout.
+    /// Useful for SARIF (`--output sarif --output-file bomdrift.sarif`)
+    /// where YAML quoting `>` redirection is fragile in CI templates.
+    #[arg(long)]
+    pub output_file: Option<PathBuf>,
+}
+
+/// Wire format for `--debug-calibration` output. Pipe-delimited keeps v0.7
+/// callers working unchanged; JSONL is the recommended shape for new tooling
+/// because adding a new finding kind doesn't fork the parser.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DebugFormat {
+    #[default]
+    Pipe,
+    Jsonl,
 }
 
 /// Threshold for `--fail-on` exit-code-2 behavior.
@@ -288,6 +353,13 @@ pub enum FailOn {
     Typosquat,
     /// Trip when at least one same-version license change is present.
     LicenseChange,
+    /// Trip when any advisory's CISA KEV flag is set (i.e. listed in the
+    /// Known Exploited Vulnerabilities catalog). KEV is a high-signal
+    /// "actively exploited in the wild" claim — narrower than `cve` but
+    /// less rigid than `critical-cve` (KEV entries can be Medium-severity).
+    Kev,
+    /// Trip on a license-policy violation (Phase D, v0.8+).
+    LicenseViolation,
     /// Trip on ANY finding (CVE, typosquat, version-jump, young-maintainer)
     /// OR any license-changed-without-version-bump pair (the suspicious case).
     Any,

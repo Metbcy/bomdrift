@@ -12,9 +12,15 @@ keeping the project OSS-first: no hosted dashboard, no account, no telemetry.
 | Local CLI | Supported on Linux x86_64/aarch64, macOS aarch64, Windows x86_64 |
 | SBOM formats | CycloneDX JSON, SPDX JSON, Syft JSON |
 | In-comment suppression (GitHub) | Supported through `Metbcy/bomdrift/comment-suppress@v1` |
-| GitLab CI merge requests | Supported through the `examples/gitlab-ci/` template (v0.7+); in-comment suppression deferred to v0.8 |
+| GitHub Code Scanning (SARIF upload) | Supported (v0.8+) — set `upload-to-code-scanning: 'true'` |
+| EPSS exploit-prediction scoring | Supported (v0.8+) — auto, opt-out via `--no-epss` |
+| CISA KEV (known-exploited) flagging | Supported (v0.8+) — auto, opt-out via `--no-kev` |
+| License allow/deny policy | Supported (v0.8+) — `[license]` block / CLI flags |
+| Suppression expiry (`expires` + `reason`) | Supported (v0.8+) — time-boxed risk acceptance |
+| GitLab CI merge requests | Supported through the `examples/gitlab-ci/` template (v0.7+); in-comment suppression deferred to v0.9 |
 | GitHub Enterprise / self-hosted runners | Expected to work, not broadly tested yet |
-| Bitbucket | Not supported |
+| Bitbucket / Azure DevOps | Planned for v0.9 |
+| VEX consume / emit | Planned for v0.9 |
 | Hosted dashboard / SaaS | Not planned |
 
 ## Known limitations
