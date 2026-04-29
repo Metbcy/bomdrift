@@ -1,0 +1,63 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment, skipping in-flight runs but always
+# letting the most recent push reach production. Manually-dispatched runs
+# fall outside the cancel-in-progress to support targeted re-deploys.
+concurrency:
+  group: docs-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: docs-mdbook
+          shared-key: docs
+
+      - name: Install mdBook
+        shell: bash
+        run: |
+          # Pin to a specific minor version for build reproducibility.
+          # Bump deliberately (and review the rendered diff) when upstream
+          # ships a meaningful new feature.
+          cargo install --locked --version 0.5.2 mdbook
+
+      - name: Build the book
+        shell: bash
+        run: mdbook build docs
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/book
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
