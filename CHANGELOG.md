@@ -7,6 +7,48 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-04-28
+
+The "make the action actually produce output" patch release. Sister
+fix to v0.4.3, which fixed the action manifest's location but left
+two upstream bugs that prevented bomdrift from running at all once
+the manifest was found.
+
+### Fixed
+
+- **`log()` and `endlog()` now write workflow-command directives to
+  stderr instead of stdout.** The functions are called from inside
+  `download_bomdrift()` whose stdout is captured by the caller
+  (`bin="$(download_bomdrift ...)"`) and from inside `run_diff()`
+  whose stdout is tee'd into the PR comment body. Writing
+  `::group::...` directives to stdout meant:
+
+  1. `$bin` became a concatenation of `::group::bomdrift:
+     Downloading...` + cosign's "Verified OK" + `::endgroup::` +
+     the actual binary path. Bash then tried to exec a "command"
+     called `::group::bomdrift: Downloading...` and reported
+     `File name too long`, so bomdrift never actually ran.
+  2. The PR comment body ended up as
+     `<!-- bomdrift:diff -->\n::group::bomdrift: Running ...\n::endgroup::`
+     — just the action's own log markers wrapped around an empty
+     body, since the binary never produced output.
+
+  GitHub Actions parses workflow commands from BOTH stdout and
+  stderr, so the UI grouping is preserved while the captured
+  streams stay clean for the data they're carrying.
+
+- **`download_bomdrift()` now redirects its entire work region to
+  stderr via `exec 3>&1 1>&2`, restoring stdout only for the final
+  `printf '%s' "$bin"`.** Catches every other stdout-leaking
+  command in the function — cosign's "Verified OK", any future
+  curl progress modes that route to stdout, tar's verbose output if
+  someone adds `-v`, etc. The captured-bin-path value is now
+  guaranteed to be the binary path and nothing else.
+
+This bug has been latent since the action shipped in v0.1.0; v0.4.3
+was the first release where someone actually invoked the action and
+hit it (bomdrift's own dogfood workflow on PR #1).
+
 ## [0.4.3] - 2026-04-28
 
 The "make the action actually invokable" patch release. No new
@@ -444,7 +486,8 @@ changed dependency in a format ready to drop into a PR comment.
 - Linux aarch64 binary.
 - PyPI / Cargo / Maven typosquat reference lists (only npm in v0.1.0).
 
-[Unreleased]: https://github.com/Metbcy/bomdrift/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/Metbcy/bomdrift/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/Metbcy/bomdrift/releases/tag/v0.4.4
 [0.4.3]: https://github.com/Metbcy/bomdrift/releases/tag/v0.4.3
 [0.4.2]: https://github.com/Metbcy/bomdrift/releases/tag/v0.4.2
 [0.4.1]: https://github.com/Metbcy/bomdrift/releases/tag/v0.4.1

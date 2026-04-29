@@ -16,10 +16,18 @@ GH_API="https://api.github.com/repos/${REPO}"
 GH_DL="https://github.com/${REPO}/releases/download"
 
 log() {
-  printf '::group::bomdrift: %s\n' "$*"
+  # Write workflow-command directives to stderr, not stdout. log/endlog are
+  # called from inside helper functions whose stdout is captured by callers
+  # (`bin="$(download_bomdrift ...)"` and `run_diff ... | tee out_file`).
+  # Writing to stdout would inject `::group::...` directives into the
+  # captured value or the PR comment body. GitHub Actions parses workflow
+  # commands from BOTH streams, so directing to stderr preserves the
+  # job-log UI grouping while keeping the stdout streams clean for the
+  # data they're carrying.
+  printf '::group::bomdrift: %s\n' "$*" >&2
 }
 endlog() {
-  printf '::endgroup::\n'
+  printf '::endgroup::\n' >&2
 }
 fail() {
   printf '::error::%s\n' "$*" >&2
@@ -108,6 +116,15 @@ download_bomdrift() {
   local workdir
   workdir="$(mktemp -d)"
 
+  # The caller captures this function's stdout (`bin="$(download_bomdrift
+  # ...)"`) to receive the bomdrift-binary path. Anything that leaks onto
+  # stdout from the work below — log/endlog directives, cosign's
+  # "Verified OK", curl progress in some terminal modes, tar output — would
+  # contaminate $bin. Redirect the whole work region to stderr via fd 3 →
+  # 1, then restore stdout just before the final printf that emits the
+  # bin path.
+  exec 3>&1 1>&2
+
   log "Downloading ${archive}"
   curl -fSL -o "${workdir}/${archive}" "${url}"
   if [ "$verify" = "true" ]; then
@@ -156,6 +173,9 @@ download_bomdrift() {
   if [ ! -x "$bin" ]; then
     chmod +x "$bin" 2>/dev/null || true
   fi
+
+  # Restore stdout and emit the bin path as the function's "return value".
+  exec 1>&3 3>&-
   printf '%s' "$bin"
 }
 
