@@ -1,0 +1,57 @@
+name: bomdrift comment-suppress
+description: |
+  Watch issue_comment events for `/bomdrift suppress <ID>` commands on
+  pull-request comments and append the advisory ID to the PR's
+  baseline file. Commits the baseline change to the PR's head branch
+  (the next bomdrift run on the same PR will then see the finding as
+  suppressed).
+
+  Companion to the main `Metbcy/bomdrift@v1` action. Consumed via
+  `Metbcy/bomdrift/comment-suppress@v1`.
+
+  Required permissions for the calling workflow:
+    contents: write       # to commit the baseline file
+    pull-requests: write  # to react with 👍/👎 on the trigger comment
+
+  Required event: `issue_comment` (with `types: [created]`). The sub-
+  action checks itself that the event came from a PR comment and that
+  the body parses as `/bomdrift suppress <ID>`; non-matching events
+  exit cleanly without committing anything.
+
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  baseline-path:
+    description: |
+      Path to the baseline JSON file relative to the repo root. The file
+      is created if missing; the parent directory is created if missing.
+      Default `.bomdrift/baseline.json` to align with the convention the
+      `bomdrift baseline add` CLI subcommand uses.
+    default: '.bomdrift/baseline.json'
+  github-token:
+    description: |
+      Token with `contents: write` and `pull-requests: write` on the
+      repo. Defaults to the workflow's GITHUB_TOKEN.
+    default: ${{ github.token }}
+  verify-signatures:
+    description: |
+      Whether to install cosign and verify the bomdrift release archive's
+      Sigstore signature before running it. Same default + opt-out as
+      the main action.
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Install cosign (for release signature verification)
+      if: inputs.verify-signatures == 'true'
+      uses: sigstore/cosign-installer@v3
+    - name: Run bomdrift comment-suppress
+      shell: bash
+      run: ${{ github.action_path }}/entrypoint.sh
+      env:
+        BASELINE_PATH: ${{ inputs.baseline-path }}
+        VERIFY_SIGNATURES: ${{ inputs.verify-signatures }}
+        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}

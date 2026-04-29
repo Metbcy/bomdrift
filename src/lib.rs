@@ -13,7 +13,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::cli::{Cli, Command, DiffArgs, FailOn, OutputFormat};
+use crate::cli::{BaselineAction, Cli, Command, DiffArgs, FailOn, OutputFormat};
 use crate::diff::ChangeSet;
 use crate::enrich::{Enrichment, Severity};
 
@@ -26,6 +26,32 @@ pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Diff(args) => run_diff(args),
         Command::RefreshTyposquat(args) => refresh::run(args),
+        Command::Baseline { action } => run_baseline(action),
+    }
+}
+
+fn run_baseline(action: BaselineAction) -> Result<()> {
+    match action {
+        BaselineAction::Add(args) => {
+            let outcome = baseline::add_suppression(&args.path, &args.id)?;
+            match outcome {
+                baseline::AddOutcome::Added => {
+                    eprintln!(
+                        "bomdrift: added '{id}' to {path}",
+                        id = args.id.trim(),
+                        path = args.path.display(),
+                    );
+                }
+                baseline::AddOutcome::AlreadyPresent => {
+                    eprintln!(
+                        "bomdrift: '{id}' already present in {path}; no change",
+                        id = args.id.trim(),
+                        path = args.path.display(),
+                    );
+                }
+            }
+            Ok(())
+        }
     }
 }
 
