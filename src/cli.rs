@@ -69,7 +69,10 @@ pub struct BaselineAddArgs {
     /// match by ID. Use the diff-output baseline format (the JSON shape
     /// emitted by `bomdrift diff --output json`) for finer per-purl
     /// suppression instead.
-    pub id: String,
+    ///
+    /// Optional when `--from-comment` is supplied — the directive in
+    /// the comment body provides the ID instead.
+    pub id: Option<String>,
 
     /// Path to the baseline file. Created if missing; parent directory is
     /// created if missing.
@@ -88,6 +91,23 @@ pub struct BaselineAddArgs {
     /// the entry expires. Free-form text.
     #[arg(long)]
     pub reason: Option<String>,
+
+    /// Parse the body of a forge-issued PR/MR comment and extract the
+    /// suppress directive. Accepts the raw note body as a single
+    /// string. The directive grammar (matched case-sensitively at the
+    /// start of any line, after optional leading whitespace):
+    ///
+    /// ```text
+    /// /bomdrift suppress <ID>[ reason: <text>]
+    /// ```
+    ///
+    /// `<ID>` must match `(?:GHSA|CVE|MAL|OSV)-[A-Z0-9-]+`. When no
+    /// matching line is found, the command exits with a non-zero code
+    /// and prints a clear stderr message — so a webhook bridge that
+    /// invokes this flag doesn't silently no-op on a non-suppress
+    /// comment. v0.9+.
+    #[arg(long)]
+    pub from_comment: Option<String>,
 }
 
 #[derive(Args, Debug)]

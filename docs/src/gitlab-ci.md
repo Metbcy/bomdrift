@@ -176,3 +176,45 @@ permissions).
 | In-comment suppression | ✅ | v0.8 |
 | Manual suppression job | n/a | ✅ |
 | `<!-- bomdrift:diff -->` marker | ✅ | ✅ (same shape — cross-platform tooling can grep one shape) |
+
+## Comment-driven suppression (advanced)
+
+> **Trade-off up front.** Comment-driven suppression turns a
+> reviewer comment like `/bomdrift suppress GHSA-...` into an
+> automatic baseline edit. To wire it up safely you need to operate
+> a small public webhook handler. The manual suppression job
+> documented above is supported and lower-risk; reach for the
+> bridge only when the zero-click UX is worth running a service.
+
+The GitHub flow ships out-of-the-box (`comment-suppress` sub-action
+fronted by the existing webhook). GitLab requires a webhook handler
+because GitLab's `Note Hook` doesn't include a command-prefix filter.
+
+### Bridge
+
+`examples/gitlab-ci/comment-bridge/` ships a Cloudflare Worker
+reference implementation that enforces five security guards:
+
+1. Webhook secret verification (constant-time `X-Gitlab-Token`).
+2. Event-type filter (`Note Hook` only).
+3. Project-ID allowlist.
+4. Commenter access_level >= 30 (Developer+ on the project).
+5. MR-context guard (rejects fork-MR comment exfiltration).
+
+When the guards pass, the worker triggers the GitLab pipeline with
+`BOMDRIFT_NOTE_BODY` set to the raw comment body. The
+`bomdrift:suppress` job in `suppress.gitlab-ci.yml` then runs
+`bomdrift baseline add --from-comment "$BOMDRIFT_NOTE_BODY"` to
+extract the directive and update `.bomdrift/baseline.json`.
+
+The threat model is documented in
+[`examples/gitlab-ci/comment-bridge/README.md`](https://github.com/Metbcy/bomdrift/tree/main/examples/gitlab-ci/comment-bridge#threat-model).
+The same logic ports to Vercel / Netlify / AWS Lambda — see
+[`vercel-equivalent.md`](https://github.com/Metbcy/bomdrift/blob/main/examples/gitlab-ci/comment-bridge/vercel-equivalent.md).
+
+### Recommended hosting
+
+Cloudflare Workers — the reference. The free tier covers most
+webhook traffic. `wrangler tail` makes live debugging easy.
+Vercel / Netlify Edge Functions are equally good if your team
+already operates on those platforms.

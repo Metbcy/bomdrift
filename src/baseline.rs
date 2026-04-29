@@ -439,6 +439,72 @@ pub enum AddOutcome {
     AlreadyPresent,
 }
 
+/// Parse the body of a PR/MR comment and extract a single
+/// `/bomdrift suppress <ID>[ reason: <text>]` directive. The grammar
+/// is documented in CLI help and in
+/// `examples/gitlab-ci/comment-bridge/`'s threat model. The same
+/// shape is honored by `comment-suppress/entrypoint.sh` for the
+/// GitHub flow — keep these in lockstep.
+///
+/// Returns `Ok(Some((id, optional_reason)))` on a single match,
+/// `Ok(None)` on no match, `Err` on a malformed ID.
+pub fn parse_comment_directive(body: &str) -> Result<Option<(String, Option<String>)>> {
+    // Looks for `/bomdrift suppress <ID>[ reason: <text>]` on each
+    // line; the directive may be preceded by free-form prose and/or
+    // mention markers. A leading `^\s*` anchor on the directive itself
+    // is too strict — reviewers paste the directive after a comment.
+    for line in body.lines() {
+        let Some(idx) = line.find("/bomdrift") else {
+            continue;
+        };
+        let rest = &line[idx + "/bomdrift".len()..];
+        let rest = rest.trim_start();
+        let Some(rest) = rest.strip_prefix("suppress") else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        if rest.is_empty() {
+            continue;
+        }
+        let mut iter = rest.splitn(2, char::is_whitespace);
+        let raw_id = iter.next().unwrap_or("").trim();
+        if raw_id.is_empty() {
+            continue;
+        }
+        if !is_valid_advisory_id(raw_id) {
+            anyhow::bail!(
+                "comment directive contained a malformed advisory ID: {raw_id:?} \
+                 (expected GHSA-/CVE-/MAL-/OSV- prefix and alnum/dash body)"
+            );
+        }
+        let reason = iter.next().and_then(|tail| {
+            let tail = tail.trim();
+            tail.strip_prefix("reason:")
+                .map(|r| r.trim().to_string())
+                .filter(|s| !s.is_empty())
+        });
+        return Ok(Some((raw_id.to_string(), reason)));
+    }
+    Ok(None)
+}
+
+fn is_valid_advisory_id(s: &str) -> bool {
+    // Aligns with comment-suppress/entrypoint.sh's regex:
+    //   ^(GHSA-[a-z0-9-]+|CVE-[0-9]{4}-[0-9]+|MAL-[0-9]{4}-[0-9]+|OSV-[A-Z0-9-]+)$
+    // Kept slightly looser here (we accept GHSA-uppercase and OSV-* too)
+    // so future advisory schemes don't trip the bridge unnecessarily.
+    let Some((prefix, rest)) = s.split_once('-') else {
+        return false;
+    };
+    if !matches!(prefix, "GHSA" | "CVE" | "MAL" | "OSV") {
+        return false;
+    }
+    if rest.is_empty() {
+        return false;
+    }
+    rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
 fn doc_kind(v: &serde_json::Value) -> &'static str {
     match v {
         serde_json::Value::Null => "null",
@@ -891,5 +957,40 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    // ---- v0.9 comment-directive parser ----
+
+    #[test]
+    fn parse_comment_directive_extracts_id_only() {
+        let body = "Looks fine. /bomdrift suppress GHSA-mwcw-c2x4-8c55";
+        let r = parse_comment_directive(body).unwrap().unwrap();
+        assert_eq!(r.0, "GHSA-mwcw-c2x4-8c55");
+        assert_eq!(r.1, None);
+    }
+
+    #[test]
+    fn parse_comment_directive_extracts_id_and_reason() {
+        let body = "/bomdrift suppress CVE-2024-12345 reason: vendor confirmed false-positive";
+        let r = parse_comment_directive(body).unwrap().unwrap();
+        assert_eq!(r.0, "CVE-2024-12345");
+        assert_eq!(r.1.as_deref(), Some("vendor confirmed false-positive"));
+    }
+
+    #[test]
+    fn parse_comment_directive_returns_none_when_no_directive() {
+        assert!(
+            parse_comment_directive("no directive here")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn parse_comment_directive_rejects_malformed_id() {
+        let err = parse_comment_directive("/bomdrift suppress not-an-id")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("malformed"));
     }
 }

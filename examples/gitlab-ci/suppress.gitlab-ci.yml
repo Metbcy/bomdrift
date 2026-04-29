@@ -28,10 +28,15 @@ bomdrift:suppress:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       when: manual
+    # When the comment-bridge worker triggers a pipeline, the source
+    # is `pipeline` and the directive arrives as `BOMDRIFT_NOTE_BODY`.
+    - if: $BOMDRIFT_NOTE_BODY
+      when: always
   variables:
     BOMDRIFT_SUPPRESS_ID: ""
+    BOMDRIFT_NOTE_BODY: ""
     BOMDRIFT_BASELINE_PATH: ".bomdrift/baseline.json"
-    BOMDRIFT_VERSION: "v0.7.0"
+    BOMDRIFT_VERSION: "v0.9.0"
   before_script:
     - apk add --no-cache bash curl git tar gzip ca-certificates
   script:
@@ -39,21 +44,10 @@ bomdrift:suppress:
       set -euo pipefail
       bash <<'BOMDRIFT'
 
-      if [ -z "${BOMDRIFT_SUPPRESS_ID}" ]; then
-        echo "BOMDRIFT_SUPPRESS_ID is empty — pass an advisory ID (GHSA / CVE / MAL pattern) when triggering the job" >&2
-        exit 1
-      fi
       if [ -z "${BOMDRIFT_PUSH_TOKEN:-}" ]; then
         echo "BOMDRIFT_PUSH_TOKEN not set; cannot push baseline update" >&2
         exit 1
       fi
-
-      # --- Validate the ID shape early; the CLI does this too but a clear
-      # --- error here saves the download round-trip. -----------------------
-      case "${BOMDRIFT_SUPPRESS_ID}" in
-        GHSA-* | CVE-* | MAL-*) ;;
-        *) echo "Unrecognized advisory ID shape: ${BOMDRIFT_SUPPRESS_ID}" >&2; exit 1 ;;
-      esac
 
       ARCH="$(uname -m)"
       case "$ARCH" in
@@ -67,22 +61,42 @@ bomdrift:suppress:
       chmod +x ./bomdrift
 
       # --- Resolve MR head ref --------------------------------------------
-      HEAD_REF="${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}"
+      HEAD_REF="${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-${CI_COMMIT_REF_NAME}}"
       git fetch origin "${HEAD_REF}"
       git checkout "${HEAD_REF}"
 
-      # --- Append + commit -------------------------------------------------
-      ./bomdrift baseline add "${BOMDRIFT_SUPPRESS_ID}" --path "${BOMDRIFT_BASELINE_PATH}"
+      # --- Two paths -------------------------------------------------------
+      # Path A: comment-bridge supplied the raw note body — let the
+      # bomdrift CLI parse the `/bomdrift suppress <ID>[ reason: ...]`
+      # directive (matches the comment-suppress sub-action grammar).
+      #
+      # Path B (manual fallback): use the explicit BOMDRIFT_SUPPRESS_ID
+      # variable — same shape as v0.7 / v0.8.
+      if [ -n "${BOMDRIFT_NOTE_BODY}" ]; then
+        ./bomdrift baseline add \
+          --from-comment "${BOMDRIFT_NOTE_BODY}" \
+          --path "${BOMDRIFT_BASELINE_PATH}"
+      else
+        if [ -z "${BOMDRIFT_SUPPRESS_ID}" ]; then
+          echo "Either BOMDRIFT_NOTE_BODY or BOMDRIFT_SUPPRESS_ID must be set" >&2
+          exit 1
+        fi
+        case "${BOMDRIFT_SUPPRESS_ID}" in
+          GHSA-* | CVE-* | MAL-*) ;;
+          *) echo "Unrecognized advisory ID shape: ${BOMDRIFT_SUPPRESS_ID}" >&2; exit 1 ;;
+        esac
+        ./bomdrift baseline add "${BOMDRIFT_SUPPRESS_ID}" --path "${BOMDRIFT_BASELINE_PATH}"
+      fi
 
       if git diff --quiet -- "${BOMDRIFT_BASELINE_PATH}"; then
-        echo "Baseline unchanged — ${BOMDRIFT_SUPPRESS_ID} was already suppressed."
+        echo "Baseline unchanged — directive was a no-op."
         exit 0
       fi
 
       git config user.email "bomdrift-suppress@${CI_SERVER_HOST}"
       git config user.name  "bomdrift suppress"
       git add "${BOMDRIFT_BASELINE_PATH}"
-      git commit -m "chore(bomdrift): suppress ${BOMDRIFT_SUPPRESS_ID}"
+      git commit -m "chore(bomdrift): suppress (via $( [ -n "${BOMDRIFT_NOTE_BODY}" ] && echo comment || echo manual ))"
 
       AUTH_REMOTE="https://oauth2:${BOMDRIFT_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
       git push "${AUTH_REMOTE}" "HEAD:${HEAD_REF}"
