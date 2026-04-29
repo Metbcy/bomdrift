@@ -1,3 +1,4 @@
+pub mod baseline;
 pub mod cli;
 pub mod diff;
 pub mod enrich;
@@ -33,7 +34,7 @@ fn run_diff(args: DiffArgs) -> Result<()> {
     let before = load_sbom(&args.before, format_hint)?;
     let after = load_sbom(&args.after, format_hint)?;
 
-    let cs = diff::diff(&before, &after);
+    let mut cs = diff::diff(&before, &after);
 
     let mut enrichment = if args.no_osv {
         enrich::Enrichment::default()
@@ -69,6 +70,15 @@ fn run_diff(args: DiffArgs) -> Result<()> {
                 );
             }
         }
+    }
+
+    // Apply the baseline AFTER all enrichers run — suppression operates on
+    // the realized finding set, not on intermediate inputs. This keeps the
+    // baseline file format stable as new enrichers are added: a new finding
+    // type that the baseline doesn't know about simply isn't suppressed.
+    if let Some(path) = &args.baseline {
+        let baseline = baseline::Baseline::load(path)?;
+        baseline::apply(&mut cs, &mut enrichment, &baseline);
     }
 
     let rendered = match args.output {
