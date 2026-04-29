@@ -11,7 +11,7 @@ description: |
 
   Required permissions for the calling workflow:
     contents: write       # to commit the baseline file
-    pull-requests: write  # to react with 👍/👎 on the trigger comment
+    pull-requests: write  # to react on the trigger comment
 
   Required event: `issue_comment` (with `types: [created]`). The sub-
   action checks itself that the event came from a PR comment and that

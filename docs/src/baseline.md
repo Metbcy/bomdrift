@@ -88,7 +88,7 @@ on:
 
 permissions:
   contents: write       # to commit the baseline file
-  pull-requests: write  # to react with 👀 / 👍 on the trigger comment
+  pull-requests: write  # to react on the trigger comment
 
 jobs:
   suppress:
@@ -110,7 +110,7 @@ defense-in-depth, not load-bearing.
 
 1. Parses the comment body for `/bomdrift suppress <id>`. The ID must
    match a GHSA / CVE / MAL pattern.
-2. Reacts with 👀 to acknowledge.
+2. Reacts to acknowledge that the command was accepted.
 3. Resolves the PR's head ref via the GitHub API.
 4. Downloads the latest bomdrift release archive and (by default)
    verifies its cosign signature.
@@ -120,7 +120,7 @@ defense-in-depth, not load-bearing.
    baseline file (creating the file if missing).
 7. Commits + pushes the baseline change with message
    `chore(bomdrift): suppress <id>`.
-8. Reacts with 👍 on success / 👎 on failure.
+8. Reacts on the trigger comment to show success or failure.
 
 ### What it suppresses
 

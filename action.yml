@@ -1,5 +1,5 @@
 name: bomdrift
-description: SBOM diff with supply-chain risk signals — flags new CVEs, typosquats, multi-major version jumps, and young maintainers on changed dependencies, posted as a PR comment.
+description: 'SBOM diff for GitHub PRs: flags new CVEs, typosquats, major jumps, and maintainer-age risk in changed dependencies.'
 branding:
   icon: shield
   color: blue
@@ -162,3 +162,4 @@ runs:
         BASELINE: ${{ inputs.baseline }}
         VERIFY_SIGNATURES: ${{ inputs.verify-signatures }}
         INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
+        BOMDRIFT_REPO_URL: 'https://github.com/${{ github.repository }}'
