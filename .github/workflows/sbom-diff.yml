@@ -1,0 +1,61 @@
+name: SBOM diff
+
+# Eat-your-own-dogfood: every PR that touches the Rust dependency
+# manifest gets a bomdrift comment showing the supply-chain diff between
+# main and the PR head. Proves the action works end-to-end on real
+# changes, and gives prospective users a live PR comment as a demo.
+
+on:
+  pull_request:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/sbom-diff.yml
+
+permissions:
+  contents: read
+  pull-requests: write       # to upsert the diff comment
+
+concurrency:
+  group: sbom-diff-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+
+      - name: Generate "after" SBOM (PR head)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: after.json
+
+      # Sibling checkout of the base ref so the SBOM generator sees a
+      # clean snapshot of main without the PR's diff applied.
+      - name: Checkout base ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: base
+
+      - name: Generate "before" SBOM (base ref)
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./base
+          format: cyclonedx-json
+          output-file: before.json
+
+      - name: Run bomdrift
+        uses: Metbcy/bomdrift@v1
+        with:
+          before-sbom: before.json
+          after-sbom:  after.json
+          # Informational only on the bomdrift repo; if the action ever
+          # surfaces something dangerous on a bomdrift PR, that's
+          # signal — not a merge-block. Tighten to `critical-cve` once
+          # we have enough false-positive history to know what's noise.
+          fail-on:     none
