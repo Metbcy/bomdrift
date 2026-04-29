@@ -7,6 +7,29 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **`Ecosystem::Other("file")` pseudo-components are now dropped from
+  diffs by default.** Syft's `directory` cataloger emits each YAML /
+  lockfile / source file in the scanned directory as a synthetic
+  component whose ecosystem string is `"file"`. Path differs between
+  the PR-head and base-ref checkouts, so each file shows up as both
+  Added and Removed in the same diff, drowning real package changes
+  in noise. The filter is applied at the CLI layer, after parse —
+  the `bomdrift::parse` library API still returns whatever the SBOM
+  format declares.
+
+  This is a visible default-output change but not a breaking one:
+  pre-v0.5 baselines that captured `file:` entries continue to load
+  (the baseline parser is forgiving) and the entries simply become
+  inert, matching against findings that no longer surface.
+
+### Added
+
+- **`--include-file-components` flag** on `bomdrift diff` for users
+  who want the raw cataloger output (debugging, auditing). Off by
+  default; enabling it restores the pre-v0.5 behavior.
+
 ## [0.4.4] - 2026-04-28
 
 The "make the action actually produce output" patch release. Sister

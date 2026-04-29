@@ -123,6 +123,15 @@ pub struct DiffArgs {
     /// goal is comment-size compression, not data loss).
     #[arg(long)]
     pub summary_only: bool,
+    /// Keep `Ecosystem::Other("file")` pseudo-components emitted by Syft's
+    /// directory cataloger. Off by default — the cataloger emits each
+    /// YAML / lockfile / source file in the scanned directory as a synthetic
+    /// component whose path differs between the PR-head and base-ref
+    /// checkouts, producing phantom Added/Removed pairs that drown real
+    /// package changes. Enable for debugging or auditing the raw cataloger
+    /// output.
+    #[arg(long)]
+    pub include_file_components: bool,
 }
 
 /// Threshold for `--fail-on` exit-code-2 behavior.
