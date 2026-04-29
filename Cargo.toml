@@ -2,7 +2,7 @@
 name = "bomdrift"
 version = "0.8.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "SBOM diff with supply-chain risk signals (CVEs, typosquats, maintainer-age)."
 license = "Apache-2.0"
 repository = "https://github.com/Metbcy/bomdrift"

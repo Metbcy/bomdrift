@@ -369,11 +369,11 @@ pub fn add_suppression_full(
         arr.push(serde_json::Value::String(trimmed.to_string()));
     }
 
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("creating parent dir: {}", parent.display()))?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating parent dir: {}", parent.display()))?;
     }
 
     // Atomic temp-file + rename, mirroring src/refresh.rs's pattern.
