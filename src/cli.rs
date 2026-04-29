@@ -21,7 +21,7 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Diff two SBOMs and surface supply-chain risk signals on changed components.
-    Diff(DiffArgs),
+    Diff(Box<DiffArgs>),
     /// Refresh the bundled typosquat top-package lists from upstream sources.
     ///
     /// Writes a fresh per-ecosystem list to the user's XDG cache directory
@@ -305,6 +305,24 @@ pub struct DiffArgs {
     /// expression evaluation). Off by default — fail-closed.
     #[arg(long)]
     pub allow_ambiguous_licenses: bool,
+    /// Path(s) to VEX (Vulnerability Exploitability eXchange) files
+    /// to consume. Repeatable. Each file is auto-detected as either
+    /// OpenVEX 0.2.0 or CycloneDX VEX 1.6. Statements with status
+    /// `not_affected` / `fixed` suppress matching findings; statements
+    /// with `under_investigation` annotate without suppressing;
+    /// statements with `affected` annotate as a no-op badge. See
+    /// <https://metbcy.github.io/bomdrift/vex.html> for the
+    /// finding-id matching rules including the synthetic-id convention
+    /// for non-CVE findings.
+    #[arg(long, action = clap::ArgAction::Append)]
+    pub vex: Vec<PathBuf>,
+    /// Emit a single OpenVEX 0.2.0 doc covering every finding in the
+    /// post-baseline diff. Baseline-suppressed entries inherit their
+    /// `vex_status` from the baseline entry (defaulting to
+    /// `under_investigation` to avoid publishing false `not_affected`
+    /// claims); un-suppressed findings emit as `affected`. v0.9+.
+    #[arg(long)]
+    pub emit_vex: Option<PathBuf>,
     #[arg(long)]
     pub debug_calibration: bool,
     /// Format for `--debug-calibration` rows. `pipe` (default, back-compat

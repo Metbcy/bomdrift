@@ -125,6 +125,13 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
             enrichment.license_violations.len()
         );
     }
+    if enrichment.vex_suppressed_count > 0 {
+        let _ = writeln!(
+            out,
+            "| Suppressed by VEX | {} |",
+            enrichment.vex_suppressed_count
+        );
+    }
     out.push('\n');
 
     if opts.summary_only {
@@ -515,6 +522,13 @@ fn write_one_vuln_row(out: &mut String, c: &Component, enrichment: &Enrichment) 
             }
             if r.kev {
                 s.push_str(" · **KEV**");
+            }
+            let key = format!("cve:{}:{}", c.purl.as_deref().unwrap_or(""), r.id);
+            if let Some(ann) = enrichment.vex_annotations.get(&key) {
+                s.push_str(&format!(" · VEX:{}", ann.status));
+                if let Some(j) = &ann.justification {
+                    s.push_str(&format!(" ({j})"));
+                }
             }
             s
         })

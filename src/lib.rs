@@ -8,6 +8,7 @@ pub mod model;
 pub mod parse;
 pub mod refresh;
 pub mod render;
+pub mod vex;
 
 use std::fs;
 use std::io::IsTerminal;
@@ -26,7 +27,7 @@ pub const FAIL_ON_EXIT_CODE: i32 = 2;
 
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Command::Diff(args) => run_diff(args),
+        Command::Diff(args) => run_diff(*args),
         Command::RefreshTyposquat(args) => refresh::run(args),
         Command::Baseline { action } => run_baseline(action),
         Command::Init(args) => run_init(args),
@@ -200,6 +201,22 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
             );
         }
         baseline::apply(&mut cs, &mut enrichment, &baseline);
+    }
+
+    // VEX consumption (Phase G, v0.9). Applied AFTER baseline so VEX
+    // statements operate on the post-baseline view — this matches what
+    // a downstream tool would see and avoids double-counting "already
+    // suppressed" findings in the VEX-suppressed tally.
+    if !args.vex.is_empty() {
+        match vex::load(&args.vex) {
+            Ok(stmts) => {
+                let idx = vex::VexIndex::build(stmts);
+                vex::apply(&mut enrichment, &idx);
+            }
+            Err(err) => {
+                eprintln!("warning: VEX load failed, continuing without VEX filtering: {err:#}");
+            }
+        }
     }
 
     // Calibration tap. Off by default; opt-in via `--debug-calibration`.

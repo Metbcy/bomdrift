@@ -199,6 +199,8 @@ mod tests {
             allow_licenses: Vec::new(),
             deny_licenses: Vec::new(),
             allow_ambiguous_licenses: false,
+            vex: Vec::new(),
+            emit_vex: None,
         }
     }
 

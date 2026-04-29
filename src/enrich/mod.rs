@@ -26,6 +26,8 @@ use maintainer::MaintainerAgeFinding;
 use typosquat::TyposquatFinding;
 use version_jump::VersionJumpFinding;
 
+use crate::vex::VexAnnotation;
+
 /// Aggregated enrichment data attached to a diff. Keyed by the component's
 /// purl-with-version (e.g. `pkg:npm/axios@1.14.1`) so renderers can look up
 /// per-component findings without re-iterating over the changeset.
@@ -56,6 +58,21 @@ pub struct Enrichment {
     /// `cs.license_changed` which detects same-version license changes.
     /// Empty when no `[license]` block is configured.
     pub license_violations: Vec<LicenseViolation>,
+    /// VEX annotations attached to findings whose status is `affected`
+    /// or `under_investigation` (Phase G, v0.9). Keyed by an opaque
+    /// finding-identity string; renderers look up by the same identity.
+    /// Empty when no `--vex` files were passed or no statements matched.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub vex_annotations: HashMap<String, VexAnnotation>,
+    /// Count of findings suppressed by `--vex` statements (`not_affected`
+    /// or `fixed`). Surfaced in the markdown summary so reviewers know
+    /// the diff was filtered. v0.9+.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub vex_suppressed_count: usize,
+}
+
+fn is_zero_usize(n: &usize) -> bool {
+    *n == 0
 }
 
 impl Enrichment {

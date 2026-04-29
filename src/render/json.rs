@@ -205,6 +205,8 @@ mod tests {
             maintainer_age: Vec::new(),
 
             license_violations: Vec::new(),
+            vex_annotations: HashMap::new(),
+            vex_suppressed_count: 0,
         };
         let cs = ChangeSet::default();
 

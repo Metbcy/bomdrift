@@ -166,6 +166,8 @@ fn enrich_with(
         version_jumps: Vec::new(),
         maintainer_age: Vec::new(),
         license_violations: Vec::new(),
+        vex_annotations: std::collections::HashMap::new(),
+        vex_suppressed_count: 0,
     })
 }
 

@@ -224,6 +224,13 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
             if advisory.kev {
                 props.insert("kev".into(), Value::Bool(true));
             }
+            let vex_key = format!("cve:{purl_str}:{}", advisory.id);
+            if let Some(ann) = e.vex_annotations.get(&vex_key) {
+                props.insert("vexStatus".into(), Value::String(ann.status.clone()));
+                if let Some(j) = &ann.justification {
+                    props.insert("vexJustification".into(), Value::String(j.clone()));
+                }
+            }
             out.push(json!({
                 "ruleId": "bomdrift.cve",
                 "level": sarif_level(advisory.severity),
