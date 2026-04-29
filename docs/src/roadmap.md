@@ -6,9 +6,9 @@ acceptance criteria for new contributions look like.
 ## Planned
 
 The list below is intentionally short — bomdrift is small on purpose.
-Items are grouped by likely v0.4+ landing and rough sizing.
+Items are grouped by likely landing area and rough sizing.
 
-### v0.5 candidates (not committed)
+### Future candidates (not committed)
 
 - **GraphQL maintainer-age** — was investigated for v0.4 and deferred.
   The current REST implementation already uses `?per_page=1` + Link-header
@@ -27,9 +27,6 @@ Items are grouped by likely v0.4+ landing and rough sizing.
   PR comments. The CLI is already CI-agnostic; this is glue + docs.
 - **OCI artifact attestation** — verify SBOMs are themselves signed
   by the build system before diffing. Pairs with cosign attest.
-- **Diff-stat threshold flags** — `--fail-on-added <N>`,
-  `--fail-on-removed-from-allowlist <file>`. Useful for governance
-  workflows.
 
 ### Calibration backlog
 

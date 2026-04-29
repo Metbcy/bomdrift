@@ -64,7 +64,8 @@ inputs:
   fail-on:
     description: |
       Threshold to fail the action with exit code 2 when findings of the
-      configured kind surface. Accepted: none|cve|critical-cve|typosquat|any.
+      configured kind surface. Accepted: none|cve|critical-cve|typosquat|
+      license-change|any.
       `critical-cve` filters on real OSV severity (HIGH or above per GHSA's
       `database_specific.severity`); advisories with no resolvable severity
       surface in the diff but don't trip this threshold. The PR comment is
@@ -79,6 +80,29 @@ inputs:
       to 0 to disable the fallback (a too-large comment will then 422
       from the GitHub API and the action posts nothing).
     default: '60000'
+  config:
+    description: |
+      Path to a `.bomdrift.toml` repo policy file. When set, the CLI loads
+      defaults such as fail_on, baseline, findings_only, and diff budgets
+      before applying explicit action inputs. Leave empty to auto-load
+      `.bomdrift.toml` when present.
+    default: ''
+  findings-only:
+    description: |
+      Markdown-only. Keep the summary table and risk-bearing sections, but
+      omit raw Added / Removed / Version changed detail tables from the PR
+      comment. Useful for high-churn repos where reviewers only want the
+      actionable findings inline.
+    default: 'false'
+  max-added:
+    description: Exit 2 when more than this many dependencies are added.
+    default: ''
+  max-removed:
+    description: Exit 2 when more than this many dependencies are removed.
+    default: ''
+  max-version-changed:
+    description: Exit 2 when more than this many dependencies change version.
+    default: ''
   baseline:
     description: |
       Path to a previously captured `bomdrift diff --output json` snapshot.
@@ -158,6 +182,11 @@ runs:
         OUTPUT_FORMAT: ${{ inputs.output }}
         COMMENT_ON_PR: ${{ inputs.comment-on-pr }}
         COMMENT_SIZE_LIMIT: ${{ inputs.comment-size-limit }}
+        CONFIG_PATH: ${{ inputs.config }}
+        FINDINGS_ONLY: ${{ inputs.findings-only }}
+        MAX_ADDED: ${{ inputs.max-added }}
+        MAX_REMOVED: ${{ inputs.max-removed }}
+        MAX_VERSION_CHANGED: ${{ inputs.max-version-changed }}
         FAIL_ON: ${{ inputs.fail-on }}
         BASELINE: ${{ inputs.baseline }}
         VERIFY_SIGNATURES: ${{ inputs.verify-signatures }}

@@ -2,7 +2,10 @@
 //! through the `CARGO_BIN_EXE_<name>` env var. These verify the user-visible
 //! behavior of `bomdrift diff <before> <after>` rather than internal API shape.
 
+use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_bomdrift")
@@ -10,6 +13,27 @@ fn bin() -> &'static str {
 
 fn manifest_dir() -> &'static str {
     env!("CARGO_MANIFEST_DIR")
+}
+
+fn fixture_path(name: &str) -> String {
+    PathBuf::from(manifest_dir())
+        .join("tests/fixtures")
+        .join(name)
+        .display()
+        .to_string()
+}
+
+fn temp_dir(name: &str) -> PathBuf {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock after unix epoch")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "bomdrift-cli-{name}-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).expect("create temp dir");
+    dir
 }
 
 #[test]
@@ -521,4 +545,216 @@ fn diff_no_maintainer_age_flag_skips_enricher() {
         !stdout.contains("| Young maintainers |"),
         "young-maintainers summary row must not appear when the enricher is skipped"
     );
+}
+
+#[test]
+fn init_config_only_scaffolds_policy_file_without_workflows() {
+    let dir = temp_dir("init-config-only");
+    let out = Command::new(bin())
+        .current_dir(&dir)
+        .args(["init", "--config-only"])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(
+        out.status.success(),
+        "exit code: {}\nstderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let config = fs::read_to_string(dir.join(".bomdrift.toml")).expect("read generated config");
+    assert!(config.contains("[diff]"));
+    assert!(config.contains("fail_on = \"critical-cve\""));
+    assert!(!dir.join(".github/workflows/sbom-diff.yml").exists());
+
+    let rerun = Command::new(bin())
+        .current_dir(&dir)
+        .args(["init", "--config-only"])
+        .output()
+        .expect("spawn bomdrift");
+    assert!(!rerun.status.success());
+    assert!(
+        String::from_utf8_lossy(&rerun.stderr).contains("already exists"),
+        "rerun should explain existing file, stderr:\n{}",
+        String::from_utf8_lossy(&rerun.stderr)
+    );
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn diff_missing_explicit_config_fails_usefully() {
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--config",
+            "tests/fixtures/does-not-exist.toml",
+            "--no-osv",
+            "--no-maintainer-age",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("tests/fixtures/does-not-exist.toml"));
+    assert!(stderr.contains("reading bomdrift config"));
+}
+
+#[test]
+fn diff_default_config_can_focus_comment_and_trip_budget() {
+    let dir = temp_dir("config-budget");
+    fs::write(
+        dir.join(".bomdrift.toml"),
+        r#"
+        [diff]
+        no_osv = true
+        no_maintainer_age = true
+        findings_only = true
+        max_added = 0
+        "#,
+    )
+    .expect("write config");
+
+    let out = Command::new(bin())
+        .current_dir(&dir)
+        .args([
+            "diff",
+            &fixture_path("cdx-minimal.json"),
+            &fixture_path("cdx-after.json"),
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "budget gate must exit 2; stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    assert!(stdout.contains("| Added | 1 |"));
+    assert!(stdout.contains("Raw dependency churn detail elided"));
+    assert!(!stdout.contains("### Added"));
+    assert!(stdout.contains("### Possible typosquats"));
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("--max-added 0"));
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn diff_explicit_flag_overrides_config_default() {
+    let dir = temp_dir("config-override");
+    fs::write(
+        dir.join(".bomdrift.toml"),
+        r#"
+        [diff]
+        output = "json"
+        no_osv = true
+        no_maintainer_age = true
+        "#,
+    )
+    .expect("write config");
+
+    let out = Command::new(bin())
+        .current_dir(&dir)
+        .args([
+            "diff",
+            &fixture_path("cdx-minimal.json"),
+            &fixture_path("cdx-after.json"),
+            "--output",
+            "markdown",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(
+        out.status.success(),
+        "exit code: {}\nstderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    assert!(stdout.starts_with("## SBOM diff"));
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&stdout).is_err(),
+        "explicit --output markdown should override config output=json"
+    );
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn diff_fail_on_license_change_exits_2() {
+    let dir = temp_dir("license-change");
+    let before = dir.join("before.json");
+    let after = dir.join("after.json");
+    fs::write(
+        &before,
+        r#"{
+          "bomFormat": "CycloneDX",
+          "specVersion": "1.5",
+          "version": 1,
+          "components": [
+            {
+              "type": "library",
+              "name": "pkg",
+              "version": "1.0.0",
+              "purl": "pkg:npm/pkg@1.0.0",
+              "licenses": [{"license": {"id": "MIT"}}]
+            }
+          ]
+        }"#,
+    )
+    .expect("write before fixture");
+    fs::write(
+        &after,
+        r#"{
+          "bomFormat": "CycloneDX",
+          "specVersion": "1.5",
+          "version": 1,
+          "components": [
+            {
+              "type": "library",
+              "name": "pkg",
+              "version": "1.0.0",
+              "purl": "pkg:npm/pkg@1.0.0",
+              "licenses": [{"license": {"id": "GPL-3.0"}}]
+            }
+          ]
+        }"#,
+    )
+    .expect("write after fixture");
+
+    let out = Command::new(bin())
+        .current_dir(&dir)
+        .args([
+            "diff",
+            before.to_str().expect("utf-8 before path"),
+            after.to_str().expect("utf-8 after path"),
+            "--no-osv",
+            "--no-maintainer-age",
+            "--fail-on",
+            "license-change",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "license-change gate must exit 2; stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    assert!(stdout.contains("### License changed (same version)"));
+    assert!(stdout.contains("MIT"));
+    assert!(stdout.contains("GPL-3.0"));
+
+    fs::remove_dir_all(dir).ok();
 }

@@ -27,6 +27,11 @@ generates CycloneDX-JSON SBOMs via Syft (installed automatically and
 cached across job runs), and posts the rendered diff as an upserted PR
 comment.
 
+For a repo-owned policy, run `bomdrift init` once and commit the generated
+`.bomdrift.toml` plus workflows. The action auto-loads `.bomdrift.toml`
+from the repo root when present, or you can pass
+`config: .bomdrift.toml` explicitly.
+
 If you already produce SBOMs through a non-Syft toolchain — Trivy,
 SPDX-tools, an in-house generator — supply the file paths via the
 `before-sbom` / `after-sbom` inputs instead. The advanced flow below
@@ -44,9 +49,14 @@ documents that path; both flows continue to be supported in v1.
 | `format`      | no  | `auto` | Force input format detection: `auto`/`cdx`/`spdx`/`syft`. |
 | `output`      | no  | `markdown` | Output format: `terminal`/`markdown`/`json`/`sarif`. The PR-comment path requires `markdown`. |
 | `comment-on-pr` | no | `true` | Post the rendered diff as a PR comment when the workflow runs on a `pull_request` event. Set to `false` for diff-only / report-only workflows. |
-| `fail-on`     | no  | `none` | Exit code 2 on findings of the configured kind: `none`/`cve`/`critical-cve`/`typosquat`/`any`. The PR comment is still posted on a tripped run. |
+| `fail-on`     | no  | `none` | Exit code 2 on findings of the configured kind: `none`/`cve`/`critical-cve`/`typosquat`/`license-change`/`any`. The PR comment is still posted on a tripped run. |
 | `comment-size-limit` | no | `60000` | Bytes. When the rendered diff exceeds this size, bomdrift re-renders with `--summary-only` for the PR comment while keeping the full body in the workflow step summary. Set to `0` to disable the fallback. GitHub's hard cap is 65,536 chars. |
 | `verify-signatures` | no | `true` | Whether to install cosign and verify the bomdrift release archive's Sigstore signature. Set to `false` on trusted mirrors / cached runners to skip the cosign-installer step (~15s saved). |
+| `config` | no | `` (empty) | Path to `.bomdrift.toml`. Leave empty to auto-load `.bomdrift.toml` from the repo root when present. |
+| `findings-only` | no | `false` | Markdown-only. Keep summary + risk-bearing sections, but omit raw Added / Removed / Version changed detail rows from the PR comment. |
+| `max-added` | no | `` (empty) | Exit 2 when more than this many dependencies are added. |
+| `max-removed` | no | `` (empty) | Exit 2 when more than this many dependencies are removed. |
+| `max-version-changed` | no | `` (empty) | Exit 2 when more than this many dependencies change version. |
 | `baseline` | no | `` (empty) | Path to a previously captured `bomdrift diff --output json` snapshot. Findings present in the baseline are suppressed from the rendered output and the `--fail-on` trip evaluation. See [Baseline & suppression](./baseline.md) for match-key semantics. |
 | `github-token` | no | `${{ github.token }}` | Token used to post PR comments. |
 
@@ -63,11 +73,34 @@ The action does not declare formal outputs. Its side effects are:
    is upserted into a single PR comment marked `<!-- bomdrift:diff -->`.
    Subsequent pushes update the same comment instead of accumulating new
    ones (`peter-evans/create-or-update-comment`-style upsert).
-4. When `fail-on` trips, the action exits with code 2 — but only **after**
-   the PR comment has been posted, so reviewers see the findings even when
-   the workflow step fails.
+4. When `fail-on` or a diff budget trips, the action exits with code 2 —
+   but only **after** the PR comment has been posted, so reviewers see the
+   findings even when the workflow step fails.
 
 ## Common patterns
+
+### Repo policy file
+
+Use `.bomdrift.toml` when you want the policy in version control instead
+of repeated YAML inputs:
+
+```toml
+[diff]
+fail_on = "critical-cve"
+baseline = ".bomdrift/baseline.json"
+findings_only = true
+max_added = 25
+max_version_changed = 10
+```
+
+```yaml
+- uses: Metbcy/bomdrift@v1
+  with:
+    config: .bomdrift.toml
+```
+
+Explicit action inputs still override the config-backed defaults for
+one-off workflows.
 
 ### Bring your own SBOMs (advanced / pre-v0.5 flow)
 
@@ -105,8 +138,9 @@ behave. Existing v0.4 workflows continue to function unchanged after a
 ```
 
 `critical-cve` filters on `severity >= High` per the OSV-fetched severity
-(see [OSV.dev CVE lookup](./enrichers/osv-cve.md)). `typosquat` and `any`
-are also accepted thresholds — see [`--fail-on`](./cli-reference.md#--fail-on).
+(see [OSV.dev CVE lookup](./enrichers/osv-cve.md)). `typosquat`,
+`license-change`, and `any` are also accepted thresholds — see
+[`--fail-on`](./cli-reference.md#--fail-on).
 
 ### Self-hosted / trusted-mirror runners
 
@@ -171,8 +205,8 @@ The `output: sarif` produces SARIF v2.1.0 with stable rule IDs (see
 
 `pull-requests: write` is required when `comment-on-pr: true` (the
 default). Without it, the comment-upsert step fails with a 403; the
-action's exit code remains the bomdrift exit (so a `fail-on` trip still
-fails the workflow correctly).
+action's exit code remains the bomdrift exit (so a `fail-on` or budget
+trip still fails the workflow correctly).
 
 `contents: read` is required so the action's internal `actions/checkout`
 steps (zero-config flow) can fetch both refs. In the bring-your-own-SBOMs

@@ -7,6 +7,35 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Repository policy config (`.bomdrift.toml`).** `bomdrift diff`
+  auto-loads `.bomdrift.toml` from the current working directory when
+  present, or an explicit file via `--config`. Config can set defaults
+  for output format, fail thresholds, baseline path, markdown focus
+  mode, and dependency-churn budgets while leaving CLI flags as the
+  one-off override path.
+
+- **`bomdrift init` scaffolding.** `bomdrift init` writes a starter
+  `.bomdrift.toml`, SBOM-diff workflow, and comment-suppression workflow.
+  `--config-only` writes just the policy file; `--force` overwrites
+  existing generated files.
+
+- **Diff-budget gates.** `--max-added`, `--max-removed`, and
+  `--max-version-changed` exit 2 after rendering when a PR changes more
+  dependencies than the configured budget allows.
+
+- **Focused markdown comments.** `--findings-only` keeps the summary and
+  risk-bearing sections but omits raw Added / Removed / Version changed
+  detail rows for high-churn PRs.
+
+- **License-change threshold.** `--fail-on license-change` exits 2 on
+  same-version license drift without also requiring `--fail-on any`.
+
+- **GitHub Action inputs for policy controls.** The action now accepts
+  `config`, `findings-only`, `max-added`, `max-removed`, and
+  `max-version-changed` and passes them through to the CLI.
+
 ## [0.5.0] - 2026-04-29
 
 The adoption milestone: bomdrift now works as a copy-paste GitHub Action,

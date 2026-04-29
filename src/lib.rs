@@ -1,5 +1,6 @@
 pub mod baseline;
 pub mod cli;
+pub mod config;
 pub mod diff;
 pub mod enrich;
 pub mod model;
@@ -13,7 +14,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::cli::{BaselineAction, Cli, Command, DiffArgs, FailOn, OutputFormat};
+use crate::cli::{BaselineAction, Cli, Command, DiffArgs, FailOn, InitArgs, OutputFormat};
 use crate::diff::ChangeSet;
 use crate::enrich::{Enrichment, Severity};
 
@@ -27,7 +28,40 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Diff(args) => run_diff(args),
         Command::RefreshTyposquat(args) => refresh::run(args),
         Command::Baseline { action } => run_baseline(action),
+        Command::Init(args) => run_init(args),
     }
+}
+
+fn run_init(args: InitArgs) -> Result<()> {
+    write_scaffold_file(Path::new(".bomdrift.toml"), INIT_CONFIG, args.force)?;
+    if !args.config_only {
+        write_scaffold_file(
+            Path::new(".github/workflows/sbom-diff.yml"),
+            INIT_SBOM_WORKFLOW,
+            args.force,
+        )?;
+        write_scaffold_file(
+            Path::new(".github/workflows/bomdrift-suppress.yml"),
+            INIT_SUPPRESS_WORKFLOW,
+            args.force,
+        )?;
+    }
+    eprintln!("bomdrift: initialized repository files");
+    Ok(())
+}
+
+fn write_scaffold_file(path: &Path, contents: &str, force: bool) -> Result<()> {
+    if path.exists() && !force {
+        anyhow::bail!(
+            "{} already exists; re-run with --force to overwrite",
+            path.display()
+        );
+    }
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("creating parent directory: {}", parent.display()))?;
+    }
+    fs::write(path, contents).with_context(|| format!("writing scaffold file: {}", path.display()))
 }
 
 fn run_baseline(action: BaselineAction) -> Result<()> {
@@ -55,8 +89,14 @@ fn run_baseline(action: BaselineAction) -> Result<()> {
     }
 }
 
-fn run_diff(args: DiffArgs) -> Result<()> {
-    let format_hint = args.format.to_sbom_format();
+fn run_diff(mut args: DiffArgs) -> Result<()> {
+    config::apply_diff_config(&mut args)?;
+
+    let output = args.output.unwrap_or(OutputFormat::Terminal);
+    let format = args.format.unwrap_or(cli::InputFormat::Auto);
+    let fail_on = args.fail_on.unwrap_or(FailOn::None);
+
+    let format_hint = format.to_sbom_format();
     let before = load_sbom(&args.before, format_hint, args.include_file_components)?;
     let after = load_sbom(&args.after, format_hint, args.include_file_components)?;
 
@@ -117,9 +157,10 @@ fn run_diff(args: DiffArgs) -> Result<()> {
         .filter(|s| !s.is_empty());
     let md_options = render::markdown::Options {
         summary_only: args.summary_only,
+        findings_only: args.findings_only,
         repo_url,
     };
-    let rendered = match args.output {
+    let rendered = match output {
         OutputFormat::Terminal => {
             // ANSI escapes are only safe on a real TTY. Piped/redirected stdout
             // (e.g. captured by a CI step that posts a PR comment) must stay
@@ -141,7 +182,22 @@ fn run_diff(args: DiffArgs) -> Result<()> {
 
     // Body must be fully written before we exit-2 — the action's `tee`
     // wrapper still wants the comment posted even when fail-on trips.
-    if tripped(&cs, &enrichment, args.fail_on) {
+    let budget_tripped = budget_tripped(
+        &cs,
+        args.max_added,
+        args.max_removed,
+        args.max_version_changed,
+    );
+    if budget_tripped {
+        log_budget_trips(
+            &cs,
+            args.max_added,
+            args.max_removed,
+            args.max_version_changed,
+        );
+    }
+
+    if tripped(&cs, &enrichment, fail_on) || budget_tripped {
         std::process::exit(FAIL_ON_EXIT_CODE);
     }
 
@@ -164,13 +220,106 @@ pub fn tripped(cs: &ChangeSet, e: &Enrichment, threshold: FailOn) -> bool {
         FailOn::Cve => !e.vulns.is_empty(),
         FailOn::CriticalCve => any_advisory_at_or_above(e, Severity::High),
         FailOn::Typosquat => !e.typosquats.is_empty(),
+        FailOn::LicenseChange => !cs.license_changed.is_empty(),
         FailOn::Any => e.has_findings() || !cs.license_changed.is_empty(),
+    }
+}
+
+pub fn budget_tripped(
+    cs: &ChangeSet,
+    max_added: Option<usize>,
+    max_removed: Option<usize>,
+    max_version_changed: Option<usize>,
+) -> bool {
+    max_added.is_some_and(|max| cs.added.len() > max)
+        || max_removed.is_some_and(|max| cs.removed.len() > max)
+        || max_version_changed.is_some_and(|max| cs.version_changed.len() > max)
+}
+
+fn log_budget_trips(
+    cs: &ChangeSet,
+    max_added: Option<usize>,
+    max_removed: Option<usize>,
+    max_version_changed: Option<usize>,
+) {
+    if let Some(max) = max_added.filter(|max| cs.added.len() > *max) {
+        eprintln!(
+            "bomdrift: policy gate tripped: added count {} exceeds --max-added {}",
+            cs.added.len(),
+            max
+        );
+    }
+    if let Some(max) = max_removed.filter(|max| cs.removed.len() > *max) {
+        eprintln!(
+            "bomdrift: policy gate tripped: removed count {} exceeds --max-removed {}",
+            cs.removed.len(),
+            max
+        );
+    }
+    if let Some(max) = max_version_changed.filter(|max| cs.version_changed.len() > *max) {
+        eprintln!(
+            "bomdrift: policy gate tripped: version-changed count {} exceeds --max-version-changed {}",
+            cs.version_changed.len(),
+            max
+        );
     }
 }
 
 fn any_advisory_at_or_above(e: &Enrichment, threshold: Severity) -> bool {
     e.vulns.values().flatten().any(|v| v.severity >= threshold)
 }
+
+const INIT_CONFIG: &str = r#"# bomdrift repo policy.
+# CLI flags override these defaults for one-off runs.
+
+[diff]
+fail_on = "critical-cve"
+baseline = ".bomdrift/baseline.json"
+findings_only = false
+
+# Optional churn budgets. Uncomment to fail the workflow when a PR changes too
+# many dependencies at once.
+# max_added = 25
+# max_removed = 50
+# max_version_changed = 10
+"#;
+
+const INIT_SBOM_WORKFLOW: &str = r#"name: SBOM diff
+
+on: pull_request
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: Metbcy/bomdrift@v1
+        with:
+          config: .bomdrift.toml
+"#;
+
+const INIT_SUPPRESS_WORKFLOW: &str = r#"name: bomdrift suppress
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  suppress:
+    if: |
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/bomdrift suppress ')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: Metbcy/bomdrift/comment-suppress@v1
+"#;
 
 fn load_sbom(
     path: &Path,
@@ -388,6 +537,25 @@ mod tests {
     }
 
     #[test]
+    fn fail_on_license_change_trips_only_on_license_changes() {
+        assert!(tripped(
+            &cs_with_license_change(),
+            &Enrichment::default(),
+            FailOn::LicenseChange
+        ));
+        assert!(!tripped(
+            &ChangeSet::default(),
+            &enrichment_with_cve(),
+            FailOn::LicenseChange
+        ));
+        assert!(!tripped(
+            &ChangeSet::default(),
+            &enrichment_with_typosquat(),
+            FailOn::LicenseChange
+        ));
+    }
+
+    #[test]
     fn fail_on_typosquat_ignores_license_change() {
         // license_changed is a ChangeSet field, not an enrichment. The
         // typosquat threshold is strictly about typosquat findings — license
@@ -398,5 +566,19 @@ mod tests {
             &Enrichment::default(),
             FailOn::Typosquat
         ));
+    }
+
+    #[test]
+    fn budget_trips_when_counts_exceed_limits() {
+        let cs = ChangeSet {
+            added: vec![comp("a"), comp("b")],
+            removed: vec![comp("c")],
+            version_changed: vec![(comp("d"), comp("d"))],
+            ..Default::default()
+        };
+        assert!(budget_tripped(&cs, Some(1), None, None));
+        assert!(budget_tripped(&cs, None, Some(0), None));
+        assert!(budget_tripped(&cs, None, None, Some(0)));
+        assert!(!budget_tripped(&cs, Some(2), Some(1), Some(1)));
     }
 }
