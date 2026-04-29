@@ -1,5 +1,6 @@
 pub mod baseline;
 pub mod cli;
+pub mod clock;
 pub mod config;
 pub mod diff;
 pub mod enrich;
