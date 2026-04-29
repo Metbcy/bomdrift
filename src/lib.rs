@@ -303,10 +303,7 @@ fn write_calibration_lines<W: std::io::Write>(e: &Enrichment, out: &mut W) {
         let _ = writeln!(
             out,
             "version-jump|{}|{}|{}",
-            f.after
-                .purl
-                .as_deref()
-                .unwrap_or(f.after.name.as_str()),
+            f.after.purl.as_deref().unwrap_or(f.after.name.as_str()),
             f.after_major.saturating_sub(f.before_major),
             MIN_MAJOR_DELTA,
         );
