@@ -44,7 +44,7 @@ pub struct RefreshArgs {
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RefreshEcosystem {
-    /// Refresh every ecosystem with a wired-up fetcher (npm, PyPI, Cargo).
+    /// Refresh every ecosystem with a wired-up fetcher (npm, PyPI, Cargo, NuGet).
     All,
     /// Refresh just the npm top-1000 list from the anvaka most-depended-upon gist.
     Npm,
@@ -57,6 +57,23 @@ pub enum RefreshEcosystem {
     /// embedded. This variant is accepted so `--ecosystem all` stays
     /// stable, and emits an informational notice.
     Maven,
+    /// Go has no canonical upstream popularity feed; the list is curated
+    /// from pkg.go.dev and well-known imports. Variant is accepted so
+    /// `--ecosystem all` stays stable, and emits an informational notice.
+    Go,
+    /// RubyGems' public most-downloaded API has gone through several
+    /// breaking changes; the v0.4 list is curated. Variant is accepted
+    /// so `--ecosystem all` stays stable, and emits an informational
+    /// notice.
+    Gem,
+    /// Refresh the NuGet top-200 list from the nuget.org v3 search API.
+    #[value(name = "nuget")]
+    NuGet,
+    /// Packagist's public statistics API has gone through several
+    /// breaking changes; the v0.4 Composer list is curated. Variant is
+    /// accepted so `--ecosystem all` stays stable, and emits an
+    /// informational notice.
+    Composer,
 }
 
 #[derive(Args, Debug)]

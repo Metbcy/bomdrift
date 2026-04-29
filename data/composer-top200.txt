@@ -1,0 +1,138 @@
+# Top ~100 Composer (Packagist) packages, hand-curated from
+# packagist.org's "most installed" categories. Snapshot date: 2026-04-28.
+#
+# Packagist's public statistics API has gone through several breaking
+# changes; rather than couple this list to a fragile upstream, v0.4
+# ships a curated snapshot. Adding a name here is an explicit editorial
+# decision; PRs welcome.
+#
+# Format: `vendor/package`, one per line. The typosquat enricher
+# canonicalizes to lowercase and matches Jaro-Winkler on the package
+# portion (post-slash) only — vendor names are organization-scoped and
+# duplicated across many legit packages.
+#
+# Lines beginning with `#` and blank lines are ignored.
+
+# --- Symfony ---
+symfony/console
+symfony/http-foundation
+symfony/http-kernel
+symfony/routing
+symfony/event-dispatcher
+symfony/dependency-injection
+symfony/finder
+symfony/process
+symfony/filesystem
+symfony/yaml
+symfony/var-dumper
+symfony/string
+symfony/translation
+symfony/mime
+symfony/polyfill-mbstring
+symfony/polyfill-ctype
+symfony/polyfill-php80
+symfony/cache
+symfony/serializer
+symfony/validator
+
+# --- Laravel ---
+laravel/framework
+laravel/sanctum
+laravel/tinker
+laravel/passport
+laravel/socialite
+laravel/horizon
+laravel/scout
+laravel/cashier
+laravel/breeze
+laravel/jetstream
+
+# --- Composer / packagist core ---
+composer/composer
+composer/installers
+composer/semver
+composer/ca-bundle
+composer/xdebug-handler
+
+# --- HTTP / clients ---
+guzzlehttp/guzzle
+guzzlehttp/psr7
+guzzlehttp/promises
+psr/http-message
+psr/http-client
+psr/http-factory
+nyholm/psr7
+
+# --- Logging / PSR ---
+monolog/monolog
+psr/log
+psr/cache
+psr/container
+psr/event-dispatcher
+psr/simple-cache
+
+# --- Templating / output ---
+twig/twig
+twig/extensions
+league/commonmark
+league/flysystem
+league/flysystem-aws-s3-v3
+league/oauth2-client
+league/oauth2-server
+league/csv
+league/uri
+
+# --- Console / CLI ---
+nunomaduro/collision
+nunomaduro/larastan
+nunomaduro/termwind
+spatie/laravel-permission
+spatie/laravel-medialibrary
+spatie/laravel-backup
+spatie/laravel-activitylog
+spatie/laravel-query-builder
+
+# --- Testing ---
+phpunit/phpunit
+phpunit/php-code-coverage
+mockery/mockery
+pestphp/pest
+pestphp/pest-plugin-laravel
+fakerphp/faker
+
+# --- Doctrine / ORM ---
+doctrine/dbal
+doctrine/orm
+doctrine/inflector
+doctrine/instantiator
+doctrine/annotations
+doctrine/cache
+doctrine/collections
+doctrine/lexer
+
+# --- Code analysis / linting ---
+phpstan/phpstan
+phpstan/phpstan-strict-rules
+phpstan/extension-installer
+vimeo/psalm
+squizlabs/php_codesniffer
+slevomat/coding-standard
+friendsofphp/php-cs-fixer
+
+# --- Utility ---
+ramsey/uuid
+ramsey/collection
+egulias/email-validator
+voku/portable-ascii
+graham-campbell/result-type
+phpseclib/phpseclib
+firebase/php-jwt
+lcobucci/jwt
+defuse/php-encryption
+
+# --- WordPress ---
+johnpbloch/wordpress-core
+roots/wordpress
+wpackagist-plugin/jetpack
+wpackagist-plugin/wordpress-seo
+wpackagist-plugin/akismet

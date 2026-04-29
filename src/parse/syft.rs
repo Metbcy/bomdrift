@@ -77,6 +77,9 @@ fn ecosystem_from_syft_type(ty: Option<&str>) -> Ecosystem {
         Some("rust-crate") => Ecosystem::Cargo,
         Some("java-archive") => Ecosystem::Maven,
         Some("go-module") => Ecosystem::Go,
+        Some("gem") => Ecosystem::Gem,
+        Some("dotnet") => Ecosystem::NuGet,
+        Some("php-composer") => Ecosystem::Composer,
         Some(other) => Ecosystem::Other(other.to_string()),
         None => Ecosystem::Other("unknown".to_string()),
     }
@@ -149,9 +152,15 @@ mod tests {
             Ecosystem::Maven
         );
         assert_eq!(ecosystem_from_syft_type(Some("go-module")), Ecosystem::Go);
+        assert_eq!(ecosystem_from_syft_type(Some("gem")), Ecosystem::Gem);
+        assert_eq!(ecosystem_from_syft_type(Some("dotnet")), Ecosystem::NuGet);
         assert_eq!(
-            ecosystem_from_syft_type(Some("gem")),
-            Ecosystem::Other("gem".to_string())
+            ecosystem_from_syft_type(Some("php-composer")),
+            Ecosystem::Composer
+        );
+        assert_eq!(
+            ecosystem_from_syft_type(Some("hex")),
+            Ecosystem::Other("hex".to_string())
         );
         assert_eq!(
             ecosystem_from_syft_type(None),

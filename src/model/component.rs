@@ -45,6 +45,9 @@ pub enum Ecosystem {
     Cargo,
     Maven,
     Go,
+    Gem,
+    NuGet,
+    Composer,
     Other(String),
 }
 
@@ -56,6 +59,9 @@ impl fmt::Display for Ecosystem {
             Self::Cargo => f.write_str("cargo"),
             Self::Maven => f.write_str("maven"),
             Self::Go => f.write_str("go"),
+            Self::Gem => f.write_str("gem"),
+            Self::NuGet => f.write_str("nuget"),
+            Self::Composer => f.write_str("composer"),
             Self::Other(s) => f.write_str(s),
         }
     }

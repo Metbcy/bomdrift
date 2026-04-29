@@ -1,0 +1,185 @@
+# Top ~100 RubyGems package names, hand-curated from well-known popular
+# gems on rubygems.org. Snapshot date: 2026-04-28.
+#
+# RubyGems' public "most downloaded" API endpoint has gone through several
+# breaking changes; rather than couple this list to a fragile upstream,
+# v0.4 ships a curated snapshot. Adding a name here is an explicit
+# editorial decision; PRs welcome.
+#
+# Format: lowercase gem name, one per line. The typosquat enricher
+# canonicalizes candidate gem names to lowercase at load time.
+#
+# Lines beginning with `#` and blank lines are ignored.
+
+# --- Rails / web framework ---
+rails
+railties
+actionpack
+activerecord
+activesupport
+activemodel
+actionview
+actionmailer
+actioncable
+actionmailbox
+actiontext
+activejob
+activestorage
+
+# --- Sinatra / lightweight web ---
+sinatra
+rack
+rack-test
+rack-protection
+rack-attack
+puma
+unicorn
+thin
+webrick
+
+# --- Database / ORM ---
+sequel
+mongoid
+redis
+pg
+mysql2
+sqlite3
+sidekiq
+sidekiq-cron
+resque
+delayed_job
+activerecord-import
+ar_lazy_preload
+acts_as_list
+paper_trail
+paranoia
+ransack
+kaminari
+will_paginate
+counter_culture
+
+# --- Auth / users ---
+devise
+omniauth
+omniauth-oauth2
+omniauth-google-oauth2
+omniauth-github
+warden
+pundit
+cancancan
+rolify
+doorkeeper
+jwt
+bcrypt
+rotp
+
+# --- Testing ---
+rspec
+rspec-core
+rspec-rails
+rspec-expectations
+rspec-mocks
+factory_bot
+factory_bot_rails
+faker
+capybara
+selenium-webdriver
+webmock
+vcr
+rubocop
+rubocop-rails
+rubocop-rspec
+rubocop-performance
+brakeman
+simplecov
+
+# --- HTTP / networking ---
+faraday
+faraday-net_http
+faraday-multipart
+faraday-retry
+httparty
+http
+rest-client
+typhoeus
+excon
+oauth2
+mail
+
+# --- Serialization / data ---
+json
+oj
+nokogiri
+yard
+psych
+csv
+hashie
+multi_json
+multi_xml
+activerecord-jdbc-adapter
+
+# --- Utility ---
+rake
+bundler
+thor
+pry
+pry-byebug
+byebug
+debug
+listen
+parallel
+parser
+ast
+concurrent-ruby
+i18n
+tzinfo
+zeitwerk
+loofah
+nokogumbo
+mini_portile2
+ffi
+erubi
+mini_mime
+marcel
+public_suffix
+addressable
+
+# --- Image / file ---
+image_processing
+mini_magick
+ruby-vips
+carrierwave
+shrine
+fog-aws
+aws-sdk-core
+aws-sdk-s3
+
+# --- Logging / observability ---
+logger
+amazing_print
+awesome_print
+benchmark-ips
+memory_profiler
+rack-mini-profiler
+bullet
+newrelic_rpm
+sentry-ruby
+sentry-rails
+
+# --- View helpers / frontend ---
+sass-rails
+sprockets
+sprockets-rails
+turbo-rails
+stimulus-rails
+importmap-rails
+webpacker
+jsbundling-rails
+cssbundling-rails
+view_component
+
+# --- Background / jobs ---
+good_job
+solid_queue
+mailcatcher
+resque-scheduler
