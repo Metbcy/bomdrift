@@ -7,6 +7,62 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-04-28
+
+The "harden the foundations" patch release. No user-visible behavior
+change, no new features — pure quality / regression-coverage
+improvements that catch entire classes of bugs in advance.
+
+### Added
+
+- **Criterion benchmarks** for the four hot paths: parse, diff,
+  typosquat, render. Run with `cargo bench`. Not gated in CI (shared
+  GitHub runner variance is ±20%, which buries any real signal); the
+  HTML report at `target/criterion/report/index.html` is the workflow
+  for validating perf-relevant changes locally. Documented in the
+  new [Benchmarks](https://metbcy.github.io/bomdrift/development/benchmarks.html)
+  chapter.
+- **Property-based tests** via `proptest`, running as part of
+  `cargo test --release`. 14 new property tests cover:
+  - Parser layer: arbitrary bytes / arbitrary JSON / arbitrary JSON
+    with each format hint forced — must NEVER panic. Errors are fine;
+    panics are bugs.
+  - Typosquat canonicalization: `pep503_normalize` on arbitrary
+    unicode (output invariants asserted: lowercase, no leading/
+    trailing dashes); `last_path_segment` always returns a substring
+    with no `/` in it; `enrich()` never panics on arbitrary added-
+    component sets.
+  - Diff core: `diff(a, a)` is always empty (identity);
+    `diff(a, b)` swaps `added`/`removed` cardinalities from
+    `diff(b, a)` (symmetry); two `diff()` calls on the same input
+    are byte-equal (determinism — the upsert contract for PR-comment
+    renderers).
+  - Version-jump extractor: never panics on arbitrary strings;
+    round-trips well-formed numerics (`1..10000` with `v`-prefix
+    and pre-release suffix variants); handles arbitrary unicode
+    prefixes without panic.
+- **Real-world SBOM regression corpus** at
+  `tests/fixtures/real-world/` containing 4 CycloneDX SBOMs (cern,
+  dropwizard, keycloak, laravel) and 1 SPDX SBOM (example10),
+  sourced from the official `CycloneDX/sbom-examples` and
+  `spdx/spdx-examples` repos. Tests in `tests/real_world.rs` exercise:
+  - Every fixture parses without error and to ≥ 1 component.
+  - Format auto-detection routes to the correct parser.
+  - Components with known purl types resolve to the canonical
+    `Ecosystem` variant (catches `ecosystem_from_purl` regressions).
+  - Diff of two unrelated real SBOMs doesn't panic.
+  - Self-diff of any real SBOM produces an empty ChangeSet
+    (parser non-determinism guard).
+  - All four renderers produce non-empty output on a real diff.
+
+### Changed
+
+- **Test count**: 236 → 256 passing (226 unit + 15 cli + 9 integration
+  + 6 real-world).
+- New `[dev-dependencies]`: `criterion = "0.5"` and `proptest = "1"`.
+  No effect on the production binary; release-profile size stays at
+  ~3.5 MB.
+
 ## [0.4.0] - 2026-04-28
 
 The "more ecosystems, more action surface" release. Adds four typosquat
@@ -323,7 +379,8 @@ changed dependency in a format ready to drop into a PR comment.
 - Linux aarch64 binary.
 - PyPI / Cargo / Maven typosquat reference lists (only npm in v0.1.0).
 
-[Unreleased]: https://github.com/Metbcy/bomdrift/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Metbcy/bomdrift/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Metbcy/bomdrift/releases/tag/v0.4.1
 [0.4.0]: https://github.com/Metbcy/bomdrift/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Metbcy/bomdrift/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Metbcy/bomdrift/releases/tag/v0.2.0

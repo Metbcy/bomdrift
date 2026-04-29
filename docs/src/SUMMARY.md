@@ -26,6 +26,11 @@
 - [Release signing](./release-signing.md)
 - [Architecture](./architecture.md)
 
+# Development
+
+- [Benchmarks](./development/benchmarks.md)
+- [Property-based testing](./development/fuzzing.md)
+
 # Project
 
 - [Roadmap](./roadmap.md)

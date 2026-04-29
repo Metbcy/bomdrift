@@ -250,4 +250,47 @@ mod tests {
         assert_eq!(findings[1].after.name, "beta");
         assert_eq!(findings[2].after.name, "gamma");
     }
+
+    // ---- Property-based tests --------------------------------------------
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(2048))]
+
+        /// `extract_major` must never panic on arbitrary input. The
+        /// function is called on every version string in a ChangeSet's
+        /// version_changed pairs; a panic here would crash the diff
+        /// pipeline mid-render.
+        #[test]
+        fn extract_major_does_not_panic(s in ".*") {
+            let _ = extract_major(&s);
+        }
+
+        /// Numeric majors (with no prefix or pre-release / build metadata)
+        /// must round-trip correctly. The `prop_filter` excludes the
+        /// leading-zero case (which the function deliberately rejects)
+        /// and over-large values that don't fit in u32.
+        #[test]
+        fn extract_major_round_trips_well_formed_numerics(major in 1u32..=10_000) {
+            let v = format!("{major}.0.0");
+            prop_assert_eq!(extract_major(&v), Some(major));
+            let with_v = format!("v{major}.0.0");
+            prop_assert_eq!(extract_major(&with_v), Some(major));
+            let with_pre = format!("{major}.0.0-rc.1");
+            prop_assert_eq!(extract_major(&with_pre), Some(major));
+        }
+
+        /// Strings containing non-ASCII unicode or control characters
+        /// must not panic. The regex-free implementation walks bytes;
+        /// this exercises the byte-level paths.
+        #[test]
+        fn extract_major_handles_unicode_without_panic(prefix in "\\PC*", major in 1u32..1000) {
+            // Mix arbitrary unicode prefix with a well-formed version.
+            // The function should treat the prefix as garbage (likely
+            // returning None) but never panic.
+            let s = format!("{prefix}{major}.0.0");
+            let _ = extract_major(&s);
+        }
+    }
 }
