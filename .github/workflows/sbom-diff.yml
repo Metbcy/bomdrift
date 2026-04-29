@@ -33,7 +33,12 @@ jobs:
   diff:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout PR head (so `uses: ./` resolves)
+      - name: Checkout PR head
+        # The `uses: ./` step below resolves the local action against the
+        # checked-out tree; this checkout step exists only to give it
+        # something to point at. Consumers copying this workflow as
+        # `uses: Metbcy/bomdrift@v1` don't need the checkout step (the
+        # v0.5 zero-config flow handles before/after checkouts internally).
         uses: actions/checkout@v4
 
       - name: Run bomdrift (zero-config)
