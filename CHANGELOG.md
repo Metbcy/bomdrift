@@ -7,6 +7,66 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-28
+
+The "severity, baselines, and big-PR survival" release. Closes the v0.2
+deferral on real OSV severity, adds an on-disk severity cache, surfaces
+baseline-suppression for adoption-mid-stream teams, and stops big PR
+diffs from blowing past GitHub's comment-body cap.
+
+### Added
+
+- **Per-advisory OSV severity** via `/v1/vulns/{id}` follow-up. Severity
+  is sourced from GHSA's `database_specific.severity` text label
+  (`LOW|MODERATE|HIGH|CRITICAL`); advisories without that field surface
+  as `NONE` and don't trip `--fail-on critical-cve`. The label is
+  rendered alongside each advisory ID in markdown / terminal / JSON /
+  SARIF output. SARIF results map Critical/High to `level: "error"`,
+  everything else to `level: "warning"`. Markdown / term sort
+  highest-severity-first within a component, ties broken by ID, so the
+  rendered output stays byte-deterministic for the PR-comment upsert.
+- **`--fail-on critical-cve` is now real.** Previously aliased to `cve`
+  with a v0.2 stub warning; now filters on `severity >= High` per the
+  OSV-fetched severity. The `critical-cve` name covers the
+  HIGH-or-CRITICAL bucket (CRITICAL is rare in GHSA tagging; many
+  actively-exploited advisories ship as HIGH, and treating them as the
+  actionable bucket matches what the option name communicates).
+- **On-disk OSV severity cache** at `<XDG_CACHE_HOME>/bomdrift/osv/`
+  with a 24h TTL. New `--no-osv-cache` flag opts out. Hits are reported
+  via a single end-of-run "osv: N/M severities served from cache"
+  stderr line. Atomic temp-file + rename writes mirror the existing
+  `src/refresh.rs` pattern.
+- **`--baseline <path.json>`** suppresses findings already present in a
+  previously captured `bomdrift diff --output json` snapshot. Match
+  keys are conservative — drift surfaces — so adopting bomdrift on a
+  project with pre-existing findings doesn't drown the first PR
+  comment. See `src/baseline.rs` module doc for per-finding-type key
+  semantics.
+- **`--summary-only`** flag emits only the summary table + a footer
+  pointing reviewers at the full output. Markdown-only.
+- **Action input `comment-size-limit`** (default 60000 bytes; just
+  under GitHub's 65536-char comment cap so a marker + footer fit).
+  When the rendered diff exceeds the limit, `entrypoint.sh`
+  re-renders with `--summary-only` for the PR comment while keeping
+  the full body in the workflow step summary. Set to 0 to disable.
+
+### Changed (breaking output shape)
+
+- **`Enrichment.vulns` JSON shape** is now
+  `{"<purl>": [{"id": "...", "severity": "..."}, ...]}` instead of
+  `{"<purl>": ["GHSA-..."]}`. Consumers parsing the v0.2 string-list
+  shape need to migrate. The CLI wrapper for downstream tooling can
+  pin `--baseline` files to v0.3 — the baseline parser is forgiving
+  about missing fields, so old baselines still load (with reduced
+  suppression precision for the severity-aware fields).
+
+### Fixed
+
+- The action's `entrypoint.sh` now uses `tee` + `PIPESTATUS` so PR
+  comments still post when bomdrift exits 2 from `--fail-on`. (This
+  was already true in v0.2; the v0.3 size-fallback path follows the
+  same pattern when re-running with `--summary-only`.)
+
 ## [0.2.0] - 2026-04-28
 
 The "ship the deferred gaps" release. Every "Known gaps (deferred to v0.2)"
@@ -184,6 +244,7 @@ changed dependency in a format ready to drop into a PR comment.
 - Linux aarch64 binary.
 - PyPI / Cargo / Maven typosquat reference lists (only npm in v0.1.0).
 
-[Unreleased]: https://github.com/Metbcy/bomdrift/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Metbcy/bomdrift/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Metbcy/bomdrift/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Metbcy/bomdrift/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Metbcy/bomdrift/releases/tag/v0.1.0
