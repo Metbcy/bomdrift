@@ -105,6 +105,23 @@ pub(crate) fn ecosystem_from_purl(purl: &str) -> Option<Ecosystem> {
     })
 }
 
+/// Drop `Ecosystem::Other("file")` pseudo-components from a parsed SBOM in
+/// place. Syft's `directory` cataloger emits each YAML / lockfile / source
+/// file encountered during a `dir:` scan as a synthetic component with this
+/// ecosystem; the absolute paths differ between the PR-head and base-ref
+/// checkouts so each file shows up as both Added and Removed in the diff,
+/// drowning real package changes in noise.
+///
+/// The match is case-sensitive on the exact string `"file"` so legitimate
+/// `Other(...)` ecosystems (e.g. `Other("hex")`, `Other("swift")`) are
+/// unaffected. Callers that genuinely want the raw cataloger output for
+/// debugging or auditing should skip this step (the CLI exposes
+/// `--include-file-components` for this).
+pub fn filter_file_components(sbom: &mut Sbom) {
+    sbom.components
+        .retain(|c| !matches!(&c.ecosystem, Ecosystem::Other(s) if s == "file"));
+}
+
 /// Normalize hash-algorithm strings from any SBOM format to [`HashAlg`].
 pub(crate) fn hash_alg(s: &str) -> HashAlg {
     match s.to_ascii_uppercase().as_str() {
@@ -240,6 +257,76 @@ mod tests {
             Some(Ecosystem::Other("hex".to_string()))
         );
         assert_eq!(ecosystem_from_purl("not-a-purl"), None);
+    }
+
+    #[test]
+    fn filter_file_components_drops_only_file_pseudo_components() {
+        use crate::model::{Component, Relationship};
+
+        fn comp(name: &str, eco: Ecosystem) -> Component {
+            Component {
+                name: name.to_string(),
+                version: "1.0.0".to_string(),
+                ecosystem: eco,
+                purl: None,
+                licenses: Vec::new(),
+                supplier: None,
+                hashes: Vec::new(),
+                relationship: Relationship::Unknown,
+                source_url: None,
+                bom_ref: None,
+            }
+        }
+
+        let mut sbom = Sbom {
+            format: SbomFormat::Syft,
+            serial: None,
+            components: vec![
+                comp("axios", Ecosystem::Npm),
+                comp(".github/workflows/ci.yml", Ecosystem::Other("file".into())),
+                comp("requests", Ecosystem::PyPI),
+                // Other("hex") and similar real-but-unrecognized ecosystems
+                // must NOT be dropped — only the exact "file" sentinel from
+                // Syft's directory cataloger.
+                comp("phoenix", Ecosystem::Other("hex".into())),
+                comp("Cargo.lock", Ecosystem::Other("file".into())),
+            ],
+        };
+
+        filter_file_components(&mut sbom);
+
+        assert_eq!(
+            sbom.components.len(),
+            3,
+            "only the two file: components should be dropped"
+        );
+        let names: Vec<&str> = sbom.components.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["axios", "requests", "phoenix"]);
+    }
+
+    #[test]
+    fn filter_file_components_is_a_noop_when_none_present() {
+        use crate::model::{Component, Relationship};
+
+        let mut sbom = Sbom {
+            format: SbomFormat::CycloneDx,
+            serial: None,
+            components: vec![Component {
+                name: "axios".into(),
+                version: "1.14.0".into(),
+                ecosystem: Ecosystem::Npm,
+                purl: Some("pkg:npm/axios@1.14.0".into()),
+                licenses: Vec::new(),
+                supplier: None,
+                hashes: Vec::new(),
+                relationship: Relationship::Unknown,
+                source_url: None,
+                bom_ref: None,
+            }],
+        };
+        let snapshot = sbom.clone();
+        filter_file_components(&mut sbom);
+        assert_eq!(sbom, snapshot);
     }
 
     #[test]

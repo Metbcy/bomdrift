@@ -77,6 +77,29 @@ fn every_real_world_spdx_fixture_parses_with_components() {
 }
 
 #[test]
+fn real_world_fixtures_contain_no_file_pseudo_components_after_filter() {
+    // Syft's directory cataloger emits each scanned YAML/lockfile as a
+    // synthetic Ecosystem::Other("file") component. The bundled CDX/SPDX
+    // fixtures from upstream corpora don't trip this cataloger (they're
+    // static documents, not directory scans), so the assertion is trivially
+    // true on today's corpus — but it acts as a regression guard if the
+    // corpus is ever refreshed from a Syft-produced source.
+    for path in CDX_FIXTURES.iter().chain(SPDX_FIXTURES) {
+        let mut sbom = parse_fixture(path);
+        parse::filter_file_components(&mut sbom);
+        for comp in &sbom.components {
+            if let Ecosystem::Other(s) = &comp.ecosystem {
+                assert_ne!(
+                    s, "file",
+                    "fixture {path}: file: pseudo-component {} survived filter_file_components",
+                    comp.name
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn known_purl_types_resolve_to_canonical_ecosystem() {
     // Components whose purl is `pkg:npm/...`, `pkg:pypi/...`, etc. should
     // resolve to the canonical Ecosystem variant — never to

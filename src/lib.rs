@@ -31,8 +31,8 @@ pub fn run(cli: Cli) -> Result<()> {
 
 fn run_diff(args: DiffArgs) -> Result<()> {
     let format_hint = args.format.to_sbom_format();
-    let before = load_sbom(&args.before, format_hint)?;
-    let after = load_sbom(&args.after, format_hint)?;
+    let before = load_sbom(&args.before, format_hint, args.include_file_components)?;
+    let after = load_sbom(&args.after, format_hint, args.include_file_components)?;
 
     let mut cs = diff::diff(&before, &after);
 
@@ -144,13 +144,21 @@ fn any_advisory_at_or_above(e: &Enrichment, threshold: Severity) -> bool {
     e.vulns.values().flatten().any(|v| v.severity >= threshold)
 }
 
-fn load_sbom(path: &Path, format_hint: Option<model::SbomFormat>) -> Result<model::Sbom> {
+fn load_sbom(
+    path: &Path,
+    format_hint: Option<model::SbomFormat>,
+    include_file_components: bool,
+) -> Result<model::Sbom> {
     let raw = fs::read_to_string(path)
         .with_context(|| format!("reading SBOM file: {}", path.display()))?;
     let value: serde_json::Value = serde_json::from_str(&raw)
         .with_context(|| format!("parsing JSON in: {}", path.display()))?;
-    parse::parse_with_format(value, format_hint)
-        .with_context(|| format!("normalizing SBOM from: {}", path.display()))
+    let mut sbom = parse::parse_with_format(value, format_hint)
+        .with_context(|| format!("normalizing SBOM from: {}", path.display()))?;
+    if !include_file_components {
+        parse::filter_file_components(&mut sbom);
+    }
+    Ok(sbom)
 }
 
 #[cfg(test)]
