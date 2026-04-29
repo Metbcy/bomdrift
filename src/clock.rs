@@ -19,6 +19,16 @@ use time::{Date, OffsetDateTime};
 /// can vary it between scenarios. If `SOURCE_DATE_EPOCH` is set but
 /// malformed, we fall back to `now_utc()` rather than panic — this matches
 /// the reproducible-builds spec's "best-effort" guidance.
+///
+/// # Example
+///
+/// ```
+/// // SAFETY: doctest is single-threaded.
+/// unsafe { std::env::set_var("SOURCE_DATE_EPOCH", "1700000000"); }
+/// let t = bomdrift::clock::now();
+/// assert_eq!(t.unix_timestamp(), 1700000000);
+/// unsafe { std::env::remove_var("SOURCE_DATE_EPOCH"); }
+/// ```
 pub fn now() -> OffsetDateTime {
     if let Ok(raw) = env::var("SOURCE_DATE_EPOCH")
         && let Ok(secs) = raw.trim().parse::<i64>()
