@@ -474,6 +474,7 @@ mod tests {
             vec![VulnRef {
                 id: "CVE-2025-1".into(),
                 severity,
+                aliases: Vec::new(),
             }],
         );
         Enrichment {

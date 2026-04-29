@@ -617,6 +617,7 @@ mod tests {
             vec![crate::enrich::VulnRef {
                 id: "GHSA-xxxx-yyyy-zzzz".to_string(),
                 severity: crate::enrich::Severity::Critical,
+                aliases: Vec::new(),
             }],
         );
         let md = render(&cs, &e);
@@ -649,14 +650,17 @@ mod tests {
                 crate::enrich::VulnRef {
                     id: "CVE-2025-medium".to_string(),
                     severity: crate::enrich::Severity::Medium,
+                    aliases: Vec::new(),
                 },
                 crate::enrich::VulnRef {
                     id: "CVE-2025-critical".to_string(),
                     severity: crate::enrich::Severity::Critical,
+                    aliases: Vec::new(),
                 },
                 crate::enrich::VulnRef {
                     id: "CVE-2025-high".to_string(),
                     severity: crate::enrich::Severity::High,
+                    aliases: Vec::new(),
                 },
             ],
         );
@@ -685,6 +689,7 @@ mod tests {
             vec![crate::enrich::VulnRef {
                 id: "GHSA-xxxx-yyyy-zzzz".to_string(),
                 severity: crate::enrich::Severity::Critical,
+                aliases: Vec::new(),
             }],
         );
         let summary = render_with_options(
@@ -745,6 +750,7 @@ mod tests {
             vec![crate::enrich::VulnRef {
                 id: "GHSA-xxxx-yyyy-zzzz".to_string(),
                 severity: crate::enrich::Severity::High,
+                aliases: Vec::new(),
             }],
         );
 
@@ -973,6 +979,7 @@ mod tests {
             vec![crate::enrich::VulnRef {
                 id: "GHSA-medium".into(),
                 severity: crate::enrich::Severity::Medium,
+                aliases: Vec::new(),
             }],
         );
         e.vulns.insert(
@@ -980,6 +987,7 @@ mod tests {
             vec![crate::enrich::VulnRef {
                 id: "CVE-2025-critical".into(),
                 severity: crate::enrich::Severity::Critical,
+                aliases: Vec::new(),
             }],
         );
         let md = render(&cs, &e);
@@ -1015,6 +1023,7 @@ mod tests {
             vec![crate::enrich::VulnRef {
                 id: "GHSA-medium".into(),
                 severity: crate::enrich::Severity::Medium,
+                aliases: Vec::new(),
             }],
         );
         e.vulns.insert(
@@ -1022,6 +1031,7 @@ mod tests {
             vec![crate::enrich::VulnRef {
                 id: "CVE-2025-critical".into(),
                 severity: crate::enrich::Severity::Critical,
+                aliases: Vec::new(),
             }],
         );
         let md = render(&cs, &e);
@@ -1199,6 +1209,7 @@ mod tests {
             vec![crate::enrich::VulnRef {
                 id: "GHSA-x".into(),
                 severity: crate::enrich::Severity::High,
+                aliases: Vec::new(),
             }],
         );
         e.typosquats

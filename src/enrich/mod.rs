@@ -70,7 +70,7 @@ impl Enrichment {
 /// A single advisory reference attached to a vulnerable component, with the
 /// best-known severity bucket. Built by [`osv::enrich`] from the
 /// `/v1/querybatch` advisory IDs plus per-advisory `/v1/vulns/{id}` lookups.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct VulnRef {
     /// Stable advisory identifier (`GHSA-…`, `CVE-…`, `MAL-…`, `OSV-…`).
     pub id: String,
@@ -78,6 +78,51 @@ pub struct VulnRef {
     /// could be resolved (network failure, advisory predates GHSA tagging,
     /// CVSS-only severity not yet parsed — see [`Severity`] doc comment).
     pub severity: Severity,
+    /// Cross-database aliases for this advisory (e.g. CVE-… for a GHSA-
+    /// keyed entry). Sorted lexicographically so JSON output is byte-
+    /// deterministic. Excludes the primary [`id`](Self::id). Populated
+    /// from OSV's `aliases[]` field; empty when offline or pre-v0.8.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
+}
+
+impl VulnRef {
+    /// Construct a [`VulnRef`] with no aliases — convenience for tests and
+    /// callers that don't have alias data (e.g. baseline-load round-trips).
+    pub fn new(id: impl Into<String>, severity: Severity) -> Self {
+        Self {
+            id: id.into(),
+            severity,
+            aliases: Vec::new(),
+        }
+    }
+
+    /// Iterator over CVE-prefixed identifiers attached to this advisory:
+    /// the primary [`id`](Self::id) when it begins with `CVE-`, plus every
+    /// alias that does. Used by EPSS/KEV enrichers (Phase B) and by
+    /// SARIF/markdown render paths that need to surface CVE IDs even when
+    /// the advisory is keyed by GHSA.
+    pub fn cves(&self) -> impl Iterator<Item = &str> {
+        let primary = if self.id.starts_with("CVE-") {
+            Some(self.id.as_str())
+        } else {
+            None
+        };
+        primary.into_iter().chain(
+            self.aliases
+                .iter()
+                .map(String::as_str)
+                .filter(|a| a.starts_with("CVE-")),
+        )
+    }
+}
+
+/// Default [`Severity`] is [`Severity::None`] so [`VulnRef::default`] gives
+/// a sensible "unknown advisory" stub useful in tests and round-trips.
+impl Default for Severity {
+    fn default() -> Self {
+        Self::None
+    }
 }
 
 /// Severity bucket for an advisory. Ordered low-to-high so `>= Severity::High`

@@ -343,6 +343,7 @@ mod tests {
             vec![VulnRef {
                 id: "CVE-1".into(),
                 severity: Severity::High,
+                aliases: Vec::new(),
             }],
         );
         apply(&mut cs, &mut e, &baseline);
@@ -368,10 +369,12 @@ mod tests {
                 VulnRef {
                     id: "CVE-1".into(),
                     severity: Severity::High,
+                    aliases: Vec::new(),
                 },
                 VulnRef {
                     id: "CVE-2".into(),
                     severity: Severity::Medium,
+                    aliases: Vec::new(),
                 },
             ],
         );
@@ -395,6 +398,7 @@ mod tests {
             vec![VulnRef {
                 id: "CVE-1".into(),
                 severity: Severity::High,
+                aliases: Vec::new(),
             }],
         );
         apply(&mut cs, &mut e, &baseline);
@@ -483,10 +487,12 @@ mod tests {
                 VulnRef {
                     id: "GHSA-evil-1234".into(),
                     severity: Severity::Critical,
+                    aliases: Vec::new(),
                 },
                 VulnRef {
                     id: "CVE-still-here".into(),
                     severity: Severity::Medium,
+                    aliases: Vec::new(),
                 },
             ],
         );
@@ -495,6 +501,7 @@ mod tests {
             vec![VulnRef {
                 id: "GHSA-evil-1234".into(),
                 severity: Severity::Critical,
+                aliases: Vec::new(),
             }],
         );
         apply(&mut cs, &mut e, &baseline);

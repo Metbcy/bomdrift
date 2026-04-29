@@ -94,27 +94,29 @@ fn enrich_with(
     // not 200. BTreeSet ordering also means the lookups happen in a stable
     // order, which makes the warn-once-on-failure stderr output deterministic.
     let unique_ids: BTreeSet<String> = purl_to_ids.values().flatten().cloned().collect();
-    let mut severities: HashMap<String, Severity> = HashMap::new();
+    let mut details: HashMap<String, (Severity, Vec<String>)> = HashMap::new();
     let mut lookup_failures = 0usize;
     let mut cache_hits = 0usize;
     for id in &unique_ids {
         if let Some(c) = cache
             && let Some(cached) = c.get(id)
         {
-            severities.insert(id.clone(), cached);
+            // v0.7 cache only stored severity; aliases stay empty on a
+            // cache hit. EPSS/KEV (Phase B) tolerates empty aliases.
+            details.insert(id.clone(), (cached, Vec::new()));
             cache_hits += 1;
             continue;
         }
-        match fetch_severity(&agent, vuln_url_base, id) {
-            Ok(sev) => {
-                severities.insert(id.clone(), sev);
+        match fetch_detail(&agent, vuln_url_base, id) {
+            Ok((sev, aliases)) => {
+                details.insert(id.clone(), (sev, aliases));
                 if let Some(c) = cache {
                     c.put(id, sev);
                 }
             }
             Err(_) => {
                 lookup_failures += 1;
-                severities.insert(id.clone(), Severity::None);
+                details.insert(id.clone(), (Severity::None, Vec::new()));
                 // Deliberately do NOT cache failures — a transient 5xx
                 // shouldn't pin Severity::None for 24h.
             }
@@ -140,8 +142,15 @@ fn enrich_with(
         let refs: Vec<VulnRef> = ids
             .into_iter()
             .map(|id| {
-                let severity = severities.get(&id).copied().unwrap_or(Severity::None);
-                VulnRef { id, severity }
+                let (severity, aliases) = details
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or((Severity::None, Vec::new()));
+                VulnRef {
+                    id,
+                    severity,
+                    aliases,
+                }
             })
             .collect();
         if !refs.is_empty() {
@@ -172,7 +181,11 @@ fn post_batch(agent: &ureq::Agent, purls: &[String], url: &str) -> Result<OsvBat
     Ok(parsed)
 }
 
-fn fetch_severity(agent: &ureq::Agent, vuln_url_base: &str, id: &str) -> Result<Severity> {
+fn fetch_detail(
+    agent: &ureq::Agent,
+    vuln_url_base: &str,
+    id: &str,
+) -> Result<(Severity, Vec<String>)> {
     let url = format!("{vuln_url_base}{id}");
     let resp = agent
         .get(&url)
@@ -185,7 +198,24 @@ fn fetch_severity(agent: &ureq::Agent, vuln_url_base: &str, id: &str) -> Result<
     let parsed: OsvVulnDetail = resp
         .into_json()
         .with_context(|| format!("parsing OSV detail JSON for {id}"))?;
-    Ok(severity_from_detail(&parsed))
+    Ok((
+        severity_from_detail(&parsed),
+        aliases_from_detail(&parsed, id),
+    ))
+}
+
+/// Extract sorted, deduplicated aliases from `/v1/vulns/{id}`. The primary
+/// id is excluded so consumers can iterate `aliases` without re-checking
+/// against the primary; sorting gives byte-deterministic JSON output.
+fn aliases_from_detail(detail: &OsvVulnDetail, primary: &str) -> Vec<String> {
+    let mut out: BTreeSet<String> = detail
+        .aliases
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    out.remove(primary);
+    out.into_iter().collect()
 }
 
 /// Extract a severity bucket from the `/v1/vulns/{id}` response. Honors the
@@ -264,6 +294,8 @@ struct OsvVulnRef {
 #[derive(Deserialize, Debug)]
 struct OsvVulnDetail {
     database_specific: Option<OsvDatabaseSpecific>,
+    /// Cross-database alias IDs (e.g. CVE-… on a GHSA-keyed entry).
+    aliases: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -373,6 +405,7 @@ mod tests {
             database_specific: Some(OsvDatabaseSpecific {
                 severity: Some("CRITICAL".to_string()),
             }),
+            aliases: None,
         };
         assert_eq!(severity_from_detail(&detail), Severity::Critical);
     }
@@ -383,6 +416,7 @@ mod tests {
             database_specific: Some(OsvDatabaseSpecific {
                 severity: Some("MODERATE".to_string()),
             }),
+            aliases: None,
         };
         assert_eq!(severity_from_detail(&detail), Severity::Medium);
     }
@@ -391,6 +425,7 @@ mod tests {
     fn severity_from_detail_returns_none_when_database_specific_absent() {
         let detail = OsvVulnDetail {
             database_specific: None,
+            aliases: None,
         };
         assert_eq!(severity_from_detail(&detail), Severity::None);
     }
@@ -399,7 +434,60 @@ mod tests {
     fn severity_from_detail_returns_none_when_severity_field_missing() {
         let detail = OsvVulnDetail {
             database_specific: Some(OsvDatabaseSpecific { severity: None }),
+            aliases: None,
         };
         assert_eq!(severity_from_detail(&detail), Severity::None);
+    }
+
+    #[test]
+    fn aliases_from_detail_excludes_primary_and_sorts() {
+        let detail = OsvVulnDetail {
+            database_specific: None,
+            aliases: Some(vec![
+                "CVE-2025-9999".to_string(),
+                "GHSA-xxxx-yyyy-zzzz".to_string(),
+                "CVE-2025-1111".to_string(),
+            ]),
+        };
+        let aliases = aliases_from_detail(&detail, "GHSA-xxxx-yyyy-zzzz");
+        assert_eq!(
+            aliases,
+            vec!["CVE-2025-1111".to_string(), "CVE-2025-9999".to_string(),],
+            "primary excluded; sorted lexicographically"
+        );
+    }
+
+    #[test]
+    fn aliases_from_detail_handles_missing_aliases_field() {
+        let detail = OsvVulnDetail {
+            database_specific: None,
+            aliases: None,
+        };
+        assert!(aliases_from_detail(&detail, "GHSA-x").is_empty());
+    }
+
+    #[test]
+    fn vulnref_cves_iterates_aliases_when_primary_is_ghsa() {
+        let v = VulnRef {
+            id: "GHSA-xxxx-yyyy-zzzz".to_string(),
+            severity: Severity::High,
+            aliases: vec!["CVE-2025-1111".to_string(), "OSV-2025-1".to_string()],
+        };
+        let cves: Vec<&str> = v.cves().collect();
+        assert_eq!(cves, vec!["CVE-2025-1111"]);
+    }
+
+    #[test]
+    fn vulnref_cves_includes_primary_when_cve_keyed() {
+        let v = VulnRef {
+            id: "CVE-2025-9999".to_string(),
+            severity: Severity::Critical,
+            aliases: vec![
+                "GHSA-aaaa-bbbb-cccc".to_string(),
+                "CVE-2025-1111".to_string(),
+            ],
+        };
+        let cves: Vec<&str> = v.cves().collect();
+        assert_eq!(cves, vec!["CVE-2025-9999", "CVE-2025-1111"]);
     }
 }

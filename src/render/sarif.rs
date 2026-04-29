@@ -380,10 +380,12 @@ mod tests {
                 crate::enrich::VulnRef {
                     id: "GHSA-3p68-rc4w-qgx5".to_string(),
                     severity: crate::enrich::Severity::High,
+                    aliases: Vec::new(),
                 },
                 crate::enrich::VulnRef {
                     id: "CVE-2025-99999".to_string(),
                     severity: crate::enrich::Severity::Medium,
+                    aliases: Vec::new(),
                 },
             ],
         );
@@ -427,6 +429,7 @@ mod tests {
             vec![crate::enrich::VulnRef {
                 id: "OSV-2025-1".to_string(),
                 severity: crate::enrich::Severity::None,
+                aliases: Vec::new(),
             }],
         );
         let e = Enrichment {
@@ -449,6 +452,7 @@ mod tests {
             vec![crate::enrich::VulnRef {
                 id: "CVE-2025-1".to_string(),
                 severity: crate::enrich::Severity::Medium,
+                aliases: Vec::new(),
             }]
         };
 
@@ -569,6 +573,7 @@ mod tests {
             vec![crate::enrich::VulnRef {
                 id: "CVE-2025-1".to_string(),
                 severity: crate::enrich::Severity::High,
+                aliases: Vec::new(),
             }],
         );
         let e = Enrichment {
@@ -610,6 +615,7 @@ mod tests {
             vec![crate::enrich::VulnRef {
                 id: "CVE-1".into(),
                 severity: crate::enrich::Severity::Medium,
+                aliases: Vec::new(),
             }],
         );
         let e = Enrichment {

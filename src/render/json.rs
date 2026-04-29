@@ -181,6 +181,7 @@ mod tests {
             vec![crate::enrich::VulnRef {
                 id: "GHSA-3p68-rc4w-qgx5".to_string(),
                 severity: crate::enrich::Severity::High,
+                aliases: Vec::new(),
             }],
         );
 

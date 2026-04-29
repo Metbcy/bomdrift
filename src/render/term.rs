@@ -310,6 +310,7 @@ mod tests {
             vec![crate::enrich::VulnRef {
                 id: "MAL-2026-2306".to_string(),
                 severity: crate::enrich::Severity::Critical,
+                aliases: Vec::new(),
             }],
         );
 

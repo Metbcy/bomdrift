@@ -64,6 +64,7 @@ fn synth_changeset() -> (ChangeSet, Enrichment) {
             vec![VulnRef {
                 id: format!("GHSA-test-{i:04}"),
                 severity: Severity::High,
+                aliases: Vec::new(),
             }],
         );
     }
