@@ -34,14 +34,15 @@ jobs:
           format: cyclonedx-json
           output-file: after.json
         env:
-          # Remove the `file` cataloger from Syft's default selection.
-          # Without this, every YAML workflow + lockfile shows up as a
-          # `file:`-ecosystem component and the path difference between
-          # the PR-head checkout and the base-ref checkout (./base/...)
-          # produces phantom add/remove pairs in the diff. The `-file`
-          # syntax is the documented "subtract from defaults" form
-          # (Syft prints the hint when it tries to add `file` itself).
-          SYFT_DEFAULT_CATALOGERS: -file
+          # Start from the `directory` cataloger defaults (the right base
+          # set for `--source dir:.`) and remove the file-level cataloger
+          # which would emit each YAML workflow + lockfile as a
+          # `file:`-ecosystem component. The path differs between the
+          # PR-head checkout and the base-ref checkout (./base/...) so
+          # those file entries produce phantom add/remove pairs in the
+          # diff. Just `-file` alone errors out — Syft requires a base
+          # selector that the negation subtracts from.
+          SYFT_DEFAULT_CATALOGERS: directory,-file
 
       # Sibling checkout of the base ref so the SBOM generator sees a
       # clean snapshot of main without the PR's diff applied.
@@ -58,7 +59,7 @@ jobs:
           format: cyclonedx-json
           output-file: before.json
         env:
-          SYFT_DEFAULT_CATALOGERS: -file
+          SYFT_DEFAULT_CATALOGERS: directory,-file
 
       - name: Run bomdrift
         uses: Metbcy/bomdrift@v1
