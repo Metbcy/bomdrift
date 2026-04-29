@@ -12,6 +12,7 @@
 pub mod cache;
 pub mod epss;
 pub mod kev;
+pub mod license;
 pub mod maintainer;
 pub mod osv;
 pub mod typosquat;

@@ -13,6 +13,7 @@
 
 - [Output formats](./output-formats.md)
 - [SARIF + Code Scanning](./sarif.md)
+- [License policy](./license-policy.md)
 - [Baseline & suppression](./baseline.md)
 
 # Enrichers

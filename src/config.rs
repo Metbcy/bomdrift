@@ -13,6 +13,19 @@ use serde::Deserialize;
 
 use crate::cli::{DebugFormat, DiffArgs, FailOn, InputFormat, OutputFormat, Platform};
 
+/// `[license]` block in `.bomdrift.toml`. CLI flags
+/// (`--allow-licenses`/`--deny-licenses`) override this block when set
+/// (override, not merge — matches the Dependency Review Action).
+#[derive(Debug, Default, Deserialize)]
+pub struct LicenseConfig {
+    #[serde(default)]
+    pub allow: Vec<String>,
+    #[serde(default)]
+    pub deny: Vec<String>,
+    #[serde(default)]
+    pub allow_ambiguous: bool,
+}
+
 const DEFAULT_CONFIG_PATH: &str = ".bomdrift.toml";
 
 #[derive(Debug, Default, Deserialize)]
@@ -29,6 +42,7 @@ pub struct DiffConfig {
     pub no_epss: Option<bool>,
     pub no_kev: Option<bool>,
     pub fail_on_epss: Option<f32>,
+    pub license: Option<LicenseConfig>,
     pub baseline: Option<PathBuf>,
     pub no_maintainer_age: Option<bool>,
     pub fail_on: Option<FailOn>,
@@ -117,6 +131,19 @@ fn apply_loaded_diff_config(args: &mut DiffArgs, config: Config) {
     if args.output_file.is_none() {
         args.output_file = diff.output_file;
     }
+
+    // [license] block: CLI flags override (not merge) when set. Mirrors
+    // Dependency Review Action semantics so users moving between bomdrift
+    // and DRA don't get surprises.
+    if let Some(lic) = diff.license {
+        if args.allow_licenses.is_empty() {
+            args.allow_licenses = lic.allow;
+        }
+        if args.deny_licenses.is_empty() {
+            args.deny_licenses = lic.deny;
+        }
+        args.allow_ambiguous_licenses |= lic.allow_ambiguous;
+    }
 }
 
 fn load_config(explicit: Option<&Path>) -> Result<Option<Config>> {
@@ -169,6 +196,9 @@ mod tests {
             debug_calibration: false,
             debug_calibration_format: DebugFormat::default(),
             output_file: None,
+            allow_licenses: Vec::new(),
+            deny_licenses: Vec::new(),
+            allow_ambiguous_licenses: false,
         }
     }
 

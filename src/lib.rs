@@ -166,6 +166,16 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
         }
     }
 
+    // License-policy enrichment (Phase D, v0.8). Pure-compute, runs after
+    // OSV/EPSS/KEV. Empty allow + empty deny means "no policy" — the
+    // enricher returns no violations.
+    let license_policy = enrich::license::Policy {
+        allow: args.allow_licenses.clone(),
+        deny: args.deny_licenses.clone(),
+        allow_ambiguous: args.allow_ambiguous_licenses,
+    };
+    enrichment.license_violations = enrich::license::enrich(&cs, &license_policy);
+
     // Apply the baseline AFTER all enrichers run — suppression operates on
     // the realized finding set, not on intermediate inputs. This keeps the
     // baseline file format stable as new enrichers are added: a new finding
@@ -442,6 +452,23 @@ fn write_calibration_lines<W: std::io::Write>(
                 }
             }
         }
+    }
+    for v in &e.license_violations {
+        write_calibration_row(
+            out,
+            "license",
+            v.component
+                .purl
+                .as_deref()
+                .unwrap_or(v.component.name.as_str()),
+            CalibrationScore::Text(&v.license),
+            CalibrationThreshold::Text(match v.kind {
+                crate::enrich::LicenseViolationKind::Deny => "deny",
+                crate::enrich::LicenseViolationKind::Ambiguous => "ambiguous",
+                crate::enrich::LicenseViolationKind::NotAllowed => "not-allowed",
+            }),
+            format,
+        );
     }
 }
 
@@ -934,5 +961,24 @@ mod tests {
         let s = String::from_utf8(buf).unwrap();
         assert!(s.contains("epss|"), "missing epss row: {s}");
         assert!(s.contains("kev|"), "missing kev row: {s}");
+    }
+
+    #[test]
+    fn fail_on_license_violation_trips() {
+        use crate::enrich::{LicenseViolation, LicenseViolationKind};
+        let mut e = Enrichment::default();
+        e.license_violations.push(LicenseViolation {
+            component: comp("foo"),
+            license: "GPL-3.0-only".into(),
+            matched_rule: "deny: GPL-3.0-only".into(),
+            kind: LicenseViolationKind::Deny,
+        });
+        assert!(tripped(&ChangeSet::default(), &e, FailOn::LicenseViolation));
+        assert!(tripped(&ChangeSet::default(), &e, FailOn::Any));
+        assert!(!tripped(
+            &ChangeSet::default(),
+            &Enrichment::default(),
+            FailOn::LicenseViolation
+        ));
     }
 }

@@ -379,6 +379,39 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
         }));
     }
 
+    // ---- bomdrift.license-violation ----
+    for v in &e.license_violations {
+        let name = &v.component.name;
+        let purl_or_name = v.component.purl.as_deref().unwrap_or(name);
+        let fp = fingerprint(&["bomdrift.license-violation", purl_or_name, &v.license]);
+        out.push(json!({
+            "ruleId": "bomdrift.license-violation",
+            "level": "warning",
+            "message": {
+                "text": format!(
+                    "`{name}` license `{lic}` violates policy ({rule}).",
+                    name = name,
+                    lic = v.license,
+                    rule = v.matched_rule,
+                ),
+            },
+            "locations": [synthetic_location()],
+            "partialFingerprints": { "primaryHash/v1": fp },
+            "properties": {
+                "purl":         v.component.purl,
+                "name":         name,
+                "version":      v.component.version,
+                "license":      v.license,
+                "matchedRule":  v.matched_rule,
+                "kind":         match v.kind {
+                    crate::enrich::LicenseViolationKind::Deny => "deny",
+                    crate::enrich::LicenseViolationKind::Ambiguous => "ambiguous",
+                    crate::enrich::LicenseViolationKind::NotAllowed => "not-allowed",
+                },
+            },
+        }));
+    }
+
     Value::Array(out)
 }
 
@@ -854,5 +887,35 @@ mod tests {
             .unwrap()
             .to_string();
         assert_ne!(f1, f2);
+    }
+
+    #[test]
+    fn license_violation_emits_result_with_stable_fingerprint() {
+        use crate::enrich::{LicenseViolation, LicenseViolationKind};
+        let comp = comp("foo", "1.0.0", Ecosystem::Npm, Some("pkg:npm/foo@1.0.0"));
+        let e = Enrichment {
+            license_violations: vec![LicenseViolation {
+                component: comp,
+                license: "GPL-3.0-only".into(),
+                matched_rule: "deny: GPL-3.0-only".into(),
+                kind: LicenseViolationKind::Deny,
+            }],
+            ..Default::default()
+        };
+        let r1 = render(&ChangeSet::default(), &e);
+        let r2 = render(&ChangeSet::default(), &e);
+        assert_eq!(r1, r2, "byte-equal across runs");
+        let v: Value = serde_json::from_str(&r1).unwrap();
+        let result = &v["runs"][0]["results"][0];
+        assert_eq!(result["ruleId"], "bomdrift.license-violation");
+        assert_eq!(result["properties"]["license"], "GPL-3.0-only");
+        assert_eq!(result["properties"]["kind"], "deny");
+        assert_eq!(
+            result["partialFingerprints"]["primaryHash/v1"]
+                .as_str()
+                .unwrap()
+                .len(),
+            64
+        );
     }
 }

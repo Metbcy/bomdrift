@@ -118,6 +118,13 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
             enrichment.maintainer_age.len()
         );
     }
+    if !enrichment.license_violations.is_empty() {
+        let _ = writeln!(
+            out,
+            "| License violations | {} |",
+            enrichment.license_violations.len()
+        );
+    }
     out.push('\n');
 
     if opts.summary_only {
@@ -165,6 +172,35 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
                 out,
                 "| {} | {} | {} | {} |",
                 a.ecosystem, a.name, b.version, a.version
+            );
+        }
+        section_close(&mut out);
+    }
+
+    if !enrichment.license_violations.is_empty() {
+        section_open(
+            &mut out,
+            "License violations",
+            enrichment.license_violations.len(),
+            None,
+        );
+        out.push_str(
+            "One or more changed components have a license that the configured \
+             policy disallows. Review the matched rule and either update the \
+             component, exempt it via an explicit baseline entry, or relax the \
+             policy. \
+             [Why this matters](https://metbcy.github.io/bomdrift/license-policy.html)\n\n",
+        );
+        out.push_str("| Ecosystem | Name | Version | License | Rule |\n|---|---|---|---|---|\n");
+        for v in &enrichment.license_violations {
+            let _ = writeln!(
+                out,
+                "| {} | {} | {} | `{}` | {} |",
+                v.component.ecosystem,
+                v.component.name,
+                v.component.version,
+                v.license,
+                v.matched_rule,
             );
         }
         section_close(&mut out);

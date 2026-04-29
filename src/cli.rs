@@ -290,6 +290,21 @@ pub struct DiffArgs {
     /// only advisories surface this; non-CVE findings are unaffected.
     #[arg(long)]
     pub fail_on_epss: Option<f32>,
+    /// Comma-separated SPDX license identifiers (or `*`-suffix globs)
+    /// permitted by policy. May be repeated. CLI flag takes precedence
+    /// over `[license] allow` in `.bomdrift.toml` (override, not merge).
+    #[arg(long, value_delimiter = ',')]
+    pub allow_licenses: Vec<String>,
+    /// Comma-separated SPDX license identifiers (or `*`-suffix globs)
+    /// forbidden by policy. May be repeated. Deny wins when a license
+    /// matches both allow and deny.
+    #[arg(long, value_delimiter = ',')]
+    pub deny_licenses: Vec<String>,
+    /// When set, compound SPDX expressions like `(MIT OR GPL-3.0)` are
+    /// permitted (the v0.9 SPDX evaluator will replace this with proper
+    /// expression evaluation). Off by default — fail-closed.
+    #[arg(long)]
+    pub allow_ambiguous_licenses: bool,
     #[arg(long)]
     pub debug_calibration: bool,
     /// Format for `--debug-calibration` rows. `pipe` (default, back-compat

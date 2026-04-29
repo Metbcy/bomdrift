@@ -170,6 +170,27 @@ pub fn render_with_color(cs: &ChangeSet, enrichment: &Enrichment, color: ColorCh
         out.push('\n');
     }
 
+    if !enrichment.license_violations.is_empty() {
+        let _ = writeln!(
+            out,
+            "License violations ({}):",
+            enrichment.license_violations.len()
+        );
+        for v in &enrichment.license_violations {
+            let _ = writeln!(
+                out,
+                "  {} {}:{}@{} - {} [{}]",
+                tag("[LIC]", Tone::High, color),
+                v.component.ecosystem,
+                v.component.name,
+                v.component.version,
+                v.license,
+                v.matched_rule,
+            );
+        }
+        out.push('\n');
+    }
+
     out
 }
 
