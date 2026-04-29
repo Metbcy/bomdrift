@@ -3,87 +3,66 @@
 What's planned, what's deliberately out of scope, and what the
 acceptance criteria for new contributions look like.
 
-## Shipped (v0.8 — supply-chain hardening)
-
-- **SARIF + GitHub Code Scanning** with stable per-result fingerprints
-  and one-line action opt-in (`upload-to-code-scanning: true`).
-- **EPSS scoring** on every CVE-aliased advisory; `--fail-on-epss`
-  threshold gating.
-- **CISA KEV flagging** of known-exploited advisories;
-  `--fail-on kev`.
-- **License allow/deny policy** with `*`-suffix glob matching and
-  fail-closed compound-expression handling. New
-  `bomdrift.license-violation` SARIF rule.
-- **Baseline `expires` + `reason`** for time-boxed risk acceptance,
-  with stderr warnings on expired entries.
-- **`time` crate adoption + `clock` module** — single source of truth
-  for date/time, honors `SOURCE_DATE_EPOCH`.
-- **OSV CVE aliases** threaded through `VulnRef` (prerequisite for
-  EPSS / KEV / VEX).
-- **`--debug-calibration-format jsonl`** alternative to the v0.7
-  pipe-delimited format.
-- **`--output-file <PATH>`** CLI flag (avoids `>` redirection in YAML).
-
-## Planned (v0.9 — interoperability + breadth)
+## Shipped (v0.9 — interoperability + breadth)
 
 - **VEX consume** — `--vex <path>` accepts OpenVEX 0.2.0 + CycloneDX
   VEX 1.6 statements; `not_affected` / `fixed` suppress findings,
   `under_investigation` annotates.
-- **VEX emit** — `--emit-vex <path>` emits an OpenVEX document from
-  baseline-suppressed findings. Defaults to
-  `under_investigation` (the safe truth-claim); per-entry
-  `vex_status` override required for `not_affected`.
-- **SPDX expression evaluator** — replaces v0.8's atomic+glob matcher
-  with full `(MIT OR Apache-2.0)` evaluation via the `spdx` crate.
-  Deprecates `allow_ambiguous`.
-- **Multi-SCM templates** — Bitbucket Pipelines + Azure DevOps with
-  per-platform footer shapes and PR-comment upsert recipes.
-- **Registry-metadata enrichers** — npm `time.modified`, PyPI
-  `info.yanked`, crates.io `versions[].yanked`. New finding kinds:
-  `RecentlyPublished`, `Deprecated`, `MaintainerSetChanged`.
-- **GitLab in-comment suppression** with explicit security guards
-  (token verification, event filter, project allowlist, commenter
-  permissions, fork-MR safety). Reference Cloudflare Worker bridge.
-- **Explicit non-goals doc** — reachability, tarball static analysis,
-  auto-fix PR generation, container image scanning, SAST/secrets,
-  risk-score dashboards. Pair with Endor/Snyk for reachability,
-  Renovate/Dependabot for auto-fix.
+- **VEX emit** — `--emit-vex <path>` emits an OpenVEX 0.2.0 document
+  with explicit per-entry `vex_status` (default
+  `under_investigation`, never auto-promoted).
+- **Full SPDX expression evaluator** via the `spdx` crate. Deprecates
+  `allow_ambiguous`.
+- **Bitbucket Pipelines + Azure DevOps Pipelines** templates with
+  auto-detection (`BITBUCKET_BUILD_NUMBER`, `TF_BUILD`) and
+  per-platform footer shapes.
+- **Registry-metadata enrichers** — npm/PyPI/crates.io. New kinds:
+  recently-published, deprecated, maintainer-set-changed (npm only).
+- **GitLab comment-driven suppression** via a security-reviewed
+  Cloudflare Worker reference bridge (five guards).
+- **Explicit non-goals + pair-with recommendations** in README and
+  STATUS.
+
+## Shipped (v0.8 — supply-chain hardening)
+
+- SARIF + GitHub Code Scanning with stable per-result fingerprints
+  and one-line action opt-in (`upload-to-code-scanning: true`).
+- EPSS scoring on every CVE-aliased advisory; `--fail-on-epss`.
+- CISA KEV flagging of known-exploited advisories; `--fail-on kev`.
+- License allow/deny policy with `*`-suffix glob matching and
+  fail-closed compound-expression handling. New
+  `bomdrift.license-violation` SARIF rule.
+- Baseline `expires` + `reason` with stderr warnings on expiry.
+- `time` crate + `clock` module honoring `SOURCE_DATE_EPOCH`.
+- OSV CVE aliases threaded through `VulnRef`.
+- `--debug-calibration-format jsonl` and `--output-file <PATH>`.
 
 ## Future candidates (not committed)
 
-- **GraphQL maintainer-age** — was investigated for v0.4 and deferred.
-  The current REST implementation already uses `?per_page=1` + Link-header
-  parsing for top contributor and contributor count. The remaining
-  round-trip cost is the per-author commit-history pagination, and
-  GitHub's GraphQL `history()` connection doesn't expose ASC ordering —
-  finding the oldest commit still requires cursor pagination. v0.5 may
-  approach this via `User.contributionsCollection` or accept that REST
-  is the right tool here.
+- **Per-exception SPDX allow/deny** — currently the WITH-exception
+  identity is informational only; allow/deny narrows to base
+  license. v1.0 candidate.
+- **PyPI / crates.io maintainer-set-changed** — blocked on
+  per-version maintainer data in upstream APIs.
+- **VEX vocabulary beyond OpenVEX's 8 justifications** — bomdrift
+  uses the spec's enum verbatim. If a richer vocab emerges we'll
+  follow.
+- **GraphQL maintainer-age** — was investigated for v0.4 and
+  deferred. Cursor-pagination cost still steers us toward REST.
 - **Custom rules / plugin system** — let consumers add
-  organization-specific enrichers (e.g. "flag any dep from
-  internal-mirror.example.com without a SHA-256 attestation").
-  Probably WASM-based for sandboxing.
-- **GitLab in-comment suppression** — v0.7 ships the GitLab CI
-  template + `--platform gitlab` (the diff path); v0.9 will add the
-  comment-driven `/bomdrift suppress <ID>` flow with explicit
-  security guards.
-- **Calibration tuning from `--debug-calibration` data** — v0.7
-  added the diagnostic flag; v0.8 may revise
-  `SIMILARITY_THRESHOLD`, `YOUNG_MAINTAINER_DAYS`, and OSV cache
-  TTL defaults based on adopter-collected samples shared on
-  issue #5.
-- **OCI artifact attestation** — verify SBOMs are themselves signed
-  by the build system before diffing. Pairs with cosign attest.
+  organization-specific enrichers. Probably WASM-based.
+- **OCI artifact attestation** — verify SBOMs are signed by the
+  build system before diffing.
 
 ### Calibration backlog
 
-These are tunable thresholds where the v0.3 default may not be the
-right answer at scale. Adjusting requires real-world signal data, so
-they're tracked as "watch the false-positive rate":
+Tunable thresholds where the default may not be the right answer
+at scale:
 
 - Typosquat `SIMILARITY_THRESHOLD` (currently 0.92).
 - Maintainer-age `YOUNG_MAINTAINER_DAYS` (currently 90).
-- OSV severity cache TTL (currently 24h).
+- Registry `MIN_PUBLISHED_AGE_DAYS` (currently 14).
+- OSV / EPSS / KEV / Registry cache TTL (currently 24h).
 
 ## Non-goals
 

@@ -17,11 +17,34 @@ keeping the project OSS-first: no hosted dashboard, no account, no telemetry.
 | CISA KEV (known-exploited) flagging | Supported (v0.8+) — auto, opt-out via `--no-kev` |
 | License allow/deny policy | Supported (v0.8+) — `[license]` block / CLI flags |
 | Suppression expiry (`expires` + `reason`) | Supported (v0.8+) — time-boxed risk acceptance |
-| GitLab CI merge requests | Supported through the `examples/gitlab-ci/` template (v0.7+); in-comment suppression deferred to v0.9 |
+| GitLab CI merge requests | Supported through the `examples/gitlab-ci/` template (v0.7+); comment-driven suppression supported via Cloudflare Worker bridge (v0.9+) |
 | GitHub Enterprise / self-hosted runners | Expected to work, not broadly tested yet |
-| Bitbucket / Azure DevOps | Planned for v0.9 |
-| VEX consume / emit | Planned for v0.9 |
+| Bitbucket Pipelines | Supported (v0.9+) — `examples/bitbucket-pipelines/` |
+| Azure DevOps Pipelines | Supported (v0.9+) — `examples/azure-devops/` |
+| VEX consume / emit | Supported (v0.9+) — OpenVEX 0.2.0 + CycloneDX VEX 1.6 |
+| SPDX expression evaluation | Supported (v0.9+) — full `Expression::evaluate` via `spdx` crate |
+| Registry-metadata enrichers (npm/PyPI/crates.io) | Supported (v0.9+) — recently-published, deprecated, maintainer-set-changed |
 | Hosted dashboard / SaaS | Not planned |
+
+## Out-of-scope by design
+
+bomdrift's design constraints (OSS-first, single-binary, no
+telemetry, change-focused) put a number of capabilities deliberately
+out of scope. Pair bomdrift with the suggested complementary tools
+when you need them — see the README's
+[Non-goals](https://github.com/Metbcy/bomdrift#non-goals) section
+for the rationale.
+
+| Out-of-scope | Pair with |
+|---|---|
+| Reachability / call-graph analysis | Endor Labs, Snyk Reachability |
+| Tarball / behavior analysis | Socket |
+| Auto-fix PR generation | Renovate, Dependabot |
+| Container / OCI image scanning | Trivy, Grype |
+| SAST / secrets scanning | GitHub Advanced Security, Semgrep, gitleaks |
+| Risk-score dashboards (cross-repo) | Endor, Snyk |
+| Continuous monitoring / always-on agent | Run bomdrift in scheduled CI |
+| Closed-source advisory feeds | bomdrift uses OSV.dev only |
 
 ## Known limitations
 

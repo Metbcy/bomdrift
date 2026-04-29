@@ -257,9 +257,58 @@ PRs welcome. The `good first issue` label tracks focused asks for new contributo
 
 ## Non-goals
 
-- **SBOM generation.** Use [Syft](https://github.com/anchore/syft) — it's already great. bomdrift only consumes SBOMs (and as of v0.5 invokes Syft itself inside the Action so consumers don't have to).
-- **Dependency-tree visualization.** [`cargo tree`](https://doc.rust-lang.org/cargo/commands/cargo-tree.html), [`pnpm why`](https://pnpm.io/cli/why), and friends do this well.
-- **Replacing your SCA scanner.** OSV-scanner, Grype, Trivy all have richer vulnerability databases. bomdrift's CVE enrichment is *change-focused*: only on what's new in this diff.
+bomdrift's design constraints (OSS-first, single-binary, no
+telemetry, change-focused) put a number of capabilities deliberately
+out of scope. We don't ship them, but we recommend pairing bomdrift
+with tools that do.
+
+- **SBOM generation.** Use [Syft](https://github.com/anchore/syft) —
+  it's already great. bomdrift only consumes SBOMs (and as of v0.5
+  invokes Syft itself inside the Action so consumers don't have to).
+- **Dependency-tree visualization.**
+  [`cargo tree`](https://doc.rust-lang.org/cargo/commands/cargo-tree.html),
+  [`pnpm why`](https://pnpm.io/cli/why), and friends do this well.
+- **Reachability / call-graph analysis.** "Is this CVE reachable
+  from my code's entry points?" requires AST + call-graph
+  infrastructure orthogonal to SBOM diffing. *Pair with Endor Labs
+  or Snyk Reachability.*
+- **Static analysis of registry tarballs.** Detecting malicious code
+  inside a published package needs a sandbox + behavior heuristics.
+  *Pair with [Socket](https://socket.dev/).*
+- **Auto-fix PR generation.** bomdrift surfaces findings; it doesn't
+  open follow-up PRs. *Pair with Renovate or Dependabot.*
+- **Continuous monitoring / always-on agent.** bomdrift is a
+  one-shot CLI invoked from CI. There's no daemon, no telemetry, no
+  scheduled background polling. *Run bomdrift in a scheduled CI
+  workflow if you want periodic re-checks.*
+- **Container / OCI image scanning.** SBOM + image-layer scanning is
+  Trivy / Grype's lane. Use them; bomdrift focuses on
+  application-dependency drift between two SBOMs.
+- **SAST / secrets scanning.** Different problem space; well
+  served by GitHub Advanced Security, Semgrep, or gitleaks.
+- **Risk-score dashboards / asset-context aggregation.** Cross-repo
+  dashboards inevitably require telemetry, which violates bomdrift's
+  no-telemetry tenet. *Pair with Endor / Snyk if your org needs
+  centralized risk reporting.*
+- **Closed-source advisory databases.** bomdrift uses OSV.dev (the
+  open advisory aggregator). Closed proprietary feeds aren't
+  consumed in the OSS distribution.
+- **Replacing your SCA scanner.** OSV-scanner, Grype, Trivy all
+  have richer vulnerability databases for *full-tree* scans.
+  bomdrift's CVE enrichment is **change-focused**: only on what's
+  new in this diff.
+
+### Pair with…
+
+| Need | Recommended tool |
+|---|---|
+| Reachability analysis | Endor Labs, Snyk Reachability |
+| Tarball / behavior analysis | Socket |
+| Auto-fix PRs | Renovate, Dependabot |
+| Container image scans | Trivy, Grype |
+| SAST / secrets | GitHub Advanced Security, Semgrep, gitleaks |
+| Cross-repo risk dashboards | Endor, Snyk |
+| SBOM generation | Syft (bomdrift bundles this in the Action) |
 
 ## License
 
