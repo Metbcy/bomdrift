@@ -7,6 +7,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-29
+
+The adoption milestone: bomdrift now works as a copy-paste GitHub Action,
+posts a much more scannable PR comment, supports comment-driven suppression,
+and has the repo surfaces first-time OSS users expect.
+
 ### Changed
 
 - **`Ecosystem::Other("file")` pseudo-components are now dropped from
@@ -25,6 +31,26 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   inert, matching against findings that no longer surface.
 
 ### Added
+
+- **Zero-config GitHub Action invocation.** `Metbcy/bomdrift@v1` can now
+  run on a `pull_request` workflow with no explicit checkout, Syft step,
+  or SBOM path wiring. The action checks out the PR base and head refs,
+  installs Syft via `anchore/sbom-action/download-syft@v0`, generates
+  CycloneDX JSON SBOMs for both sides, runs `bomdrift diff`, and upserts
+  the markdown result as a PR comment. Existing `before-sbom` /
+  `after-sbom` inputs remain supported as the bring-your-own-SBOM escape
+  hatch, but are no longer required.
+
+- **`bomdrift baseline add <id>` CLI subcommand** for adding wildcard
+  advisory suppressions to `.bomdrift/baseline.json`. The command creates
+  the file and parent directory when missing, writes atomically, and is
+  idempotent when the advisory is already suppressed.
+
+- **Companion `Metbcy/bomdrift/comment-suppress@v1` action** for
+  in-comment suppression. A reviewer can comment `/bomdrift suppress
+  <ID>` on a PR; the sub-action validates the command, runs
+  `bomdrift baseline add <ID>`, commits the baseline update to the PR
+  branch, and reacts to the trigger comment.
 
 - **`--include-file-components` flag** on `bomdrift diff` for users
   who want the raw cataloger output (debugging, auditing). Off by
@@ -61,10 +87,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `bomdrift diff`. When set, the markdown comment renders an
   action-affordance footer with three links: a pre-filled "Report
   this finding" issue URL, the `/bomdrift suppress <id>`
-  suppress-comment hint (Phase D wires the actual mechanism), and
-  the docs site. When unset, the footer is omitted entirely so
-  forks / standalone CLI use don't render dead links to bomdrift's
-  own issue tracker.
+  suppress-comment hint, and the docs site. The action sets this
+  automatically from the consuming repository, while standalone CLI
+  runs can pass the flag or env var explicitly. When unset, the footer
+  is omitted entirely so forks / standalone CLI use don't render dead
+  links to bomdrift's own issue tracker.
+
+- **OSS adoption surfaces.** The README now leads with the one-step
+  workflow, a comparison table, suppression setup, and v0.5 examples.
+  The repo also has issue templates, a pull-request template,
+  root-level CONTRIBUTING.md, CODE_OF_CONDUCT.md, STATUS.md, and a
+  pinned feedback issue for early users.
 
 ## [0.4.4] - 2026-04-28
 
@@ -545,7 +578,8 @@ changed dependency in a format ready to drop into a PR comment.
 - Linux aarch64 binary.
 - PyPI / Cargo / Maven typosquat reference lists (only npm in v0.1.0).
 
-[Unreleased]: https://github.com/Metbcy/bomdrift/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/Metbcy/bomdrift/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Metbcy/bomdrift/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/Metbcy/bomdrift/releases/tag/v0.4.4
 [0.4.3]: https://github.com/Metbcy/bomdrift/releases/tag/v0.4.3
 [0.4.2]: https://github.com/Metbcy/bomdrift/releases/tag/v0.4.2
