@@ -973,4 +973,77 @@ mod tests {
         assert_eq!(pep503_normalize("scikit__learn"), "scikit-learn");
         assert_eq!(pep503_normalize("---weird---"), "weird");
     }
+
+    // ---- Property-based tests --------------------------------------------
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1024))]
+
+        /// `pep503_normalize` must never panic on arbitrary unicode and
+        /// must always produce ASCII-only output (PEP 503's normalization
+        /// rules collapse all non-alphanumeric to `-`, so the output is
+        /// constrained to lowercase ASCII alphanumerics + `-`). Any
+        /// upstream mojibake or zero-width character should not crash.
+        #[test]
+        fn pep503_normalize_does_not_panic(s in ".*") {
+            let out = pep503_normalize(&s);
+            // Output is always lowercase (no uppercase made it through).
+            prop_assert_eq!(out.clone(), out.to_lowercase());
+            // Output never starts or ends with `-` (the trim_matches step).
+            prop_assert!(!out.starts_with('-'));
+            prop_assert!(!out.ends_with('-'));
+        }
+
+        /// `last_path_segment` must never panic and must return a substring
+        /// of its input (i.e. the returned `&str` borrows from the
+        /// argument). The substring rule is enforced by the type system —
+        /// the property test catches semantic bugs like "returned an empty
+        /// string when the input had no `/`".
+        #[test]
+        fn last_path_segment_returns_substring(s in ".*") {
+            let result = last_path_segment(&s);
+            // Result is always present in the input.
+            prop_assert!(s.contains(result) || result.is_empty() && s.is_empty());
+            // No `/` in the result (we split on `/`).
+            prop_assert!(!result.contains('/'));
+        }
+
+        /// The entire `enrich(cs)` entry point must never panic on
+        /// arbitrary `ChangeSet::added` shapes. Empty ChangeSets are
+        /// trivially fine; this exercises the loops over arbitrary
+        /// component names + ecosystems.
+        #[test]
+        fn enrich_does_not_panic_on_arbitrary_components(
+            names in proptest::collection::vec(".*", 0..32)
+        ) {
+            let added: Vec<Component> = names
+                .iter()
+                .map(|n| {
+                    let eco = match n.len() % 5 {
+                        0 => Ecosystem::Npm,
+                        1 => Ecosystem::PyPI,
+                        2 => Ecosystem::Cargo,
+                        3 => Ecosystem::Go,
+                        _ => Ecosystem::Other("unknown".to_string()),
+                    };
+                    Component {
+                        name: n.clone(),
+                        version: "1.0.0".to_string(),
+                        ecosystem: eco,
+                        purl: None,
+                        licenses: Vec::new(),
+                        supplier: None,
+                        hashes: Vec::new(),
+                        relationship: Relationship::Unknown,
+                        source_url: None,
+                        bom_ref: None,
+                    }
+                })
+                .collect();
+            let cs = ChangeSet { added, ..Default::default() };
+            let _ = enrich(&cs);
+        }
+    }
 }

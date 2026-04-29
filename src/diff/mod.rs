@@ -462,4 +462,66 @@ mod tests {
         assert_eq!(cs.removed.len(), 1);
         assert!(cs.version_changed.is_empty());
     }
+
+    // ---- Property-based tests --------------------------------------------
+
+    use proptest::prelude::*;
+
+    /// Strategy: generate an `Sbom` with up to 16 npm components.
+    /// Components are keyed by `name` only (no purl) for simplicity.
+    /// Versions cycle from a small pool so add/remove/version_changed
+    /// paths all see realistic input.
+    fn arb_sbom() -> impl Strategy<Value = Sbom> {
+        proptest::collection::vec(
+            (
+                "[a-z][a-z0-9_-]{0,15}",
+                proptest::sample::select(vec!["1.0.0", "1.0.1", "2.0.0", "3.0.0"]),
+            ),
+            0..16,
+        )
+        .prop_map(|pairs| {
+            let components = pairs
+                .into_iter()
+                .map(|(name, ver)| comp(&name, ver, Ecosystem::Npm, None))
+                .collect();
+            sbom(components)
+        })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(512))]
+
+        /// Identity: diff(a, a) is always empty. Self-diffs of any input
+        /// must produce no changes.
+        #[test]
+        fn diff_self_is_empty(a in arb_sbom()) {
+            let cs = diff(&a, &a);
+            prop_assert!(cs.is_empty(), "self-diff produced non-empty changeset: {:?}", cs);
+        }
+
+        /// Symmetry: `diff(a, b)` swaps `added` and `removed` from
+        /// `diff(b, a)`. version_changed pairs reverse, license_changed
+        /// pairs reverse. The ChangeSet shape is otherwise stable.
+        #[test]
+        fn diff_swap_roles_when_inputs_swapped(a in arb_sbom(), b in arb_sbom()) {
+            let ab = diff(&a, &b);
+            let ba = diff(&b, &a);
+
+            // Cardinalities flip.
+            prop_assert_eq!(ab.added.len(), ba.removed.len());
+            prop_assert_eq!(ab.removed.len(), ba.added.len());
+            prop_assert_eq!(ab.version_changed.len(), ba.version_changed.len());
+            prop_assert_eq!(ab.license_changed.len(), ba.license_changed.len());
+        }
+
+        /// Determinism: two diff() calls on the same input produce
+        /// byte-equal ChangeSet structures. This is the upsert contract
+        /// for the PR-comment renderer.
+        #[test]
+        fn diff_is_deterministic(a in arb_sbom(), b in arb_sbom()) {
+            let cs1 = diff(&a, &b);
+            let cs2 = diff(&a, &b);
+            prop_assert_eq!(cs1, cs2);
+        }
+    }
 }

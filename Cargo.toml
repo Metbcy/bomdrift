@@ -1,6 +1,6 @@
 [package]
 name = "bomdrift"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 rust-version = "1.85"
 description = "SBOM diff with supply-chain risk signals (CVEs, typosquats, maintainer-age)."
@@ -32,6 +32,24 @@ supports-color = "3"
 directories = "6"
 
 [dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
+proptest = "1"
+
+[[bench]]
+name = "parse"
+harness = false
+
+[[bench]]
+name = "diff"
+harness = false
+
+[[bench]]
+name = "typosquat"
+harness = false
+
+[[bench]]
+name = "render"
+harness = false
 
 [profile.release]
 strip = true

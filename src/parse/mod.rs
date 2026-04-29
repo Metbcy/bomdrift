@@ -249,4 +249,83 @@ mod tests {
         assert_eq!(hash_alg("MD5"), HashAlg::Md5);
         assert_eq!(hash_alg("BLAKE3"), HashAlg::Other("BLAKE3".to_string()));
     }
+
+    // ---- Property-based tests ---------------------------------------------
+    //
+    // Hypothesis: feeding arbitrary bytes through `serde_json::from_slice`
+    // followed by `parse_with_format` must NEVER panic. Errors are fine
+    // (most random byte streams aren't valid JSON, and most valid JSON
+    // isn't a recognizable SBOM); panics are bugs.
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1024))]
+
+        /// Random bytes through the JSON parser → parse pipeline never
+        /// panic. The vast majority of inputs error at `serde_json`; the
+        /// proptest still exercises the error path's `Result` plumbing.
+        #[test]
+        fn parse_pipeline_does_not_panic_on_arbitrary_bytes(bytes in proptest::collection::vec(any::<u8>(), 0..2048)) {
+            let _ = serde_json::from_slice::<serde_json::Value>(&bytes)
+                .ok()
+                .and_then(|v| parse_with_format(v, None).ok());
+        }
+
+        /// Random JSON values (constructed from a strategy that produces
+        /// arbitrary nested objects/arrays) through the auto-detect
+        /// parser never panic. This explores the parser's behavior on
+        /// well-formed-JSON-but-not-an-SBOM far more efficiently than
+        /// random bytes.
+        #[test]
+        fn parse_pipeline_does_not_panic_on_arbitrary_json(v in arb_json()) {
+            let _ = parse_with_format(v, None);
+        }
+
+        /// Same as above but with each `SbomFormat` hint forced. Catches
+        /// any per-parser panic that auto-detect would have routed away
+        /// from.
+        #[test]
+        fn parse_pipeline_does_not_panic_with_format_hint(v in arb_json(), hint_idx in 0u8..3) {
+            let hint = match hint_idx {
+                0 => Some(SbomFormat::CycloneDx),
+                1 => Some(SbomFormat::Spdx),
+                _ => Some(SbomFormat::Syft),
+            };
+            let _ = parse_with_format(v, hint);
+        }
+
+        /// `ecosystem_from_purl` must never panic on arbitrary input —
+        /// the function is called on every component's purl during parse,
+        /// so a panic here would crash the whole pipeline.
+        #[test]
+        fn ecosystem_from_purl_does_not_panic(s in any::<String>()) {
+            let _ = ecosystem_from_purl(&s);
+        }
+
+        /// `hash_alg` must never panic on arbitrary algorithm strings.
+        /// Same rationale as `ecosystem_from_purl`.
+        #[test]
+        fn hash_alg_does_not_panic(s in any::<String>()) {
+            let _ = hash_alg(&s);
+        }
+    }
+
+    /// Strategy: produce arbitrary serde_json::Value trees up to depth 3.
+    /// Used by the parser-doesn't-panic property tests above.
+    fn arb_json() -> impl Strategy<Value = serde_json::Value> {
+        let leaf = prop_oneof![
+            Just(serde_json::Value::Null),
+            any::<bool>().prop_map(serde_json::Value::Bool),
+            any::<i64>().prop_map(|n| serde_json::Value::Number(n.into())),
+            ".*".prop_map(serde_json::Value::String),
+        ];
+        leaf.prop_recursive(3, 32, 8, |inner| {
+            prop_oneof![
+                proptest::collection::vec(inner.clone(), 0..6).prop_map(serde_json::Value::Array),
+                proptest::collection::hash_map(".*", inner, 0..6)
+                    .prop_map(|m| serde_json::Value::Object(m.into_iter().collect())),
+            ]
+        })
+    }
 }
