@@ -264,6 +264,28 @@ pub struct DiffArgs {
     /// `threshold` is the constant the finding was compared against.
     #[arg(long)]
     pub debug_calibration: bool,
+    /// Format for `--debug-calibration` rows. `pipe` (default, back-compat
+    /// with v0.7) emits `kind|key|score|threshold` per line; `jsonl` emits
+    /// one JSON object per line for downstream tooling that doesn't want
+    /// to maintain a custom CSV-ish parser.
+    #[arg(long, value_enum, default_value_t = DebugFormat::Pipe)]
+    pub debug_calibration_format: DebugFormat,
+    /// Write the chosen `--output` format to this path instead of stdout.
+    /// Useful for SARIF (`--output sarif --output-file bomdrift.sarif`)
+    /// where YAML quoting `>` redirection is fragile in CI templates.
+    #[arg(long)]
+    pub output_file: Option<PathBuf>,
+}
+
+/// Wire format for `--debug-calibration` output. Pipe-delimited keeps v0.7
+/// callers working unchanged; JSONL is the recommended shape for new tooling
+/// because adding a new finding kind doesn't fork the parser.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DebugFormat {
+    #[default]
+    Pipe,
+    Jsonl,
 }
 
 /// Threshold for `--fail-on` exit-code-2 behavior.

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use crate::cli::{DiffArgs, FailOn, InputFormat, OutputFormat, Platform};
+use crate::cli::{DebugFormat, DiffArgs, FailOn, InputFormat, OutputFormat, Platform};
 
 const DEFAULT_CONFIG_PATH: &str = ".bomdrift.toml";
 
@@ -37,6 +37,9 @@ pub struct DiffConfig {
     pub max_added: Option<usize>,
     pub max_removed: Option<usize>,
     pub max_version_changed: Option<usize>,
+    pub debug_calibration: Option<bool>,
+    pub debug_calibration_format: Option<DebugFormat>,
+    pub output_file: Option<PathBuf>,
 }
 
 pub fn apply_diff_config(args: &mut DiffArgs) -> Result<()> {
@@ -95,6 +98,17 @@ fn apply_loaded_diff_config(args: &mut DiffArgs, config: Config) {
     if args.max_version_changed.is_none() {
         args.max_version_changed = diff.max_version_changed;
     }
+    args.debug_calibration |= diff.debug_calibration.unwrap_or(false);
+    if let Some(fmt) = diff.debug_calibration_format {
+        // Only override the default when the config explicitly sets a value;
+        // CLI flag still wins because it's the explicit form.
+        if args.debug_calibration_format == DebugFormat::default() {
+            args.debug_calibration_format = fmt;
+        }
+    }
+    if args.output_file.is_none() {
+        args.output_file = diff.output_file;
+    }
 }
 
 fn load_config(explicit: Option<&Path>) -> Result<Option<Config>> {
@@ -142,6 +156,8 @@ mod tests {
             max_removed: None,
             max_version_changed: None,
             debug_calibration: false,
+            debug_calibration_format: DebugFormat::default(),
+            output_file: None,
         }
     }
 

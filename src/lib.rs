@@ -157,7 +157,11 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
     // integration. Format: `kind|key|score|threshold`. No telemetry: the
     // user owns the bytes and pipes them wherever they want.
     if args.debug_calibration {
-        write_calibration_lines(&enrichment, &mut std::io::stderr());
+        write_calibration_lines(
+            &enrichment,
+            &mut std::io::stderr(),
+            args.debug_calibration_format,
+        );
     }
 
     // CLI flag wins; otherwise the env var supplies the default. Empty
@@ -283,59 +287,125 @@ pub fn budget_tripped(
 /// `threshold` is the constant the score was gated against. CVE rows
 /// surface every advisory (no internal threshold) so adopters can see
 /// the score distribution before tuning `--fail-on critical-cve`.
-fn write_calibration_lines<W: std::io::Write>(e: &Enrichment, out: &mut W) {
+fn write_calibration_lines<W: std::io::Write>(
+    e: &Enrichment,
+    out: &mut W,
+    format: crate::cli::DebugFormat,
+) {
     use crate::enrich::maintainer::YOUNG_MAINTAINER_DAYS;
     use crate::enrich::typosquat::SIMILARITY_THRESHOLD;
     use crate::enrich::version_jump::MIN_MAJOR_DELTA;
 
     for f in &e.typosquats {
-        let _ = writeln!(
+        write_calibration_row(
             out,
-            "typosquat|{}|{:.4}|{:.4}",
+            "typosquat",
             f.component
                 .purl
                 .as_deref()
                 .unwrap_or(f.component.name.as_str()),
-            f.score,
-            SIMILARITY_THRESHOLD,
+            CalibrationScore::Float(f.score),
+            CalibrationThreshold::Float(SIMILARITY_THRESHOLD),
+            format,
         );
     }
     for f in &e.version_jumps {
-        let _ = writeln!(
+        write_calibration_row(
             out,
-            "version-jump|{}|{}|{}",
+            "version-jump",
             f.after.purl.as_deref().unwrap_or(f.after.name.as_str()),
-            f.after_major.saturating_sub(f.before_major),
-            MIN_MAJOR_DELTA,
+            CalibrationScore::Int(f.after_major.saturating_sub(f.before_major) as i64),
+            CalibrationThreshold::Int(MIN_MAJOR_DELTA as i64),
+            format,
         );
     }
     for f in &e.maintainer_age {
-        let _ = writeln!(
+        write_calibration_row(
             out,
-            "maintainer-age|{}|{}|{}",
+            "maintainer-age",
             f.component
                 .purl
                 .as_deref()
                 .unwrap_or(f.component.name.as_str()),
-            f.days_old,
-            YOUNG_MAINTAINER_DAYS,
+            CalibrationScore::Int(f.days_old),
+            CalibrationThreshold::Int(YOUNG_MAINTAINER_DAYS),
+            format,
         );
     }
     for (purl, refs) in &e.vulns {
         for vuln in refs {
-            // Severity has no numeric score in our model; emit the
-            // bucket label as a non-numeric "score" so the CSV row is
-            // still well-formed. Adopters who want raw CVSS can grep
-            // the JSON output instead — the calibration tap is for the
-            // ranked-bucket choice (cve vs critical-cve), not for
-            // reverse-engineering CVSS.
-            let _ = writeln!(
+            // Severity has no numeric score in our model; emit the bucket
+            // label as a non-numeric "score" so the row stays well-formed
+            // (string in JSONL, plain token in pipe).
+            write_calibration_row(
                 out,
-                "cve|{}#{}|{}|high+",
-                purl,
-                vuln.id,
-                vuln.severity.as_str(),
+                "cve",
+                &format!("{purl}#{}", vuln.id),
+                CalibrationScore::Text(vuln.severity.as_str()),
+                CalibrationThreshold::Text("high+"),
+                format,
             );
+        }
+    }
+}
+
+/// Numeric or symbolic score for a calibration row. Float/Int rendered
+/// without quotes in JSONL; Text rendered as a JSON string.
+pub(crate) enum CalibrationScore<'a> {
+    Float(f64),
+    Int(i64),
+    Text(&'a str),
+}
+
+pub(crate) enum CalibrationThreshold<'a> {
+    Float(f64),
+    Int(i64),
+    Text(&'a str),
+}
+
+/// Single dispatch point for both pipe and JSONL calibration formats.
+/// Adding a new finding kind is one call site, not two — the format
+/// branches stay localized to this helper.
+pub(crate) fn write_calibration_row<W: std::io::Write>(
+    out: &mut W,
+    kind: &str,
+    key: &str,
+    score: CalibrationScore<'_>,
+    threshold: CalibrationThreshold<'_>,
+    format: crate::cli::DebugFormat,
+) {
+    match format {
+        crate::cli::DebugFormat::Pipe => {
+            let score_s = match score {
+                CalibrationScore::Float(v) => format!("{v:.4}"),
+                CalibrationScore::Int(v) => v.to_string(),
+                CalibrationScore::Text(s) => s.to_string(),
+            };
+            let thr_s = match threshold {
+                CalibrationThreshold::Float(v) => format!("{v:.4}"),
+                CalibrationThreshold::Int(v) => v.to_string(),
+                CalibrationThreshold::Text(s) => s.to_string(),
+            };
+            let _ = writeln!(out, "{kind}|{key}|{score_s}|{thr_s}");
+        }
+        crate::cli::DebugFormat::Jsonl => {
+            let score_v = match score {
+                CalibrationScore::Float(v) => serde_json::Value::from(v),
+                CalibrationScore::Int(v) => serde_json::Value::from(v),
+                CalibrationScore::Text(s) => serde_json::Value::from(s),
+            };
+            let thr_v = match threshold {
+                CalibrationThreshold::Float(v) => serde_json::Value::from(v),
+                CalibrationThreshold::Int(v) => serde_json::Value::from(v),
+                CalibrationThreshold::Text(s) => serde_json::Value::from(s),
+            };
+            let line = serde_json::json!({
+                "kind": kind,
+                "key": key,
+                "score": score_v,
+                "threshold": thr_v,
+            });
+            let _ = writeln!(out, "{line}");
         }
     }
 }
@@ -685,5 +755,46 @@ mod tests {
         assert!(budget_tripped(&cs, None, Some(0), None));
         assert!(budget_tripped(&cs, None, None, Some(0)));
         assert!(!budget_tripped(&cs, Some(2), Some(1), Some(1)));
+    }
+
+    #[test]
+    fn calibration_pipe_format_matches_v0_7_layout() {
+        let e = enrichment_with_typosquat();
+        let mut buf = Vec::new();
+        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Pipe);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.starts_with("typosquat|"), "got: {s}");
+        assert_eq!(
+            s.matches('|').count(),
+            3,
+            "pipe row has 4 fields → 3 separators; got: {s}"
+        );
+    }
+
+    #[test]
+    fn calibration_jsonl_format_emits_one_object_per_line() {
+        let e = enrichment_with_typosquat();
+        let mut buf = Vec::new();
+        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Jsonl);
+        let s = String::from_utf8(buf).unwrap();
+        let lines: Vec<&str> = s.lines().collect();
+        assert_eq!(lines.len(), 1);
+        let v: serde_json::Value = serde_json::from_str(lines[0]).expect("valid jsonl");
+        assert_eq!(v["kind"], "typosquat");
+        assert!(v["score"].is_number(), "numeric score in jsonl");
+        assert!(v["threshold"].is_number());
+        assert!(v["key"].is_string());
+    }
+
+    #[test]
+    fn calibration_jsonl_keeps_severity_label_as_string() {
+        let e = enrichment_with_cve_at(Severity::High);
+        let mut buf = Vec::new();
+        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Jsonl);
+        let s = String::from_utf8(buf).unwrap();
+        let v: serde_json::Value = serde_json::from_str(s.trim()).unwrap();
+        assert_eq!(v["kind"], "cve");
+        assert_eq!(v["score"], "HIGH");
+        assert_eq!(v["threshold"], "high+");
     }
 }
