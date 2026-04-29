@@ -195,6 +195,7 @@ main() {
   local comment_on_pr="${COMMENT_ON_PR:-true}"
   local comment_size_limit="${COMMENT_SIZE_LIMIT:-60000}"
   local fail_on="${FAIL_ON:-none}"
+  local baseline="${BASELINE:-}"
 
   if [ -z "$before" ] || [ -z "$after" ]; then
     fail "before-sbom and after-sbom inputs are required"
@@ -204,6 +205,11 @@ main() {
   fi
   if [ ! -f "$after" ]; then
     fail "after-sbom not found: $after"
+  fi
+  # Baseline is optional but if specified must exist — typo'd paths
+  # silently no-op'ing would defeat the whole point of opting in.
+  if [ -n "$baseline" ] && [ ! -f "$baseline" ]; then
+    fail "baseline file not found: $baseline"
   fi
 
   local tag target bin out rc
@@ -224,9 +230,14 @@ main() {
   if [ "$fail_on" != "none" ]; then
     fail_on_args=(--fail-on "$fail_on")
   fi
+  local baseline_args=()
+  if [ -n "$baseline" ]; then
+    baseline_args=(--baseline "$baseline")
+  fi
 
   set +e
-  run_diff "$bin" "$before" "$after" "$output_format" "$input_format" "${fail_on_args[@]}" \
+  run_diff "$bin" "$before" "$after" "$output_format" "$input_format" \
+    "${fail_on_args[@]}" "${baseline_args[@]}" \
     | tee "$out_file"
   rc="${PIPESTATUS[0]}"
   set -e
@@ -257,7 +268,7 @@ main() {
       summary_file="$(mktemp)"
       set +e
       run_diff "$bin" "$before" "$after" "$output_format" "$input_format" \
-        "${fail_on_args[@]}" --summary-only > "$summary_file"
+        "${fail_on_args[@]}" "${baseline_args[@]}" --summary-only > "$summary_file"
       set -e
       body="$(cat "$summary_file")"
       rm -f "$summary_file"

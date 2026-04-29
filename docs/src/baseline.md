@@ -56,16 +56,15 @@ Notes:
 
 ## Forward compatibility
 
-The baseline parser is intentionally forgiving about missing fields. v0.2
-JSON snapshots (which lacked the per-vuln `severity` field) load against
-v0.3 and later with reduced suppression precision: a v0.2 baseline can
-suppress a vuln by `(purl, advisory_id)` even when the v0.3 enrichment
-has populated severity. New baselines should be regenerated under v0.3+
-to capture the full match shape.
+The baseline parser is intentionally forgiving about missing fields.
+v0.2 baselines can suppress a vuln by `(purl, advisory_id)` even when
+the v0.3+ enrichment has populated severity, just with reduced
+precision. Regenerate baselines under v0.3+ to capture the full match
+shape.
 
-The action does **not** yet ship a `baseline:` input — pass `--baseline`
-via a custom step that calls the `bomdrift` binary directly. A formal
-action input is on the [roadmap](./roadmap.md).
+As of v0.4, the action ships a `baseline:` input that plumbs straight
+through to `--baseline` — no need for a custom step calling the
+binary directly.
 
 ## Workflow integration
 
@@ -74,11 +73,12 @@ refreshes it after a maintainer reviews and accepts new noise as known
 acceptable:
 
 ```yaml
-- name: Run bomdrift with baseline
-  run: |
-    ./bomdrift diff before.json after.json \
-      --baseline .bomdrift-baseline.json \
-      --fail-on critical-cve
+- uses: Metbcy/bomdrift@v1
+  with:
+    before-sbom: before.json
+    after-sbom:  after.json
+    baseline:    .bomdrift/baseline.json
+    fail-on:     critical-cve
 ```
 
 When this fails on a new finding, the maintainer either:
