@@ -36,6 +36,6 @@ failure is usually obvious if you expand all groups. -->
 
 ## Environment
 
-- **bomdrift version pin**: `@v1` / `@v0.5.0` / `@<sha>`
+- **bomdrift version pin**: `@v1` / `@v0.6.0` / `@<sha>`
 - **Runner**: <ubuntu-latest / self-hosted / etc.>
 - **Trigger event**: <pull_request / push / workflow_dispatch / etc.>
