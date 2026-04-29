@@ -33,16 +33,16 @@ jobs:
           path: .
           format: cyclonedx-json
           output-file: after.json
-        env:
-          # Start from the `directory` cataloger defaults (the right base
-          # set for `--source dir:.`) and remove the file-level cataloger
-          # which would emit each YAML workflow + lockfile as a
-          # `file:`-ecosystem component. The path differs between the
-          # PR-head checkout and the base-ref checkout (./base/...) so
-          # those file entries produce phantom add/remove pairs in the
-          # diff. Just `-file` alone errors out — Syft requires a base
-          # selector that the negation subtracts from.
-          SYFT_DEFAULT_CATALOGERS: directory,-file
+        # NOTE: Syft's default cataloger set on `dir:.` includes the
+        # file-level cataloger, which emits each YAML workflow + lockfile
+        # as a `file:`-ecosystem component. Path differs between PR-head
+        # and base-ref checkouts (`./base/...`), so those produce phantom
+        # add/remove pairs in the diff. Two attempts to filter via
+        # SYFT_DEFAULT_CATALOGERS (`-file` and `directory,-file`) didn't
+        # work — Syft seemed to ignore the env var or parse only the
+        # first token. Tracked as a v0.5 follow-up: either filter
+        # `Ecosystem::Other("file")` in the bomdrift parser, or document
+        # a `.syft.yaml` config-file approach in the Action chapter.
 
       # Sibling checkout of the base ref so the SBOM generator sees a
       # clean snapshot of main without the PR's diff applied.
@@ -58,8 +58,6 @@ jobs:
           path: ./base
           format: cyclonedx-json
           output-file: before.json
-        env:
-          SYFT_DEFAULT_CATALOGERS: directory,-file
 
       - name: Run bomdrift
         uses: Metbcy/bomdrift@v1
