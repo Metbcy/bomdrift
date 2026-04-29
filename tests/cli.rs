@@ -967,3 +967,75 @@ fn diff_explicit_platform_flag_overrides_ci_env_detection() {
         "explicit --platform github must override GITLAB_CI auto-detection; got:\n{stdout}"
     );
 }
+
+#[test]
+fn diff_debug_calibration_prints_csv_lines_to_stderr() {
+    // b7 acceptance: `--debug-calibration` emits one
+    // `kind|key|score|threshold` line per finding to stderr, leaves
+    // stdout untouched, and exits 0 in the no-fail-on path. The
+    // axios-fixture pair is known to produce 1 typosquat finding (see
+    // `diff_axios_fixture_pair_renders_typosquat_section`); pinning on
+    // that lets us verify the schema without depending on the exact
+    // count of all finding kinds.
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--debug-calibration",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(
+        out.status.success(),
+        "exit code: {}\nstderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stderr = String::from_utf8(out.stderr).expect("stderr is utf-8");
+    let typosquat_lines: Vec<&str> = stderr
+        .lines()
+        .filter(|l| l.starts_with("typosquat|"))
+        .collect();
+    assert!(
+        !typosquat_lines.is_empty(),
+        "expected at least one typosquat calibration line; got stderr:\n{stderr}"
+    );
+    // Schema: `kind|key|score|threshold` — exactly 4 pipe-separated fields.
+    for line in &typosquat_lines {
+        let fields: Vec<&str> = line.split('|').collect();
+        assert_eq!(
+            fields.len(),
+            4,
+            "calibration line must have 4 pipe-separated fields; got: {line}"
+        );
+        assert_eq!(fields[0], "typosquat");
+        // score and threshold are floats; both should parse.
+        let score: f64 = fields[2].parse().expect("score is a float");
+        let threshold: f64 = fields[3].parse().expect("threshold is a float");
+        assert!(
+            (0.0..=1.0).contains(&score),
+            "typosquat similarity score must be in [0, 1]; got {score}"
+        );
+        assert!(
+            score >= threshold,
+            "a reported finding must clear its threshold; score={score} threshold={threshold}"
+        );
+    }
+
+    // Stdout must remain pure markdown — calibration is a stderr-only
+    // side channel so it doesn't pollute PR-comment posting pipelines.
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    assert!(
+        stdout.starts_with("## SBOM diff"),
+        "stdout must remain pure markdown when calibration is enabled; got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("typosquat|"),
+        "calibration output must NOT leak into stdout; got:\n{stdout}"
+    );
+}

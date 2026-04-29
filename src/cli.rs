@@ -251,6 +251,19 @@ pub struct DiffArgs {
     /// Exit 2 when more than this many components change version in one diff.
     #[arg(long)]
     pub max_version_changed: Option<usize>,
+    /// Print one CSV-friendly stderr line per finding showing the score
+    /// and the threshold that gated it. Off by default. Used to gather
+    /// real-world calibration data — `SIMILARITY_THRESHOLD` for
+    /// typosquats, `YOUNG_MAINTAINER_DAYS` for maintainer-age — without
+    /// shipping telemetry. The output is opt-in and the user owns the
+    /// resulting CSV; pipe to a file with `2>calibration.csv`.
+    ///
+    /// Format: `kind|key|score|threshold` per line. `kind` is one of
+    /// `typosquat`, `maintainer-age`, `version-jump`, `cve`. `score` is
+    /// the underlying similarity / age / jump-size / CVSS value;
+    /// `threshold` is the constant the finding was compared against.
+    #[arg(long)]
+    pub debug_calibration: bool,
 }
 
 /// Threshold for `--fail-on` exit-code-2 behavior.

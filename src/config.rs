@@ -141,6 +141,7 @@ mod tests {
             max_added: None,
             max_removed: None,
             max_version_changed: None,
+            debug_calibration: false,
         }
     }
 

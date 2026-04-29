@@ -183,3 +183,63 @@ good_job
 solid_queue
 mailcatcher
 resque-scheduler
+
+# --- v0.7 top-up: Rails ecosystem extras (source: rubygems.org top downloads) ---
+jbuilder
+bootsnap
+spring
+web-console
+rack-cors
+responders
+friendly_id
+aasm
+annotate
+letter_opener
+rails-html-sanitizer
+rails-i18n
+
+# --- v0.7 top-up: testing (source: rubygems.org top downloads) ---
+minitest
+minitest-reporters
+shoulda-matchers
+timecop
+pry-rails
+pry-doc
+
+# --- v0.7 top-up: dotenv / config (source: rubygems.org top downloads) ---
+dotenv
+dotenv-rails
+foreman
+
+# --- v0.7 top-up: API / serializers (source: rubygems.org top downloads) ---
+jsonapi-serializer
+active_model_serializers
+alba
+grape
+grape-entity
+rswag
+
+# --- v0.7 top-up: cache / jobs / KV (source: rubygems.org top downloads) ---
+connection_pool
+dalli
+redis-namespace
+sneakers
+sucker_punch
+
+# --- v0.7 top-up: search / admin (source: rubygems.org top downloads) ---
+searchkick
+pg_search
+activeadmin
+administrate
+
+# --- v0.7 top-up: dry-rb / utility (source: rubygems.org top downloads) ---
+dry-validation
+dry-types
+dry-struct
+dry-monads
+
+# --- v0.7 top-up: documents / files (source: rubygems.org top downloads) ---
+prawn
+caxlsx
+roo
+pdf-reader

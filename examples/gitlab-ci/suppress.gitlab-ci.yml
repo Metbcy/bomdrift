@@ -1,0 +1,89 @@
+# bomdrift suppression job for GitLab CI (v0.7+)
+#
+# Manual job that takes an advisory ID as a CI variable and commits the
+# resulting `.bomdrift/baseline.json` change to the MR's head branch.
+#
+# Why a manual job and not a note webhook?
+#   GitLab's `Note` webhook fires on every comment on every MR, with no
+#   command-prefix filter built into the trigger. Wiring a v0.5-style
+#   `/bomdrift suppress` flow safely (rate-limit, command parsing,
+#   double-trigger debouncing, fork-MR safety) is non-trivial — that's
+#   the v0.8 follow-up. For v0.7, the manual-job path covers the same
+#   user need (one click per accepted finding) without standing up a
+#   webhook handler.
+#
+# Trigger:
+#   * From the MR's pipeline view, click "Run job" on `bomdrift:suppress`.
+#   * Set the `BOMDRIFT_SUPPRESS_ID` variable in the prompt
+#     (e.g. `GHSA-1234-5678-9abc`).
+#
+# Tokens:
+#   * Needs a Project Access Token with `write_repository` scope so it
+#     can push the baseline change back to the MR's head branch.
+#     Configure as `BOMDRIFT_PUSH_TOKEN`.
+
+bomdrift:suppress:
+  stage: deploy
+  image: alpine:3.20
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+  variables:
+    BOMDRIFT_SUPPRESS_ID: ""
+    BOMDRIFT_BASELINE_PATH: ".bomdrift/baseline.json"
+    BOMDRIFT_VERSION: "v0.7.0"
+  before_script:
+    - apk add --no-cache bash curl git tar gzip ca-certificates
+  script:
+    - |
+      set -euo pipefail
+      bash <<'BOMDRIFT'
+
+      if [ -z "${BOMDRIFT_SUPPRESS_ID}" ]; then
+        echo "BOMDRIFT_SUPPRESS_ID is empty — pass an advisory ID (GHSA / CVE / MAL pattern) when triggering the job" >&2
+        exit 1
+      fi
+      if [ -z "${BOMDRIFT_PUSH_TOKEN:-}" ]; then
+        echo "BOMDRIFT_PUSH_TOKEN not set; cannot push baseline update" >&2
+        exit 1
+      fi
+
+      # --- Validate the ID shape early; the CLI does this too but a clear
+      # --- error here saves the download round-trip. -----------------------
+      case "${BOMDRIFT_SUPPRESS_ID}" in
+        GHSA-* | CVE-* | MAL-*) ;;
+        *) echo "Unrecognized advisory ID shape: ${BOMDRIFT_SUPPRESS_ID}" >&2; exit 1 ;;
+      esac
+
+      ARCH="$(uname -m)"
+      case "$ARCH" in
+        x86_64)  ARCH="x86_64-unknown-linux-musl" ;;
+        aarch64) ARCH="aarch64-unknown-linux-musl" ;;
+        *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
+      esac
+      curl -fsSL -o bomdrift.tar.gz \
+        "https://github.com/Metbcy/bomdrift/releases/download/${BOMDRIFT_VERSION}/bomdrift-${BOMDRIFT_VERSION}-${ARCH}.tar.gz"
+      tar -xzf bomdrift.tar.gz
+      chmod +x ./bomdrift
+
+      # --- Resolve MR head ref --------------------------------------------
+      HEAD_REF="${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}"
+      git fetch origin "${HEAD_REF}"
+      git checkout "${HEAD_REF}"
+
+      # --- Append + commit -------------------------------------------------
+      ./bomdrift baseline add "${BOMDRIFT_SUPPRESS_ID}" --path "${BOMDRIFT_BASELINE_PATH}"
+
+      if git diff --quiet -- "${BOMDRIFT_BASELINE_PATH}"; then
+        echo "Baseline unchanged — ${BOMDRIFT_SUPPRESS_ID} was already suppressed."
+        exit 0
+      fi
+
+      git config user.email "bomdrift-suppress@${CI_SERVER_HOST}"
+      git config user.name  "bomdrift suppress"
+      git add "${BOMDRIFT_BASELINE_PATH}"
+      git commit -m "chore(bomdrift): suppress ${BOMDRIFT_SUPPRESS_ID}"
+
+      AUTH_REMOTE="https://oauth2:${BOMDRIFT_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+      git push "${AUTH_REMOTE}" "HEAD:${HEAD_REF}"
+      BOMDRIFT

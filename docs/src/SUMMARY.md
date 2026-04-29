@@ -6,6 +6,7 @@
 
 - [Quickstart](./quickstart.md)
 - [GitHub Action](./github-action.md)
+- [GitLab CI](./gitlab-ci.md)
 - [CLI reference](./cli-reference.md)
 
 # Output
