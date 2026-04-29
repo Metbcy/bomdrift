@@ -181,6 +181,7 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
     // the realized finding set, not on intermediate inputs. This keeps the
     // baseline file format stable as new enrichers are added: a new finding
     // type that the baseline doesn't know about simply isn't suppressed.
+    let mut baseline_entries: Vec<crate::baseline::BaselineEntry> = Vec::new();
     if let Some(path) = &args.baseline {
         let baseline = baseline::Baseline::load(path)?;
         for ent in &baseline.expired_entries {
@@ -200,6 +201,7 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
                     .unwrap_or_default(),
             );
         }
+        baseline_entries = baseline.entries.clone();
         baseline::apply(&mut cs, &mut enrichment, &baseline);
     }
 
@@ -217,6 +219,32 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
                 eprintln!("warning: VEX load failed, continuing without VEX filtering: {err:#}");
             }
         }
+    }
+
+    // VEX emission (Phase H, v0.9). Writes a single OpenVEX 0.2.0 doc
+    // to the requested path, covering baseline-suppressed entries and
+    // un-suppressed findings. Byte-deterministic when SOURCE_DATE_EPOCH
+    // is set.
+    if let Some(path) = &args.emit_vex {
+        let author = args
+            .vex_author
+            .clone()
+            .or_else(|| args.repo_url.clone())
+            .or_else(|| std::env::var("BOMDRIFT_REPO_URL").ok())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "bomdrift".to_string());
+        let default_just = args
+            .vex_default_justification
+            .clone()
+            .unwrap_or_else(|| "vulnerable_code_not_in_execute_path".to_string());
+        let opts = vex::EmitOptions {
+            author: &author,
+            default_justification: &default_just,
+            baseline_entries: &baseline_entries,
+        };
+        let body = vex::emit(&cs, &enrichment, &opts);
+        std::fs::write(path, body)
+            .with_context(|| format!("writing --emit-vex {}", path.display()))?;
     }
 
     // Calibration tap. Off by default; opt-in via `--debug-calibration`.

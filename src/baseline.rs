@@ -62,6 +62,25 @@ pub struct Baseline {
     /// Surface to the caller for stderr warnings; do NOT contribute to
     /// suppression.
     pub expired_entries: Vec<ExpiredEntry>,
+    /// v0.9+ rich entries from object-form `suppressed_advisories`.
+    /// Keyed in insertion order so VEX emission (Phase H) can surface
+    /// `vex_status` / `vex_justification` / `reason` without re-parsing
+    /// the source JSON. Both expired and active entries appear here —
+    /// callers filter as needed.
+    pub entries: Vec<BaselineEntry>,
+}
+
+/// A rich baseline entry preserved for VEX emission. Plain string-form
+/// entries (`"GHSA-..."`) do NOT appear here — they have no metadata
+/// to preserve. Object-form entries always do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BaselineEntry {
+    pub id: String,
+    pub purl: Option<String>,
+    pub reason: Option<String>,
+    pub expires: Option<String>,
+    pub vex_status: Option<String>,
+    pub vex_justification: Option<String>,
 }
 
 /// A baseline entry whose `expires` date is strictly before today. The diff
@@ -185,7 +204,30 @@ impl Baseline {
                             .get("reason")
                             .and_then(|v| v.as_str())
                             .map(str::to_string);
-                        if let Some(expires_s) = obj.get("expires").and_then(|v| v.as_str()) {
+                        let vex_status = obj
+                            .get("vex_status")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string);
+                        let vex_justification = obj
+                            .get("vex_justification")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string);
+                        let expires_str = obj
+                            .get("expires")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string);
+                        // Track the rich entry for VEX emission regardless
+                        // of expiry — emission may include expired entries
+                        // for documentation; suppression below honors expiry.
+                        out.entries.push(BaselineEntry {
+                            id: id.to_string(),
+                            purl: purl.clone(),
+                            reason: reason.clone(),
+                            expires: expires_str.clone(),
+                            vex_status: vex_status.clone(),
+                            vex_justification: vex_justification.clone(),
+                        });
+                        if let Some(expires_s) = expires_str.as_deref() {
                             match clock::parse_ymd(expires_s) {
                                 Ok(date) => {
                                     if clock::is_expired(date) {

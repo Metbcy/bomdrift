@@ -323,6 +323,16 @@ pub struct DiffArgs {
     /// claims); un-suppressed findings emit as `affected`. v0.9+.
     #[arg(long)]
     pub emit_vex: Option<PathBuf>,
+    /// VEX `author` for `--emit-vex`. Falls back to repo_url, then
+    /// to `"bomdrift"`. v0.9+.
+    #[arg(long)]
+    pub vex_author: Option<String>,
+    /// Default OpenVEX `justification` written into emitted statements
+    /// when the source baseline entry doesn't supply one. Defaults to
+    /// `"vulnerable_code_not_in_execute_path"` — the safe fallback per
+    /// the OpenVEX spec.
+    #[arg(long)]
+    pub vex_default_justification: Option<String>,
     #[arg(long)]
     pub debug_calibration: bool,
     /// Format for `--debug-calibration` rows. `pipe` (default, back-compat

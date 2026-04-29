@@ -57,6 +57,12 @@ pub struct DiffConfig {
     pub debug_calibration: Option<bool>,
     pub debug_calibration_format: Option<DebugFormat>,
     pub output_file: Option<PathBuf>,
+    /// VEX `author` field for `--emit-vex`. Falls back to `repo_url`,
+    /// then to the literal `"bomdrift"`.
+    pub vex_author: Option<String>,
+    /// Default OpenVEX justification when an entry doesn't supply one.
+    /// Defaults to `"vulnerable_code_not_in_execute_path"`.
+    pub vex_default_justification: Option<String>,
 }
 
 pub fn apply_diff_config(args: &mut DiffArgs) -> Result<()> {
@@ -131,6 +137,12 @@ fn apply_loaded_diff_config(args: &mut DiffArgs, config: Config) {
     if args.output_file.is_none() {
         args.output_file = diff.output_file;
     }
+    if args.vex_author.is_none() {
+        args.vex_author = diff.vex_author.filter(|s| !s.is_empty());
+    }
+    if args.vex_default_justification.is_none() {
+        args.vex_default_justification = diff.vex_default_justification.filter(|s| !s.is_empty());
+    }
 
     // [license] block: CLI flags override (not merge) when set. Mirrors
     // Dependency Review Action semantics so users moving between bomdrift
@@ -201,6 +213,8 @@ mod tests {
             allow_ambiguous_licenses: false,
             vex: Vec::new(),
             emit_vex: None,
+            vex_author: None,
+            vex_default_justification: None,
         }
     }
 
