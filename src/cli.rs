@@ -132,6 +132,14 @@ pub struct DiffArgs {
     /// output.
     #[arg(long)]
     pub include_file_components: bool,
+    /// Repository URL (e.g. `https://github.com/owner/repo`) used to
+    /// render the markdown comment's action-affordance footer — the
+    /// "Report this finding" link target and the suppress-comment hint.
+    /// When unset, falls back to the `BOMDRIFT_REPO_URL` env var; when
+    /// neither is set, the footer is omitted so forks and standalone CLI
+    /// use don't render dead links to bomdrift's own issue tracker.
+    #[arg(long)]
+    pub repo_url: Option<String>,
 }
 
 /// Threshold for `--fail-on` exit-code-2 behavior.

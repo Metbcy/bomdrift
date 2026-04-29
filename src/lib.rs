@@ -81,6 +81,18 @@ fn run_diff(args: DiffArgs) -> Result<()> {
         baseline::apply(&mut cs, &mut enrichment, &baseline);
     }
 
+    // CLI flag wins; otherwise the env var supplies the default. Empty
+    // strings are treated as unset to match shell-script callers that
+    // pass `BOMDRIFT_REPO_URL=` to clear the value rather than `unset`.
+    let repo_url = args
+        .repo_url
+        .clone()
+        .or_else(|| std::env::var("BOMDRIFT_REPO_URL").ok())
+        .filter(|s| !s.is_empty());
+    let md_options = render::markdown::Options {
+        summary_only: args.summary_only,
+        repo_url,
+    };
     let rendered = match args.output {
         OutputFormat::Terminal => {
             // ANSI escapes are only safe on a real TTY. Piped/redirected stdout
@@ -89,22 +101,12 @@ fn run_diff(args: DiffArgs) -> Result<()> {
             if std::io::stdout().is_terminal() {
                 render::term::render(&cs, &enrichment)
             } else {
-                render::markdown::render_with_options(
-                    &cs,
-                    &enrichment,
-                    render::markdown::Options {
-                        summary_only: args.summary_only,
-                    },
-                )
+                render::markdown::render_with_options(&cs, &enrichment, md_options)
             }
         }
-        OutputFormat::Markdown => render::markdown::render_with_options(
-            &cs,
-            &enrichment,
-            render::markdown::Options {
-                summary_only: args.summary_only,
-            },
-        ),
+        OutputFormat::Markdown => {
+            render::markdown::render_with_options(&cs, &enrichment, md_options)
+        }
         OutputFormat::Json => render::json::render(&cs, &enrichment),
         OutputFormat::Sarif => render::sarif::render(&cs, &enrichment),
     };

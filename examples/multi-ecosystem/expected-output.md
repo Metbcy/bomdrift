@@ -8,7 +8,9 @@
 | License changed | 0 |
 | Possible typosquats | 4 |
 
-### Added
+### Added (4)
+
+<details><summary>Show details</summary>
 
 | Ecosystem | Name | Version |
 |---|---|---|
@@ -17,9 +19,13 @@
 | npm | crossenv | 1.0.0 |
 | pypi | requessts | 1.0.0 |
 
-### Possible typosquats
+</details>
 
-These newly added dependencies have names similar to popular packages. High similarity does not prove malicious intent — investigate the package source before merging.
+### Possible typosquats (4)
+
+<details><summary>Show details · top similarity: 0.98 (crossenv → cross-env)</summary>
+
+These newly added dependencies have names similar to popular packages. High similarity does not prove malicious intent — investigate the package source before merging. [Why this matters](https://metbcy.github.io/bomdrift/enrichers/typosquat.html)
 
 | Ecosystem | Name | Version | Similar to | Similarity |
 |---|---|---|---|---:|
@@ -27,4 +33,6 @@ These newly added dependencies have names similar to popular packages. High simi
 | maven | org.apache.commons:commons-lng3 | 1.0.0 | org.apache.commons:commons-lang3 | 0.93 |
 | npm | crossenv | 1.0.0 | cross-env | 0.98 |
 | pypi | requessts | 1.0.0 | requests | 0.95 |
+
+</details>
 

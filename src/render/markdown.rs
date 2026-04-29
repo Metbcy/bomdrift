@@ -28,7 +28,7 @@ use crate::model::Component;
 
 /// Renderer toggles. Defaults match v0.2 behavior so existing callers keep
 /// working unchanged.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct Options {
     /// When true, emit only the summary-counts table plus a footer note —
     /// no per-section detail tables. Compresses a several-hundred-finding
@@ -36,6 +36,13 @@ pub struct Options {
     /// reviewer follows the footer link to the full report (workflow-step
     /// summary, JSON artifact, etc.) when they need detail.
     pub summary_only: bool,
+    /// Repository URL — `https://github.com/<owner>/<repo>` form, no
+    /// trailing slash. When supplied, the renderer appends a footer
+    /// linking to a pre-filled "Report this finding" issue and the
+    /// `/bomdrift suppress <id>` comment-affordance hint. When `None`,
+    /// the footer is omitted entirely so forks / standalone CLI use
+    /// don't render dead links to bomdrift's own issue tracker.
+    pub repo_url: Option<String>,
 }
 
 pub fn render(cs: &ChangeSet, enrichment: &Enrichment) -> String {
@@ -97,25 +104,25 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
     }
 
     if !cs.added.is_empty() {
-        out.push_str("### Added\n\n");
+        section_open(&mut out, "Added", cs.added.len(), None);
         out.push_str("| Ecosystem | Name | Version |\n|---|---|---|\n");
         for c in &cs.added {
             let _ = writeln!(out, "| {} | {} | {} |", c.ecosystem, c.name, c.version);
         }
-        out.push('\n');
+        section_close(&mut out);
     }
 
     if !cs.removed.is_empty() {
-        out.push_str("### Removed\n\n");
+        section_open(&mut out, "Removed", cs.removed.len(), None);
         out.push_str("| Ecosystem | Name | Version |\n|---|---|---|\n");
         for c in &cs.removed {
             let _ = writeln!(out, "| {} | {} | {} |", c.ecosystem, c.name, c.version);
         }
-        out.push('\n');
+        section_close(&mut out);
     }
 
     if !cs.version_changed.is_empty() {
-        out.push_str("### Version changed\n\n");
+        section_open(&mut out, "Version changed", cs.version_changed.len(), None);
         out.push_str("| Ecosystem | Name | Before | After |\n|---|---|---|---|\n");
         for (b, a) in &cs.version_changed {
             let _ = writeln!(
@@ -124,15 +131,21 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
                 a.ecosystem, a.name, b.version, a.version
             );
         }
-        out.push('\n');
+        section_close(&mut out);
     }
 
     if !cs.license_changed.is_empty() {
-        out.push_str("### License changed (same version)\n\n");
+        section_open(
+            &mut out,
+            "License changed (same version)",
+            cs.license_changed.len(),
+            None,
+        );
         out.push_str(
             "Same version, different licenses — investigate. A re-publish under \
              different terms can indicate a corrected SBOM, a deliberate license \
-             change, or a supply-chain swap. Verify the source matches.\n\n",
+             change, or a supply-chain swap. Verify the source matches. \
+             [Why this matters](https://metbcy.github.io/bomdrift/output-formats.html#sarif-v210)\n\n",
         );
         out.push_str("| Ecosystem | Name | Version | Before | After |\n|---|---|---|---|---|\n");
         for (b, a) in &cs.license_changed {
@@ -146,31 +159,51 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
                 license_cell(&a.licenses),
             );
         }
-        out.push('\n');
+        section_close(&mut out);
     }
 
     if !enrichment.vulns.is_empty() {
-        out.push_str("### Vulnerabilities (added/upgraded deps)\n\n");
+        let count = enrichment.vulns.values().map(Vec::len).sum::<usize>();
+        let teaser = vuln_teaser(cs, enrichment);
+        section_open(
+            &mut out,
+            "Vulnerabilities (added/upgraded deps)",
+            count,
+            teaser.as_deref(),
+        );
         out.push_str(
             "Advisories per OSV.dev. Click each ID for details. Severity is the highest \
              of GHSA's `database_specific.severity` for that advisory; advisories that \
              pre-date the GHSA tagging or weren't reachable at lookup time render as \
-             `NONE` and don't trip `--fail-on critical-cve`.\n\n",
+             `NONE` and don't trip `--fail-on critical-cve`. \
+             [Why this matters](https://metbcy.github.io/bomdrift/enrichers/osv-cve.html)\n\n",
         );
         out.push_str("| Ecosystem | Name | Version | Advisories |\n|---|---|---|---|\n");
-        write_vuln_rows(&mut out, &cs.added, enrichment);
-        for (_, after) in &cs.version_changed {
-            write_one_vuln_row(&mut out, after, enrichment);
+        // Component-row order: highest max-severity first, then alphabetical
+        // by ecosystem+name. Per-component advisories are themselves
+        // severity-sorted in `write_one_vuln_row`. The combined ordering
+        // means Critical / High findings always cluster at the top of the
+        // table — reviewers scanning the comment see the load-bearing rows
+        // before the noise.
+        for c in vuln_components_sorted(cs, enrichment) {
+            write_one_vuln_row(&mut out, c, enrichment);
         }
-        out.push('\n');
+        section_close(&mut out);
     }
 
     if !enrichment.typosquats.is_empty() {
-        out.push_str("### Possible typosquats\n\n");
+        let teaser = typosquat_teaser(enrichment);
+        section_open(
+            &mut out,
+            "Possible typosquats",
+            enrichment.typosquats.len(),
+            teaser.as_deref(),
+        );
         out.push_str(
             "These newly added dependencies have names similar to popular packages. \
              High similarity does not prove malicious intent — investigate the package \
-             source before merging.\n\n",
+             source before merging. \
+             [Why this matters](https://metbcy.github.io/bomdrift/enrichers/typosquat.html)\n\n",
         );
         out.push_str(
             "| Ecosystem | Name | Version | Similar to | Similarity |\n|---|---|---|---|---:|\n",
@@ -178,16 +211,22 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
         for f in &enrichment.typosquats {
             write_typosquat_row(&mut out, f);
         }
-        out.push('\n');
+        section_close(&mut out);
     }
 
     if !enrichment.version_jumps.is_empty() {
-        out.push_str("### Multi-major version jumps\n\n");
+        section_open(
+            &mut out,
+            "Multi-major version jumps",
+            enrichment.version_jumps.len(),
+            None,
+        );
         out.push_str(
             "These dependencies crossed two or more major versions in a single diff. \
              Multi-major bumps can hide takeover swaps, namespace reuse, or large \
              refactors that bypass the SemVer signals reviewers usually rely on. \
-             Confirm the upgrade is intentional and the source matches.\n\n",
+             Confirm the upgrade is intentional and the source matches. \
+             [Why this matters](https://metbcy.github.io/bomdrift/enrichers/version-jump.html)\n\n",
         );
         out.push_str(
             "| Ecosystem | Name | Before | After | Major bump |\n|---|---|---|---|---:|\n",
@@ -195,18 +234,24 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
         for f in &enrichment.version_jumps {
             write_version_jump_row(&mut out, f);
         }
-        out.push('\n');
+        section_close(&mut out);
     }
 
     if !enrichment.maintainer_age.is_empty() {
-        out.push_str("### Young maintainers (added deps)\n\n");
+        section_open(
+            &mut out,
+            "Young maintainers (added deps)",
+            enrichment.maintainer_age.len(),
+            None,
+        );
         out.push_str(
             "The top contributor to each repository below opened their first commit \
              recently. The xz/liblzma backdoor (CVE-2024-3094) was authored by an \
              identity that took over maintainership after a sustained ramp-up; a \
              very-recent top contributor on a newly-introduced dependency is the \
              early signal of that pattern. Investigate the maintainer's history \
-             before merging.\n\n",
+             before merging. \
+             [Why this matters](https://metbcy.github.io/bomdrift/enrichers/maintainer-age.html)\n\n",
         );
         out.push_str(
             "| Ecosystem | Name | Version | Top contributor | Days since first commit |\n\
@@ -215,10 +260,111 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
         for f in &enrichment.maintainer_age {
             write_maintainer_age_row(&mut out, f);
         }
-        out.push('\n');
+        section_close(&mut out);
     }
 
+    write_footer(&mut out, &opts);
+
     out
+}
+
+/// Open a per-category collapsible section. The `### {label} ({count})`
+/// markdown header stays outside the `<details>` block so it remains
+/// visible (and TOC-eligible) even when the section is collapsed; the
+/// `<details>` wrapper hides the body table by default to keep the comment
+/// scannable for big diffs. `teaser` populates the `<summary>` line with
+/// the most-actionable item in the section (e.g. `top severity: CRITICAL`)
+/// so the reviewer knows whether expanding is worth their time.
+fn section_open(out: &mut String, label: &str, count: usize, teaser: Option<&str>) {
+    let _ = writeln!(out, "### {} ({})\n", label, count);
+    out.push_str("<details><summary>Show details");
+    if let Some(t) = teaser {
+        let _ = write!(out, " · {}", t);
+    }
+    // Blank line after `</summary>` is required by GitHub-Flavored Markdown
+    // for the markdown body inside `<details>` to render as markdown rather
+    // than as raw HTML. Same blank line on close.
+    out.push_str("</summary>\n\n");
+}
+
+fn section_close(out: &mut String) {
+    out.push_str("\n</details>\n\n");
+}
+
+/// Renders the comment footer with action affordances. Omitted entirely
+/// when `repo_url` is `None` so forks / standalone CLI use don't render
+/// dead links to a repo they don't own. Wrapped in `<sub>` so it doesn't
+/// compete visually with the section bodies.
+fn write_footer(out: &mut String, opts: &Options) {
+    let Some(repo) = opts.repo_url.as_deref() else {
+        return;
+    };
+    let repo = repo.trim_end_matches('/');
+    out.push_str("---\n");
+    let _ = writeln!(
+        out,
+        "<sub>**False positive?** [Report it]({repo}/issues/new?labels=false-positive&template=false-positive.md) · \
+         **Suppress a finding?** Comment `/bomdrift suppress <ID>` (requires the \
+         [comment-suppress sub-action]({repo})) · \
+         [Docs](https://metbcy.github.io/bomdrift/)</sub>",
+    );
+}
+
+/// Cross-component vulnerability ordering: components affected by the
+/// highest-severity advisory first, ties broken alphabetically by
+/// `ecosystem` then `name`. The plan calls this out explicitly: Critical /
+/// High findings should cluster at the top of the table for skimmability.
+fn vuln_components_sorted<'a>(cs: &'a ChangeSet, enrichment: &Enrichment) -> Vec<&'a Component> {
+    let mut comps: Vec<&Component> = Vec::new();
+    for c in &cs.added {
+        if !enrichment.vulns_for(c.purl.as_deref()).is_empty() {
+            comps.push(c);
+        }
+    }
+    for (_, after) in &cs.version_changed {
+        if !enrichment.vulns_for(after.purl.as_deref()).is_empty() {
+            comps.push(after);
+        }
+    }
+    comps.sort_by(|a, b| {
+        let sa = max_severity(enrichment, a);
+        let sb = max_severity(enrichment, b);
+        sb.cmp(&sa)
+            .then_with(|| a.ecosystem.to_string().cmp(&b.ecosystem.to_string()))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    comps
+}
+
+fn max_severity(enrichment: &Enrichment, c: &Component) -> crate::enrich::Severity {
+    enrichment
+        .vulns_for(c.purl.as_deref())
+        .iter()
+        .map(|v| v.severity)
+        .max()
+        .unwrap_or(crate::enrich::Severity::None)
+}
+
+fn vuln_teaser(cs: &ChangeSet, enrichment: &Enrichment) -> Option<String> {
+    let comps = vuln_components_sorted(cs, enrichment);
+    let top = comps.first()?;
+    let refs = enrichment.vulns_for(top.purl.as_deref());
+    let mut sorted: Vec<&crate::enrich::VulnRef> = refs.iter().collect();
+    sorted.sort_by(|a, b| b.severity.cmp(&a.severity).then_with(|| a.id.cmp(&b.id)));
+    let head = sorted.first()?;
+    Some(format!("top severity: {} ({})", head.severity, head.id))
+}
+
+fn typosquat_teaser(enrichment: &Enrichment) -> Option<String> {
+    let top = enrichment.typosquats.iter().max_by(|a, b| {
+        a.score
+            .partial_cmp(&b.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })?;
+    Some(format!(
+        "top similarity: {:.2} ({} → {})",
+        top.score, top.component.name, top.closest
+    ))
 }
 
 fn write_version_jump_row(out: &mut String, f: &VersionJumpFinding) {
@@ -248,12 +394,6 @@ fn write_typosquat_row(out: &mut String, f: &TyposquatFinding) {
         "| {} | {} | {} | {} | {:.2} |",
         f.component.ecosystem, f.component.name, f.component.version, f.closest, f.score
     );
-}
-
-fn write_vuln_rows(out: &mut String, components: &[Component], enrichment: &Enrichment) {
-    for c in components {
-        write_one_vuln_row(out, c, enrichment);
-    }
 }
 
 fn write_one_vuln_row(out: &mut String, c: &Component, enrichment: &Enrichment) {
@@ -486,7 +626,14 @@ mod tests {
                 severity: crate::enrich::Severity::Critical,
             }],
         );
-        let summary = render_with_options(&cs, &e, Options { summary_only: true });
+        let summary = render_with_options(
+            &cs,
+            &e,
+            Options {
+                summary_only: true,
+                repo_url: None,
+            },
+        );
         // Summary table is preserved (the load-bearing part of the comment).
         assert!(summary.contains("## SBOM diff"));
         assert!(summary.contains("| Added | 1 |"));
@@ -507,7 +654,10 @@ mod tests {
         let out = render_with_options(
             &ChangeSet::default(),
             &Enrichment::default(),
-            Options { summary_only: true },
+            Options {
+                summary_only: true,
+                repo_url: None,
+            },
         );
         assert!(out.contains("_No dependency changes._"));
         assert!(!out.contains("Per-category detail elided"));
@@ -664,5 +814,241 @@ mod tests {
         let md = render(&cs, &Enrichment::default());
         assert!(!md.contains("### Young maintainers"));
         assert!(!md.contains("| Young maintainers |"));
+    }
+
+    // ---- Phase C: collapsible sections, cross-component vuln sort, footer ----
+
+    #[test]
+    fn sections_are_wrapped_in_collapsible_details_with_count() {
+        // Each populated section gets a `### Header (N)` line followed by
+        // a `<details><summary>Show details...</summary>` wrapper. Reviewers
+        // see the section name + count without expanding; expand to see the
+        // table.
+        let cs = ChangeSet {
+            added: vec![comp("a", "1.0", Ecosystem::Npm, None)],
+            removed: vec![comp("b", "1.0", Ecosystem::Cargo, None)],
+            version_changed: vec![(
+                comp("c", "1.0", Ecosystem::Npm, None),
+                comp("c", "2.0", Ecosystem::Npm, None),
+            )],
+            ..Default::default()
+        };
+        let md = render(&cs, &Enrichment::default());
+        assert!(md.contains("### Added (1)\n"));
+        assert!(md.contains("### Removed (1)\n"));
+        assert!(md.contains("### Version changed (1)\n"));
+        // Each opens a details block
+        let details_count = md.matches("<details>").count();
+        let summary_count = md.matches("</summary>").count();
+        let close_count = md.matches("</details>").count();
+        assert_eq!(details_count, 3);
+        assert_eq!(summary_count, 3);
+        assert_eq!(close_count, 3);
+        // Show details prefix appears in every summary line
+        assert!(md.contains("<details><summary>Show details"));
+    }
+
+    #[test]
+    fn vuln_section_summary_includes_top_severity_teaser() {
+        // The summary line must include the top severity + advisory ID so
+        // a reviewer skimming the collapsed comment knows whether to expand.
+        let cs = ChangeSet {
+            added: vec![
+                comp(
+                    "low-risk",
+                    "1.0",
+                    Ecosystem::Npm,
+                    Some("pkg:npm/low-risk@1.0"),
+                ),
+                comp("hot", "1.0", Ecosystem::Npm, Some("pkg:npm/hot@1.0")),
+            ],
+            ..Default::default()
+        };
+        let mut e = Enrichment::default();
+        e.vulns.insert(
+            "pkg:npm/low-risk@1.0".into(),
+            vec![crate::enrich::VulnRef {
+                id: "GHSA-medium".into(),
+                severity: crate::enrich::Severity::Medium,
+            }],
+        );
+        e.vulns.insert(
+            "pkg:npm/hot@1.0".into(),
+            vec![crate::enrich::VulnRef {
+                id: "CVE-2025-critical".into(),
+                severity: crate::enrich::Severity::Critical,
+            }],
+        );
+        let md = render(&cs, &e);
+        // Summary teaser cites the highest-severity advisory, not just any.
+        assert!(
+            md.contains("top severity: CRITICAL (CVE-2025-critical)"),
+            "summary line missing severity teaser; got:\n{md}"
+        );
+    }
+
+    #[test]
+    fn vuln_rows_sorted_by_max_severity_across_components() {
+        // `low-risk` is alphabetically first but only has Medium; `hot` has
+        // Critical. The Critical row must appear before the Medium row in
+        // the Vulnerabilities table — even though they appear in the
+        // opposite order in the Added section above it. Scope the search
+        // to the Vulnerabilities section to isolate the assertion.
+        let cs = ChangeSet {
+            added: vec![
+                comp(
+                    "low-risk",
+                    "1.0",
+                    Ecosystem::Npm,
+                    Some("pkg:npm/low-risk@1.0"),
+                ),
+                comp("hot", "1.0", Ecosystem::Npm, Some("pkg:npm/hot@1.0")),
+            ],
+            ..Default::default()
+        };
+        let mut e = Enrichment::default();
+        e.vulns.insert(
+            "pkg:npm/low-risk@1.0".into(),
+            vec![crate::enrich::VulnRef {
+                id: "GHSA-medium".into(),
+                severity: crate::enrich::Severity::Medium,
+            }],
+        );
+        e.vulns.insert(
+            "pkg:npm/hot@1.0".into(),
+            vec![crate::enrich::VulnRef {
+                id: "CVE-2025-critical".into(),
+                severity: crate::enrich::Severity::Critical,
+            }],
+        );
+        let md = render(&cs, &e);
+        let vuln_start = md
+            .find("### Vulnerabilities")
+            .expect("vulnerabilities section present");
+        let vuln_section = &md[vuln_start..];
+        let pos_hot = vuln_section
+            .find("| npm | hot |")
+            .expect("hot row present in vulns table");
+        let pos_low = vuln_section
+            .find("| npm | low-risk |")
+            .expect("low-risk row present in vulns table");
+        assert!(
+            pos_hot < pos_low,
+            "Critical-severity component must render before Medium-severity component within the Vulnerabilities table"
+        );
+    }
+
+    #[test]
+    fn typosquat_section_summary_includes_top_similarity_teaser() {
+        let cs = ChangeSet {
+            added: vec![
+                comp("plain-crypto-js", "4.2.1", Ecosystem::Npm, None),
+                comp("axiosx", "1.0.0", Ecosystem::Npm, None),
+            ],
+            ..Default::default()
+        };
+        let mut e = Enrichment::default();
+        e.typosquats
+            .push(crate::enrich::typosquat::TyposquatFinding {
+                component: cs.added[0].clone(),
+                closest: "crypto-js".to_string(),
+                score: 0.95,
+            });
+        e.typosquats
+            .push(crate::enrich::typosquat::TyposquatFinding {
+                component: cs.added[1].clone(),
+                closest: "axios".to_string(),
+                score: 0.85,
+            });
+        let md = render(&cs, &e);
+        // Top score (0.95) wins — that's the actionable finding to surface
+        // in the collapsed summary line.
+        assert!(
+            md.contains("top similarity: 0.95 (plain-crypto-js → crypto-js)"),
+            "typosquat summary missing teaser; got:\n{md}"
+        );
+    }
+
+    #[test]
+    fn footer_omitted_when_repo_url_unset() {
+        let cs = ChangeSet {
+            added: vec![comp("a", "1.0", Ecosystem::Npm, None)],
+            ..Default::default()
+        };
+        let md = render(&cs, &Enrichment::default());
+        assert!(!md.contains("False positive?"));
+        assert!(!md.contains("/issues/new"));
+    }
+
+    #[test]
+    fn footer_renders_when_repo_url_supplied() {
+        let cs = ChangeSet {
+            added: vec![comp("a", "1.0", Ecosystem::Npm, None)],
+            ..Default::default()
+        };
+        let md = render_with_options(
+            &cs,
+            &Enrichment::default(),
+            Options {
+                summary_only: false,
+                repo_url: Some("https://github.com/example/proj".to_string()),
+            },
+        );
+        assert!(md.contains("False positive?"));
+        assert!(md.contains("https://github.com/example/proj/issues/new"));
+        assert!(md.contains("/bomdrift suppress"));
+        assert!(md.contains("https://metbcy.github.io/bomdrift/"));
+    }
+
+    #[test]
+    fn footer_strips_trailing_slash_from_repo_url() {
+        // Forks and fork-of-forks may pass a URL with a trailing slash;
+        // produce the same `/issues/new` suffix regardless.
+        let cs = ChangeSet {
+            added: vec![comp("a", "1.0", Ecosystem::Npm, None)],
+            ..Default::default()
+        };
+        let md = render_with_options(
+            &cs,
+            &Enrichment::default(),
+            Options {
+                summary_only: false,
+                repo_url: Some("https://github.com/example/proj/".to_string()),
+            },
+        );
+        assert!(md.contains("https://github.com/example/proj/issues/new"));
+        assert!(!md.contains("proj//issues"));
+    }
+
+    #[test]
+    fn why_this_matters_link_appears_in_each_finding_section() {
+        let cs = ChangeSet {
+            added: vec![comp(
+                "vuln",
+                "1.0",
+                Ecosystem::Npm,
+                Some("pkg:npm/vuln@1.0"),
+            )],
+            ..Default::default()
+        };
+        let mut e = Enrichment::default();
+        e.vulns.insert(
+            "pkg:npm/vuln@1.0".into(),
+            vec![crate::enrich::VulnRef {
+                id: "GHSA-x".into(),
+                severity: crate::enrich::Severity::High,
+            }],
+        );
+        e.typosquats
+            .push(crate::enrich::typosquat::TyposquatFinding {
+                component: cs.added[0].clone(),
+                closest: "vulnx".to_string(),
+                score: 0.9,
+            });
+        let md = render(&cs, &e);
+        // SARIF helpUri reuse — the same docs URL should appear in markdown
+        // so reviewers can click through to the per-rule explanation.
+        assert!(md.contains("https://metbcy.github.io/bomdrift/enrichers/osv-cve.html"));
+        assert!(md.contains("https://metbcy.github.io/bomdrift/enrichers/typosquat.html"));
     }
 }

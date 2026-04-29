@@ -30,6 +30,42 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   who want the raw cataloger output (debugging, auditing). Off by
   default; enabling it restores the pre-v0.5 behavior.
 
+- **Markdown comment is now collapsible.** Each per-category section
+  (Added / Removed / Version changed / Vulnerabilities / Possible
+  typosquats / Multi-major version jumps / Young maintainers /
+  License changed) is wrapped in a `<details><summary>` block. The
+  `### Section (count)` header stays visible above the wrapper so
+  the table of contents still works; the body is hidden by default
+  for skim-readability on big diffs. Reviewers expand the sections
+  they care about.
+
+- **Severity-sorted vulnerability rows.** Within the Vulnerabilities
+  section, components are ordered by their highest-severity
+  advisory (Critical first, then High / Medium / Low / None), with
+  alphabetical tie-breaking on ecosystem+name. Per-component
+  advisories continue to be severity-then-id sorted as before.
+  Critical / High findings now cluster at the top of the table —
+  the load-bearing rows that justify a reviewer's attention.
+
+- **`<summary>` teasers** on the Vulnerabilities and Possible
+  typosquats sections surface the most-actionable item without
+  expanding (e.g. `top severity: CRITICAL (CVE-2025-foo)` or
+  `top similarity: 0.95 (axiosx → axios)`).
+
+- **Per-section "Why this matters" links** in the markdown output,
+  reusing the SARIF rule helpUris that v0.4.2 introduced. Reviewers
+  click through to the docs chapter explaining what the enricher is
+  detecting and why.
+
+- **`--repo-url` flag** (also reads `BOMDRIFT_REPO_URL` env var) on
+  `bomdrift diff`. When set, the markdown comment renders an
+  action-affordance footer with three links: a pre-filled "Report
+  this finding" issue URL, the `/bomdrift suppress <id>`
+  suppress-comment hint (Phase D wires the actual mechanism), and
+  the docs site. When unset, the footer is omitted entirely so
+  forks / standalone CLI use don't render dead links to bomdrift's
+  own issue tracker.
+
 ## [0.4.4] - 2026-04-28
 
 The "make the action actually produce output" patch release. Sister
