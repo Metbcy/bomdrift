@@ -3,12 +3,53 @@
 What's planned, what's deliberately out of scope, and what the
 acceptance criteria for new contributions look like.
 
-## Planned
+## Shipped (v0.8 — supply-chain hardening)
 
-The list below is intentionally short — bomdrift is small on purpose.
-Items are grouped by likely landing area and rough sizing.
+- **SARIF + GitHub Code Scanning** with stable per-result fingerprints
+  and one-line action opt-in (`upload-to-code-scanning: true`).
+- **EPSS scoring** on every CVE-aliased advisory; `--fail-on-epss`
+  threshold gating.
+- **CISA KEV flagging** of known-exploited advisories;
+  `--fail-on kev`.
+- **License allow/deny policy** with `*`-suffix glob matching and
+  fail-closed compound-expression handling. New
+  `bomdrift.license-violation` SARIF rule.
+- **Baseline `expires` + `reason`** for time-boxed risk acceptance,
+  with stderr warnings on expired entries.
+- **`time` crate adoption + `clock` module** — single source of truth
+  for date/time, honors `SOURCE_DATE_EPOCH`.
+- **OSV CVE aliases** threaded through `VulnRef` (prerequisite for
+  EPSS / KEV / VEX).
+- **`--debug-calibration-format jsonl`** alternative to the v0.7
+  pipe-delimited format.
+- **`--output-file <PATH>`** CLI flag (avoids `>` redirection in YAML).
 
-### Future candidates (not committed)
+## Planned (v0.9 — interoperability + breadth)
+
+- **VEX consume** — `--vex <path>` accepts OpenVEX 0.2.0 + CycloneDX
+  VEX 1.6 statements; `not_affected` / `fixed` suppress findings,
+  `under_investigation` annotates.
+- **VEX emit** — `--emit-vex <path>` emits an OpenVEX document from
+  baseline-suppressed findings. Defaults to
+  `under_investigation` (the safe truth-claim); per-entry
+  `vex_status` override required for `not_affected`.
+- **SPDX expression evaluator** — replaces v0.8's atomic+glob matcher
+  with full `(MIT OR Apache-2.0)` evaluation via the `spdx` crate.
+  Deprecates `allow_ambiguous`.
+- **Multi-SCM templates** — Bitbucket Pipelines + Azure DevOps with
+  per-platform footer shapes and PR-comment upsert recipes.
+- **Registry-metadata enrichers** — npm `time.modified`, PyPI
+  `info.yanked`, crates.io `versions[].yanked`. New finding kinds:
+  `RecentlyPublished`, `Deprecated`, `MaintainerSetChanged`.
+- **GitLab in-comment suppression** with explicit security guards
+  (token verification, event filter, project allowlist, commenter
+  permissions, fork-MR safety). Reference Cloudflare Worker bridge.
+- **Explicit non-goals doc** — reachability, tarball static analysis,
+  auto-fix PR generation, container image scanning, SAST/secrets,
+  risk-score dashboards. Pair with Endor/Snyk for reachability,
+  Renovate/Dependabot for auto-fix.
+
+## Future candidates (not committed)
 
 - **GraphQL maintainer-age** — was investigated for v0.4 and deferred.
   The current REST implementation already uses `?per_page=1` + Link-header
@@ -23,13 +64,9 @@ Items are grouped by likely landing area and rough sizing.
   internal-mirror.example.com without a SHA-256 attestation").
   Probably WASM-based for sandboxing.
 - **GitLab in-comment suppression** — v0.7 ships the GitLab CI
-  template + `--platform gitlab` (the diff path), but the
-  comment-driven `/bomdrift suppress <ID>` flow on GitLab is
-  deferred. GitLab note-event webhooks have a different model than
-  GitHub PR comments — wiring the safe path (rate-limit, fork-MR
-  safety, command parsing, double-trigger debounce) is a v0.8
-  candidate once we see real adoption data on the v0.7 manual
-  path.
+  template + `--platform gitlab` (the diff path); v0.9 will add the
+  comment-driven `/bomdrift suppress <ID>` flow with explicit
+  security guards.
 - **Calibration tuning from `--debug-calibration` data** — v0.7
   added the diagnostic flag; v0.8 may revise
   `SIMILARITY_THRESHOLD`, `YOUNG_MAINTAINER_DAYS`, and OSV cache

@@ -7,6 +7,105 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-29
+
+The "supply-chain hardening" milestone. v0.8 finishes SARIF for GitHub
+Code Scanning, lights up exploit-prediction (EPSS) and
+known-exploited-in-the-wild (CISA KEV) signals on every advisory,
+introduces an explicit license allow/deny policy with fail-closed
+compound-expression handling, and adds time-boxed risk-acceptance to
+the suppression baseline.
+
+### Added
+
+- **SARIF + GitHub Code Scanning end-to-end.** Every result now carries
+  a stable `partialFingerprints.primaryHash/v1` hash so Code Scanning's
+  alert dedup threads correctly across runs. New action input
+  `upload-to-code-scanning: true` wires
+  `github/codeql-action/upload-sarif@v3` for one-line opt-in. New
+  `--output-file <PATH>` CLI flag avoids YAML `>`-redirection
+  quirks. Per-rule fingerprint identity tuples documented at
+  [docs/src/sarif.md](docs/src/sarif.md).
+
+- **EPSS scoring (FIRST.org).** Every CVE-aliased advisory surfaces an
+  exploitation-probability badge in markdown / terminal / SARIF /
+  JSON. `--fail-on-epss <FLOAT>` trips exit 2 when any advisory exceeds
+  the threshold. `--no-epss` opt-out + 24h disk cache at
+  `<XDG_CACHE>/bomdrift/epss/`. Best-effort: network failure logs at
+  `BOMDRIFT_DEBUG=1`, diff still renders.
+  [docs/src/enrichers/epss.md](docs/src/enrichers/epss.md)
+
+- **CISA KEV (Known Exploited Vulnerabilities).** A `KEV` flag flips
+  on every advisory whose primary id or CVE alias appears in CISA's
+  catalog. `--fail-on kev` + `--no-kev` flags. Once-daily catalog
+  cache at `<XDG_CACHE>/bomdrift/kev/catalog.json`.
+  [docs/src/enrichers/kev.md](docs/src/enrichers/kev.md)
+
+- **License allow/deny policy.** New `[license]` block in
+  `.bomdrift.toml` (or `--allow-licenses`/`--deny-licenses` CLI flags
+  matching Dependency Review Action names). Atomic exact match +
+  `*`-suffix glob (`AGPL-*`); compound expressions like
+  `(MIT OR GPL-3.0)` fail closed by default unless
+  `allow_ambiguous=true`. Distinct from same-version license drift:
+  this is a policy gate. New SARIF rule
+  `bomdrift.license-violation`. `--fail-on license-violation` trips
+  exit 2. [docs/src/license-policy.md](docs/src/license-policy.md)
+
+- **Suppression expiry + reason.** Each `suppressed_advisories` entry
+  may now be the v0.8 object form
+  `{id, expires?: "YYYY-MM-DD", reason?: "free text"}`. Expired
+  entries surface a stderr warning and stop suppressing; bomdrift
+  refuses to load malformed dates. `bomdrift baseline add --expires
+  --reason` records the metadata; the `comment-suppress` companion
+  action picks up an optional `reason: <text>` line in the trigger
+  comment body.
+  [docs/src/baseline.md](docs/src/baseline.md#time-boxed-suppressions-expires--reason)
+
+- **OSV CVE aliases threaded through `VulnRef`.** OSV `/v1/vulns/{id}`
+  responses now feed CVE aliases into `VulnRef.aliases` (sorted,
+  byte-deterministic). EPSS / KEV / future VEX consumption all read
+  from `VulnRef::cves()`.
+
+- **`time` crate adoption + `clock` module.** New `src/clock.rs` is
+  the single source of truth for date/time across the codebase.
+  Honors `SOURCE_DATE_EPOCH` (read per call so test fixtures can vary
+  it). All v0.8 features that emit dates / compare dates go through
+  this module — reproducible-build contexts stay deterministic.
+
+- **`--debug-calibration-format <pipe|jsonl>`.** New JSONL alternative
+  to the v0.7 pipe-delimited calibration tap. Numeric scores stay
+  numeric in JSON; severity buckets stay strings. Adding a new
+  finding kind is one call to a dispatch helper, not a fork.
+
+### Changed
+
+- `--fail-on any` now also includes KEV-flagged advisories and
+  license-violation findings.
+- SARIF rule list grew from 5 to 6 (added `bomdrift.license-violation`).
+
+### Scope notes
+
+The following items were deliberately **deferred to v0.9** rather than
+half-shipped:
+
+- **GitLab comment-driven suppress.** The `/bomdrift suppress` flow
+  works on GitHub via the `comment-suppress` companion action. Porting
+  to GitLab needs a webhook bridge with five distinct security guards
+  (token verification, event-type filter, project allowlist,
+  commenter-permission check, MR-context guard). Shipping the bridge
+  without those is a vulnerability — moved to v0.9 with a security
+  review milestone.
+- **Multi-SCM (Bitbucket + Azure DevOps).** Templates and footer
+  shapes need per-platform comment-API exploration; deferred to v0.9.
+- **VEX consume + emit.** Both depend on the `time` crate
+  foundation that lands here. Consume in v0.9-G; emit in v0.9-H. The
+  baseline-expiry + reason fields added in v0.8 feed directly into
+  the VEX `status_notes` field when emit lands.
+- **SPDX expression evaluator.** v0.8 fails closed on compound
+  expressions; v0.9 adopts the `spdx` crate (~30kb) for proper
+  evaluation. The `allow_ambiguous` flag becomes redundant at that
+  point.
+
 ## [0.7.0] - 2026-04-30
 
 The "broaden the platform, polish the edges" milestone. v0.7 takes the
