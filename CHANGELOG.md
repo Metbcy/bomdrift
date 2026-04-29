@@ -7,6 +7,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **First PR after `bomdrift init` no longer fails when no baseline
+  has been suppressed yet.** `bomdrift init` ships a `.bomdrift.toml`
+  with `baseline = ".bomdrift/baseline.json"` — the path the
+  `/bomdrift suppress` flow writes to. Before this fix, the diff
+  hard-failed with `reading baseline file: ... No such file or
+  directory` on every PR until a reviewer used the suppress comment
+  at least once. Config-derived baseline paths are now tolerant of a
+  missing file (the diff runs with no suppressions applied), while
+  CLI `--baseline path` keeps its strict typo-detector behavior.
+
 ## [0.6.0] - 2026-04-29
 
 ### Added

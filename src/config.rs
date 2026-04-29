@@ -61,7 +61,16 @@ fn apply_loaded_diff_config(args: &mut DiffArgs, config: Config) {
     args.no_osv |= diff.no_osv.unwrap_or(false);
     args.no_osv_cache |= diff.no_osv_cache.unwrap_or(false);
     if args.baseline.is_none() {
-        args.baseline = diff.baseline;
+        // Config-derived baseline paths are tolerant of a missing file.
+        // `bomdrift init` ships `.bomdrift.toml` pointing at
+        // `.bomdrift/baseline.json` before any `/bomdrift suppress`
+        // comment has had a chance to create it; failing the very first
+        // PR-comment run because the file doesn't exist yet would defeat
+        // the whole point of the scaffolded default. CLI `--baseline
+        // path` remains strict (a typo'd path silently no-op'ing is the
+        // worse footgun there) — that strict behavior lives in
+        // `Baseline::load` and is unchanged.
+        args.baseline = diff.baseline.filter(|p| p.exists());
     }
     args.no_maintainer_age |= diff.no_maintainer_age.unwrap_or(false);
     if args.fail_on.is_none() {
@@ -156,6 +165,47 @@ mod tests {
         assert_eq!(diff.no_osv, Some(true));
         assert_eq!(diff.findings_only, Some(true));
         assert_eq!(diff.max_added, Some(10));
+    }
+
+    #[test]
+    fn config_baseline_path_is_dropped_when_file_missing() {
+        // Repro of the v0.6.0 rough edge: `bomdrift init` writes
+        // `.bomdrift.toml` with `baseline = ".bomdrift/baseline.json"`
+        // but the file doesn't exist yet (it's created on the first
+        // `/bomdrift suppress` comment). The first PR-comment run on a
+        // freshly-init'd repo must NOT fail before rendering — the diff
+        // should run with no baseline applied.
+        let mut args = args();
+        let diff = DiffConfig {
+            baseline: Some(PathBuf::from(
+                "/nonexistent/this/path/should/not/exist/baseline.json",
+            )),
+            ..Default::default()
+        };
+        let config = Config { diff: Some(diff) };
+        apply_loaded_diff_config(&mut args, config);
+        assert!(
+            args.baseline.is_none(),
+            "config-derived baseline pointing at a missing file must be dropped, not propagated"
+        );
+    }
+
+    #[test]
+    fn config_baseline_path_is_kept_when_file_exists() {
+        let mut args = args();
+        let tmp = std::env::temp_dir();
+        let path = tmp.join("bomdrift-config-baseline-fixture.json");
+        std::fs::write(&path, "{}").expect("write fixture baseline");
+
+        let diff = DiffConfig {
+            baseline: Some(path.clone()),
+            ..Default::default()
+        };
+        let config = Config { diff: Some(diff) };
+        apply_loaded_diff_config(&mut args, config);
+        assert_eq!(args.baseline.as_deref(), Some(path.as_path()));
+
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]

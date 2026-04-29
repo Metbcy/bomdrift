@@ -758,3 +758,88 @@ fn diff_fail_on_license_change_exits_2() {
 
     fs::remove_dir_all(dir).ok();
 }
+
+#[test]
+fn diff_explicit_baseline_path_missing_errors_loudly() {
+    // Regression guard for the v0.6.1 baseline split: CLI `--baseline
+    // <path>` MUST keep its strict typo-detector behavior even after
+    // config-supplied baselines were softened. A user who types
+    // `--baseline pasleline.json` (typo) deserves a hard failure, not a
+    // silent run with no suppressions applied.
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--baseline",
+            "tests/fixtures/does-not-exist-baseline.json",
+            "--no-osv",
+            "--no-maintainer-age",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(
+        !out.status.success(),
+        "explicit --baseline pointing at a missing file must error; got status {}",
+        out.status
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("does-not-exist-baseline.json"),
+        "stderr should name the missing baseline path; got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("reading baseline file"),
+        "stderr should explain the baseline read failure; got:\n{stderr}"
+    );
+}
+
+#[test]
+fn diff_config_baseline_missing_file_does_not_error() {
+    // End-to-end repro of the v0.6.1 fix: `bomdrift init` writes
+    // `.bomdrift.toml` with `baseline = ".bomdrift/baseline.json"` —
+    // a path that doesn't exist until the first `/bomdrift suppress`
+    // comment populates it. The first PR-comment run on a freshly
+    // init'd repo must succeed and render markdown with no
+    // suppressions applied, NOT fail with "No such file or directory".
+    let dir = temp_dir("config-baseline-missing");
+    fs::write(
+        dir.join(".bomdrift.toml"),
+        r#"
+        [diff]
+        no_osv = true
+        no_maintainer_age = true
+        baseline = ".bomdrift/baseline.json"
+        "#,
+    )
+    .expect("write config");
+
+    let out = Command::new(bin())
+        .current_dir(&dir)
+        .args([
+            "diff",
+            &fixture_path("cdx-minimal.json"),
+            &fixture_path("cdx-after.json"),
+        ])
+        .output()
+        .expect("spawn bomdrift");
+
+    assert!(
+        out.status.success(),
+        "config-supplied missing baseline must not block render; got status {} stderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("reading baseline file"),
+        "config-tolerant path must not surface the strict-mode error; got:\n{stderr}"
+    );
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    assert!(stdout.starts_with("## SBOM diff"));
+    assert!(stdout.contains("plain-crypto-js"));
+
+    fs::remove_dir_all(dir).ok();
+}
