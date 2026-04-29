@@ -4,12 +4,43 @@ The `Metbcy/bomdrift` action is a **composite action** (no Docker), which
 keeps PR-comment latency low — typically 5–10s on a warm runner versus
 30s+ for a Docker container action.
 
+## Quick start (zero-config, v0.5+)
+
+On a `pull_request` workflow, the action defaults to comparing the PR's
+base branch against the PR's head SHA — no checkout step, no Syft step,
+no SBOM-path wiring needed:
+
+```yaml
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: Metbcy/bomdrift@v1
+```
+
+That's it. The action checks out both refs into opaque sibling paths,
+generates CycloneDX-JSON SBOMs via Syft (installed automatically and
+cached across job runs), and posts the rendered diff as an upserted PR
+comment.
+
+If you already produce SBOMs through a non-Syft toolchain — Trivy,
+SPDX-tools, an in-house generator — supply the file paths via the
+`before-sbom` / `after-sbom` inputs instead. The advanced flow below
+documents that path; both flows continue to be supported in v1.
+
 ## Inputs
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `before-sbom` | yes | — | Path to the "before" SBOM (CycloneDX, SPDX, or Syft JSON). |
-| `after-sbom`  | yes | — | Path to the "after" SBOM. |
+| `before-ref` | no | `${{ github.event.pull_request.base.ref }}` | Git ref / SHA to check out as the "before" side. The default works on `pull_request` events; supply explicitly on other events. Ignored when `before-sbom` is set. |
+| `after-ref`  | no | `${{ github.event.pull_request.head.sha }}`  | Git ref / SHA for the "after" side. Same defaulting story. Ignored when `after-sbom` is set. |
+| `path`       | no | `.` | Subdirectory of the checked-out ref to scan with Syft. Useful for monorepos (`path: services/api`). Ignored when both `*-sbom` inputs are set. |
+| `before-sbom` | no | `` (empty) | Path to the "before" SBOM (CycloneDX, SPDX, or Syft JSON). When set, bypasses the v0.5 zero-config Syft invocation and uses this file directly. The escape hatch for non-Syft toolchains. |
+| `after-sbom`  | no | `` (empty) | Path to the "after" SBOM. Same migration story as `before-sbom`. |
 | `format`      | no  | `auto` | Force input format detection: `auto`/`cdx`/`spdx`/`syft`. |
 | `output`      | no  | `markdown` | Output format: `terminal`/`markdown`/`json`/`sarif`. The PR-comment path requires `markdown`. |
 | `comment-on-pr` | no | `true` | Post the rendered diff as a PR comment when the workflow runs on a `pull_request` event. Set to `false` for diff-only / report-only workflows. |
@@ -38,10 +69,12 @@ The action does not declare formal outputs. Its side effects are:
 
 ## Common patterns
 
-### Generate the SBOMs in the same workflow
+### Bring your own SBOMs (advanced / pre-v0.5 flow)
 
-The most common pattern: generate before and after SBOMs from the base ref
-and the PR head, respectively, then feed both into bomdrift.
+When the SBOMs come from a non-Syft toolchain (Trivy, SPDX-tools,
+proprietary scanners) or you already generate them in an earlier job
+step, supply both paths explicitly. The action skips the in-action
+Syft invocation entirely:
 
 ```yaml
 - uses: actions/checkout@v4
@@ -54,6 +87,12 @@ and the PR head, respectively, then feed both into bomdrift.
 - uses: Metbcy/bomdrift@v1
   with: { before-sbom: before.json, after-sbom: after.json }
 ```
+
+This is the v0.4-era "manual" pattern. It still works in v0.5 — the
+`before-sbom` / `after-sbom` inputs were `required: true` in v0.4 and
+became `required: false` in v0.5; nothing else changed about how they
+behave. Existing v0.4 workflows continue to function unchanged after a
+`@v1` tag bump.
 
 ### Block the merge on critical findings
 
@@ -135,5 +174,29 @@ default). Without it, the comment-upsert step fails with a 403; the
 action's exit code remains the bomdrift exit (so a `fail-on` trip still
 fails the workflow correctly).
 
-`contents: read` is required for the SBOM-checkout step, not the action
-itself. The action only reads files passed via `before-sbom` / `after-sbom`.
+`contents: read` is required so the action's internal `actions/checkout`
+steps (zero-config flow) can fetch both refs. In the bring-your-own-SBOMs
+flow it's still required by whichever step generates the SBOMs upstream.
+
+## What the action does (v0.5+)
+
+When the zero-config flow runs (no explicit `before-sbom` / `after-sbom`):
+
+1. **Two sibling checkouts** of `before-ref` and `after-ref` into
+   `${{ github.workspace }}/__bomdrift_before` and `__bomdrift_after`.
+   Both with `fetch-depth: 1` and `persist-credentials: false`. Skipped
+   for whichever side has a pre-supplied SBOM path.
+2. **Syft installed** via `anchore/sbom-action/download-syft@v0`. Cached
+   across job runs in the runner's tool cache.
+3. **`syft scan dir:...` against each checkout's `${path}` subtree**,
+   producing CycloneDX-JSON into a tempfile under `$RUNNER_TEMP`. The
+   bomdrift parser drops `Ecosystem::Other("file")` pseudo-components
+   that Syft's directory cataloger emits — set
+   `--include-file-components` (CLI) or pass a pre-generated SBOM via
+   `before-sbom` / `after-sbom` to bypass.
+4. **`bomdrift diff` runs** as in the v0.4 flow, and the upsert + step
+   summary plumbing is unchanged.
+
+The new behavior costs about 30 MB of one-time tool cache and 3–5s of
+cold-cache wall time per first invocation. Subsequent runs in the same
+job (or in repos that share the runner's tool cache) reuse Syft.

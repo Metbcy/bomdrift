@@ -179,6 +179,51 @@ download_bomdrift() {
   printf '%s' "$bin"
 }
 
+# ---- Generate an SBOM for one side of the diff -------------------------------
+#
+# Used in the v0.5 zero-config flow when the consumer didn't supply a
+# pre-computed `before-sbom` / `after-sbom`. The action's composite step
+# already checked out the requested ref into `${checkout_dir}` and installed
+# Syft into PATH; this function just runs the scan.
+#
+# Args:
+#   $1 — checkout directory (absolute path, e.g. ${GITHUB_WORKSPACE}/__bomdrift_after)
+#   $2 — project subdirectory within the checkout (default ".")
+#   $3 — output SBOM path (CycloneDX JSON)
+
+generate_sbom() {
+  local checkout_dir="$1"
+  local subpath="${2:-.}"
+  local out="$3"
+
+  if [ ! -d "$checkout_dir" ]; then
+    fail "checkout directory missing: ${checkout_dir} (the in-action checkout step likely failed; check the job log for actions/checkout errors)"
+  fi
+  # Trim a trailing slash, then trim leading "./" so users who write `path: ./`
+  # or `path: services/api/` get the canonical path Syft expects.
+  local clean="${subpath%/}"
+  clean="${clean#./}"
+  if [ -z "$clean" ]; then
+    clean="."
+  fi
+  local source_dir="${checkout_dir}/${clean}"
+  if [ ! -d "$source_dir" ]; then
+    fail "scan path not found: ${source_dir} (resolved from input path='${subpath}')"
+  fi
+
+  if ! command -v syft >/dev/null 2>&1; then
+    fail "syft not installed; the action's Syft-install step should have run before this point"
+  fi
+
+  log "Generating SBOM for ${source_dir}"
+  # `dir:` source pins Syft to directory cataloging (no container or git
+  # plumbing). CycloneDX-JSON because bomdrift's CDX parser is the most
+  # battle-tested code path; SPDX/Syft-native are also accepted but have
+  # less coverage in our real-world corpus.
+  syft scan "dir:${source_dir}" -o "cyclonedx-json=${out}" --quiet
+  endlog
+}
+
 # ---- Run bomdrift diff -------------------------------------------------------
 
 run_diff() {
@@ -210,6 +255,11 @@ run_diff() {
 main() {
   local before="${BEFORE_SBOM:-}"
   local after="${AFTER_SBOM:-}"
+  local before_ref="${BEFORE_REF:-}"
+  local after_ref="${AFTER_REF:-}"
+  local before_checkout="${BEFORE_CHECKOUT_DIR:-}"
+  local after_checkout="${AFTER_CHECKOUT_DIR:-}"
+  local scan_path="${BOMDRIFT_PATH:-.}"
   local input_format="${INPUT_FORMAT:-auto}"
   local output_format="${OUTPUT_FORMAT:-markdown}"
   local comment_on_pr="${COMMENT_ON_PR:-true}"
@@ -217,11 +267,42 @@ main() {
   local fail_on="${FAIL_ON:-none}"
   local baseline="${BASELINE:-}"
 
-  if [ -z "$before" ] || [ -z "$after" ]; then
-    fail "before-sbom and after-sbom inputs are required"
+  # ---- Resolve "before" SBOM path -------------------------------------------
+  #
+  # Three modes, in priority order:
+  #   1. BEFORE_SBOM is set — explicit-SBOM (v0.4-compat / advanced) flow.
+  #      Validate the path exists; never re-generate.
+  #   2. BEFORE_SBOM is unset AND a checkout dir exists — zero-config flow.
+  #      Generate via Syft into a tempfile.
+  #   3. Neither — fail loudly with migration guidance.
+
+  if [ -z "$before" ]; then
+    if [ -z "$before_ref" ]; then
+      fail "before-ref is empty and before-sbom is unset. On non-pull_request events the default is empty; supply before-ref explicitly OR provide before-sbom."
+    fi
+    if [ -z "$before_checkout" ] || [ ! -d "$before_checkout" ]; then
+      fail "in-action checkout of '${before_ref}' produced no directory at '${before_checkout}'. Check the actions/checkout step in the job log."
+    fi
+    # GNU and BSD `mktemp` disagree on `--suffix`, and macOS-hosted runners
+    # ship the BSD form. A predictable filename under $RUNNER_TEMP (always
+    # set on GitHub-hosted runners; falls back to /tmp elsewhere) avoids
+    # the portability cliff.
+    before="${RUNNER_TEMP:-/tmp}/bomdrift_before.cdx.json"
+    generate_sbom "$before_checkout" "$scan_path" "$before"
   fi
   if [ ! -f "$before" ]; then
     fail "before-sbom not found: $before"
+  fi
+
+  if [ -z "$after" ]; then
+    if [ -z "$after_ref" ]; then
+      fail "after-ref is empty and after-sbom is unset. Supply after-ref explicitly OR provide after-sbom."
+    fi
+    if [ -z "$after_checkout" ] || [ ! -d "$after_checkout" ]; then
+      fail "in-action checkout of '${after_ref}' produced no directory at '${after_checkout}'. Check the actions/checkout step in the job log."
+    fi
+    after="${RUNNER_TEMP:-/tmp}/bomdrift_after.cdx.json"
+    generate_sbom "$after_checkout" "$scan_path" "$after"
   fi
   if [ ! -f "$after" ]; then
     fail "after-sbom not found: $after"

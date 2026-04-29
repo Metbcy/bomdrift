@@ -1,15 +1,24 @@
 name: SBOM diff
 
 # Eat-your-own-dogfood: every PR that touches the Rust dependency
-# manifest gets a bomdrift comment showing the supply-chain diff between
-# main and the PR head. Proves the action works end-to-end on real
-# changes, and gives prospective users a live PR comment as a demo.
+# manifest (or the action surface itself) gets a bomdrift comment
+# showing the supply-chain diff between main and the PR head.
+#
+# `uses: ./` runs the action code from THIS PR, not the published
+# release — so a regression in action.yml / entrypoint.sh shows up
+# on the same PR that introduced it. The actions/checkout step is
+# only here to give `./` something to point at; consumers who copy
+# this workflow as `uses: Metbcy/bomdrift@v1` don't need the
+# checkout step (the v0.5 zero-config flow handles the before/after
+# checkouts internally).
 
 on:
   pull_request:
     paths:
       - Cargo.toml
       - Cargo.lock
+      - action.yml
+      - entrypoint.sh
       - .github/workflows/sbom-diff.yml
 
 permissions:
@@ -24,48 +33,14 @@ jobs:
   diff:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout PR head
+      - name: Checkout PR head (so `uses: ./` resolves)
         uses: actions/checkout@v4
 
-      - name: Generate "after" SBOM (PR head)
-        uses: anchore/sbom-action@v0
+      - name: Run bomdrift (zero-config)
+        uses: ./
         with:
-          path: .
-          format: cyclonedx-json
-          output-file: after.json
-        # NOTE: Syft's default cataloger set on `dir:.` includes the
-        # file-level cataloger, which emits each YAML workflow + lockfile
-        # as a `file:`-ecosystem component. Path differs between PR-head
-        # and base-ref checkouts (`./base/...`), so those produce phantom
-        # add/remove pairs in the diff. Two attempts to filter via
-        # SYFT_DEFAULT_CATALOGERS (`-file` and `directory,-file`) didn't
-        # work — Syft seemed to ignore the env var or parse only the
-        # first token. Tracked as a v0.5 follow-up: either filter
-        # `Ecosystem::Other("file")` in the bomdrift parser, or document
-        # a `.syft.yaml` config-file approach in the Action chapter.
-
-      # Sibling checkout of the base ref so the SBOM generator sees a
-      # clean snapshot of main without the PR's diff applied.
-      - name: Checkout base ref
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.base.ref }}
-          path: base
-
-      - name: Generate "before" SBOM (base ref)
-        uses: anchore/sbom-action@v0
-        with:
-          path: ./base
-          format: cyclonedx-json
-          output-file: before.json
-
-      - name: Run bomdrift
-        uses: Metbcy/bomdrift@v1
-        with:
-          before-sbom: before.json
-          after-sbom:  after.json
           # Informational only on the bomdrift repo; if the action ever
           # surfaces something dangerous on a bomdrift PR, that's
           # signal — not a merge-block. Tighten to `critical-cve` once
           # we have enough false-positive history to know what's noise.
-          fail-on:     none
+          fail-on: none

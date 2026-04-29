@@ -5,12 +5,53 @@ branding:
   color: blue
 
 inputs:
+  # ---- Zero-config inputs (v0.5+) -------------------------------------------
+  #
+  # Defaults populate from the `pull_request` event payload. On other event
+  # types (push, workflow_dispatch, schedule), supply both refs explicitly
+  # OR fall back to the deprecated `before-sbom`/`after-sbom` inputs.
+
+  before-ref:
+    description: |
+      Git ref / SHA to check out as the "before" side of the diff. On a
+      `pull_request` event, defaults to the PR's base branch. Required
+      when the action runs on any other event AND `before-sbom` is unset.
+    default: ${{ github.event.pull_request.base.ref }}
+  after-ref:
+    description: |
+      Git ref / SHA to check out as the "after" side. On a `pull_request`
+      event, defaults to the PR head SHA. Required when the action runs
+      on any other event AND `after-sbom` is unset.
+    default: ${{ github.event.pull_request.head.sha }}
+  path:
+    description: |
+      Subdirectory of the checked-out ref to scan with Syft. Defaults to
+      the repository root. Useful for monorepos where dependencies live
+      under a workspace path (e.g. `path: services/api`).
+    default: '.'
+
+  # ---- Explicit-SBOM inputs (v0.4-compat, deprecated) -----------------------
+  #
+  # When set, bypass the in-action SBOM generation entirely and use the
+  # supplied paths directly. v0.4 callers continue to work unchanged. New
+  # callers should prefer the zero-config flow above; these inputs remain
+  # documented as the "I generate SBOMs in a non-Syft toolchain" escape
+  # hatch and won't be removed in the v1 lifetime.
+
   before-sbom:
-    description: Path to the "before" SBOM (CycloneDX, SPDX, or Syft JSON).
-    required: true
+    description: |
+      Path to the "before" SBOM (CycloneDX, SPDX, or Syft JSON). When set,
+      bypasses the v0.5 zero-config Syft invocation. Optional in v0.5+
+      (was required in v0.4); leaving it empty triggers the in-action
+      SBOM generation against `before-ref`.
+    default: ''
   after-sbom:
-    description: Path to the "after" SBOM (CycloneDX, SPDX, or Syft JSON).
-    required: true
+    description: |
+      Path to the "after" SBOM. Same migration story as `before-sbom`.
+    default: ''
+
+  # ---- Behavior knobs (unchanged) -------------------------------------------
+
   format:
     description: Force input format detection (auto|cdx|spdx|syft).
     default: auto
@@ -64,15 +105,55 @@ inputs:
 runs:
   using: composite
   steps:
+    # Two sibling checkouts at fixed paths under $GITHUB_WORKSPACE. The
+    # path: parameter is required to be a relative subpath of the workspace
+    # by actions/checkout, so we use opaque names (`__bomdrift_before`,
+    # `__bomdrift_after`) that won't collide with consumer paths. Both
+    # steps are skipped when the corresponding `*-sbom` input is set, so
+    # v0.4 advanced consumers (BYO SBOMs) pay neither the network round-trip
+    # nor the disk usage.
+
+    - name: Checkout after-ref (PR head, default)
+      if: inputs.after-sbom == ''
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.after-ref }}
+        path: __bomdrift_after
+        fetch-depth: 1
+        persist-credentials: false
+
+    - name: Checkout before-ref (PR base, default)
+      if: inputs.before-sbom == ''
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.before-ref }}
+        path: __bomdrift_before
+        fetch-depth: 1
+        persist-credentials: false
+
+    # Syft is only installed when at least one side needs in-action SBOM
+    # generation. anchore/sbom-action's published `download-syft` sub-action
+    # handles arch detection + tool-cache reuse — re-implementing it inline
+    # would lose those for no real gain.
+    - name: Install Syft (for in-action SBOM generation)
+      if: inputs.before-sbom == '' || inputs.after-sbom == ''
+      uses: anchore/sbom-action/download-syft@v0
+
     - name: Install cosign (for release signature verification)
       if: inputs.verify-signatures == 'true'
       uses: sigstore/cosign-installer@v3
+
     - name: Run bomdrift
       shell: bash
       run: ${{ github.action_path }}/entrypoint.sh
       env:
         BEFORE_SBOM: ${{ inputs.before-sbom }}
         AFTER_SBOM: ${{ inputs.after-sbom }}
+        BEFORE_REF: ${{ inputs.before-ref }}
+        AFTER_REF: ${{ inputs.after-ref }}
+        BOMDRIFT_PATH: ${{ inputs.path }}
+        BEFORE_CHECKOUT_DIR: ${{ github.workspace }}/__bomdrift_before
+        AFTER_CHECKOUT_DIR: ${{ github.workspace }}/__bomdrift_after
         INPUT_FORMAT: ${{ inputs.format }}
         OUTPUT_FORMAT: ${{ inputs.output }}
         COMMENT_ON_PR: ${{ inputs.comment-on-pr }}
