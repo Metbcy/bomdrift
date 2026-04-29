@@ -126,7 +126,10 @@ pub fn render(cs: &ChangeSet, enrichment: &Enrichment) -> String {
     if !enrichment.vulns.is_empty() {
         out.push_str("### Vulnerabilities (added/upgraded deps)\n\n");
         out.push_str(
-            "Advisories per OSV.dev. Click each ID for details, fixed versions, and severity.\n\n",
+            "Advisories per OSV.dev. Click each ID for details. Severity is the highest \
+             of GHSA's `database_specific.severity` for that advisory; advisories that \
+             pre-date the GHSA tagging or weren't reachable at lookup time render as \
+             `NONE` and don't trip `--fail-on critical-cve`.\n\n",
         );
         out.push_str("| Ecosystem | Name | Version | Advisories |\n|---|---|---|---|\n");
         write_vuln_rows(&mut out, &cs.added, enrichment);
@@ -228,13 +231,23 @@ fn write_vuln_rows(out: &mut String, components: &[Component], enrichment: &Enri
 }
 
 fn write_one_vuln_row(out: &mut String, c: &Component, enrichment: &Enrichment) {
-    let ids = enrichment.vulns_for(c.purl.as_deref());
-    if ids.is_empty() {
+    let refs = enrichment.vulns_for(c.purl.as_deref());
+    if refs.is_empty() {
         return;
     }
-    let advisories = ids
+    // Sort highest-severity-first, then by advisory ID for tie-breaking. Stable
+    // ordering matters because the action's PR-comment upsert keys on full-body
+    // equality.
+    let mut sorted: Vec<&crate::enrich::VulnRef> = refs.iter().collect();
+    sorted.sort_by(|a, b| b.severity.cmp(&a.severity).then_with(|| a.id.cmp(&b.id)));
+    let advisories = sorted
         .iter()
-        .map(|id| format!("[{id}](https://osv.dev/vulnerability/{id})"))
+        .map(|r| {
+            format!(
+                "[{}](https://osv.dev/vulnerability/{}) `{}`",
+                r.id, r.id, r.severity
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ");
     let _ = writeln!(
@@ -374,7 +387,10 @@ mod tests {
         let mut e = Enrichment::default();
         e.vulns.insert(
             "pkg:npm/plain-crypto-js@4.2.1".to_string(),
-            vec!["GHSA-xxxx-yyyy-zzzz".to_string()],
+            vec![crate::enrich::VulnRef {
+                id: "GHSA-xxxx-yyyy-zzzz".to_string(),
+                severity: crate::enrich::Severity::Critical,
+            }],
         );
         let md = render(&cs, &e);
         assert!(md.contains("### Vulnerabilities (added/upgraded deps)"));
@@ -382,6 +398,47 @@ mod tests {
         assert!(
             md.contains("[GHSA-xxxx-yyyy-zzzz](https://osv.dev/vulnerability/GHSA-xxxx-yyyy-zzzz)")
         );
+        assert!(
+            md.contains("`CRITICAL`"),
+            "severity badge must render next to advisory id"
+        );
+    }
+
+    #[test]
+    fn vulnerability_section_sorts_advisories_by_severity_then_id() {
+        let cs = ChangeSet {
+            added: vec![comp(
+                "vuln",
+                "1.0",
+                Ecosystem::Npm,
+                Some("pkg:npm/vuln@1.0"),
+            )],
+            ..Default::default()
+        };
+        let mut e = Enrichment::default();
+        e.vulns.insert(
+            "pkg:npm/vuln@1.0".to_string(),
+            vec![
+                crate::enrich::VulnRef {
+                    id: "CVE-2025-medium".to_string(),
+                    severity: crate::enrich::Severity::Medium,
+                },
+                crate::enrich::VulnRef {
+                    id: "CVE-2025-critical".to_string(),
+                    severity: crate::enrich::Severity::Critical,
+                },
+                crate::enrich::VulnRef {
+                    id: "CVE-2025-high".to_string(),
+                    severity: crate::enrich::Severity::High,
+                },
+            ],
+        );
+        let md = render(&cs, &e);
+        // Critical must appear before High; High before Medium.
+        let pos_crit = md.find("CVE-2025-critical").unwrap();
+        let pos_high = md.find("CVE-2025-high").unwrap();
+        let pos_med = md.find("CVE-2025-medium").unwrap();
+        assert!(pos_crit < pos_high && pos_high < pos_med);
     }
 
     #[test]

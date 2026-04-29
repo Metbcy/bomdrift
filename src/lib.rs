@@ -14,7 +14,7 @@ use anyhow::{Context, Result};
 
 use crate::cli::{Cli, Command, DiffArgs, FailOn, OutputFormat};
 use crate::diff::ChangeSet;
-use crate::enrich::Enrichment;
+use crate::enrich::{Enrichment, Severity};
 
 /// Process exit code emitted when `--fail-on` trips. Distinct from clap's
 /// usage-error exit (`2`-ish on parse failure) because clap exits before
@@ -92,13 +92,6 @@ fn run_diff(args: DiffArgs) -> Result<()> {
     // Body must be fully written before we exit-2 — the action's `tee`
     // wrapper still wants the comment posted even when fail-on trips.
     if tripped(&cs, &enrichment, args.fail_on) {
-        if matches!(args.fail_on, FailOn::CriticalCve) {
-            eprintln!(
-                "warning: --fail-on=critical-cve is treated as --fail-on=cve in v0.2 \
-                 because OSV's /v1/querybatch does not return severity. v0.3 will \
-                 narrow this to CVSS >= 9.0."
-            );
-        }
         std::process::exit(FAIL_ON_EXIT_CODE);
     }
 
@@ -108,16 +101,25 @@ fn run_diff(args: DiffArgs) -> Result<()> {
 /// Pure helper: does this `(changeset, enrichment)` pair trip the configured
 /// fail-on threshold? Side-effect-free so the policy is easy to unit-test
 /// without spinning up the full pipeline.
+///
+/// `FailOn::CriticalCve` filters on real severity now that OSV `/v1/vulns/{id}`
+/// is fetched; only advisories with [`Severity::High`] or higher trip it.
+/// (High is included because GHSA's `CRITICAL` label is relatively rare —
+/// many actively-exploited supply-chain advisories ship as `HIGH`. Treating
+/// "critical-cve" as "high-or-critical" matches what the option's name
+/// communicates to a CI policy author: "block on the actionable bucket".)
 pub fn tripped(cs: &ChangeSet, e: &Enrichment, threshold: FailOn) -> bool {
     match threshold {
         FailOn::None => false,
-        // CriticalCve is treated as Cve in v0.2 (see DiffArgs.fail_on doc
-        // comment for rationale); the diagnostic warning is emitted at the
-        // `run_diff` exit path, not here, to keep `tripped` pure.
-        FailOn::Cve | FailOn::CriticalCve => !e.vulns.is_empty(),
+        FailOn::Cve => !e.vulns.is_empty(),
+        FailOn::CriticalCve => any_advisory_at_or_above(e, Severity::High),
         FailOn::Typosquat => !e.typosquats.is_empty(),
         FailOn::Any => e.has_findings() || !cs.license_changed.is_empty(),
     }
+}
+
+fn any_advisory_at_or_above(e: &Enrichment, threshold: Severity) -> bool {
+    e.vulns.values().flatten().any(|v| v.severity >= threshold)
 }
 
 fn load_sbom(path: &Path, format_hint: Option<model::SbomFormat>) -> Result<model::Sbom> {
@@ -136,6 +138,7 @@ mod tests {
 
     use crate::enrich::typosquat::TyposquatFinding;
     use crate::enrich::version_jump::VersionJumpFinding;
+    use crate::enrich::{Severity, VulnRef};
     use crate::model::{Component, Ecosystem, Relationship};
 
     fn comp(name: &str) -> Component {
@@ -153,13 +156,25 @@ mod tests {
         }
     }
 
-    fn enrichment_with_cve() -> Enrichment {
-        let mut vulns: HashMap<String, Vec<String>> = HashMap::new();
-        vulns.insert("pkg:npm/foo@1.0.0".into(), vec!["CVE-2025-1".into()]);
+    fn enrichment_with_cve_at(severity: Severity) -> Enrichment {
+        let mut vulns: HashMap<String, Vec<VulnRef>> = HashMap::new();
+        vulns.insert(
+            "pkg:npm/foo@1.0.0".into(),
+            vec![VulnRef {
+                id: "CVE-2025-1".into(),
+                severity,
+            }],
+        );
         Enrichment {
             vulns,
             ..Default::default()
         }
+    }
+
+    fn enrichment_with_cve() -> Enrichment {
+        // Severity::None is what every v0.2-era test implicitly assumed — the
+        // pre-severity world. Tests that don't care about the bucket use this.
+        enrichment_with_cve_at(Severity::None)
     }
 
     fn enrichment_with_typosquat() -> Enrichment {
@@ -230,14 +245,42 @@ mod tests {
     }
 
     #[test]
-    fn fail_on_critical_cve_currently_aliases_to_cve() {
-        // Documented v0.2 behavior: severity isn't populated yet from OSV's
-        // /v1/querybatch, so critical-cve currently fires on any CVE. The
-        // user-facing warning is emitted at the run_diff exit, not here.
+    fn fail_on_critical_cve_filters_on_severity_high_or_above() {
+        // Critical and High advisories trip; Medium / Low / None don't. The
+        // doc on `tripped()` explains why High is included in the
+        // "critical-cve" bucket.
         assert!(tripped(
             &ChangeSet::default(),
-            &enrichment_with_cve(),
+            &enrichment_with_cve_at(Severity::Critical),
             FailOn::CriticalCve
+        ));
+        assert!(tripped(
+            &ChangeSet::default(),
+            &enrichment_with_cve_at(Severity::High),
+            FailOn::CriticalCve
+        ));
+        assert!(!tripped(
+            &ChangeSet::default(),
+            &enrichment_with_cve_at(Severity::Medium),
+            FailOn::CriticalCve
+        ));
+        assert!(!tripped(
+            &ChangeSet::default(),
+            &enrichment_with_cve_at(Severity::None),
+            FailOn::CriticalCve
+        ));
+    }
+
+    #[test]
+    fn fail_on_cve_still_trips_on_severity_none_advisories() {
+        // --fail-on cve is the broad "any advisory" bucket; severity threading
+        // doesn't change its semantics. An advisory with unresolved severity
+        // still trips it (the alternative — silent suppression — would be the
+        // real footgun).
+        assert!(tripped(
+            &ChangeSet::default(),
+            &enrichment_with_cve_at(Severity::None),
+            FailOn::Cve
         ));
     }
 
