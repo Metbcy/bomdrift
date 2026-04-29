@@ -193,6 +193,7 @@ main() {
   local input_format="${INPUT_FORMAT:-auto}"
   local output_format="${OUTPUT_FORMAT:-markdown}"
   local comment_on_pr="${COMMENT_ON_PR:-true}"
+  local comment_size_limit="${COMMENT_SIZE_LIMIT:-60000}"
   local fail_on="${FAIL_ON:-none}"
 
   if [ -z "$before" ] || [ -z "$after" ]; then
@@ -241,7 +242,28 @@ main() {
   if [ "$comment_on_pr" = "true" ] \
      && [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ] \
      && [ "$output_format" = "markdown" ]; then
-    post_pr_comment "$out"
+
+    local body="$out"
+    # Re-render in summary-only mode when the full body would blow past
+    # GitHub's comment-size cap. The full markdown is still in the step
+    # summary (written above), so the reviewer can click through; the
+    # comment stays scannable. `comment_size_limit=0` disables the
+    # fallback for users on Enterprise GHE with raised limits.
+    local body_len=${#out}
+    if [ "$comment_size_limit" -gt 0 ] && [ "$body_len" -gt "$comment_size_limit" ]; then
+      printf '::warning::bomdrift output is %d bytes (cap %d); falling back to --summary-only for the PR comment\n' \
+        "$body_len" "$comment_size_limit"
+      local summary_file
+      summary_file="$(mktemp)"
+      set +e
+      run_diff "$bin" "$before" "$after" "$output_format" "$input_format" \
+        "${fail_on_args[@]}" --summary-only > "$summary_file"
+      set -e
+      body="$(cat "$summary_file")"
+      rm -f "$summary_file"
+    fi
+
+    post_pr_comment "$body"
   fi
 
   # bomdrift exit 2 means --fail-on tripped; surface that to the runner so

@@ -26,7 +26,23 @@ use crate::enrich::typosquat::TyposquatFinding;
 use crate::enrich::version_jump::VersionJumpFinding;
 use crate::model::Component;
 
+/// Renderer toggles. Defaults match v0.2 behavior so existing callers keep
+/// working unchanged.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Options {
+    /// When true, emit only the summary-counts table plus a footer note —
+    /// no per-section detail tables. Compresses a several-hundred-finding
+    /// diff from "blow past GitHub's 65k comment cap" to a few KB. The
+    /// reviewer follows the footer link to the full report (workflow-step
+    /// summary, JSON artifact, etc.) when they need detail.
+    pub summary_only: bool,
+}
+
 pub fn render(cs: &ChangeSet, enrichment: &Enrichment) -> String {
+    render_with_options(cs, enrichment, Options::default())
+}
+
+pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Options) -> String {
     let mut out = String::new();
     out.push_str("## SBOM diff\n\n");
 
@@ -69,6 +85,16 @@ pub fn render(cs: &ChangeSet, enrichment: &Enrichment) -> String {
         );
     }
     out.push('\n');
+
+    if opts.summary_only {
+        out.push_str(
+            "_Per-category detail elided (`--summary-only`). The full diff is \
+             available as `bomdrift diff <before> <after> --output markdown` \
+             without the flag, or as the JSON / SARIF artifact attached to \
+             the workflow step summary._\n",
+        );
+        return out;
+    }
 
     if !cs.added.is_empty() {
         out.push_str("### Added\n\n");
@@ -439,6 +465,52 @@ mod tests {
         let pos_high = md.find("CVE-2025-high").unwrap();
         let pos_med = md.find("CVE-2025-medium").unwrap();
         assert!(pos_crit < pos_high && pos_high < pos_med);
+    }
+
+    #[test]
+    fn summary_only_keeps_summary_table_and_drops_detail() {
+        let cs = ChangeSet {
+            added: vec![comp(
+                "axios",
+                "1.14.1",
+                Ecosystem::Npm,
+                Some("pkg:npm/axios@1.14.1"),
+            )],
+            ..Default::default()
+        };
+        let mut e = Enrichment::default();
+        e.vulns.insert(
+            "pkg:npm/axios@1.14.1".to_string(),
+            vec![crate::enrich::VulnRef {
+                id: "GHSA-xxxx-yyyy-zzzz".to_string(),
+                severity: crate::enrich::Severity::Critical,
+            }],
+        );
+        let summary = render_with_options(&cs, &e, Options { summary_only: true });
+        // Summary table is preserved (the load-bearing part of the comment).
+        assert!(summary.contains("## SBOM diff"));
+        assert!(summary.contains("| Added | 1 |"));
+        assert!(summary.contains("| Vulnerabilities | 1 |"));
+        // Per-section detail tables are dropped.
+        assert!(!summary.contains("### Added"));
+        assert!(!summary.contains("### Vulnerabilities"));
+        assert!(!summary.contains("GHSA-xxxx-yyyy-zzzz"));
+        // Footer points the reader at the full output.
+        assert!(summary.contains("--summary-only"));
+    }
+
+    #[test]
+    fn summary_only_does_not_change_no_changes_short_circuit() {
+        // Empty changeset still emits the "No dependency changes." line, even
+        // with summary_only=true. The footer is *only* meaningful when the
+        // diff was big enough to compress.
+        let out = render_with_options(
+            &ChangeSet::default(),
+            &Enrichment::default(),
+            Options { summary_only: true },
+        );
+        assert!(out.contains("_No dependency changes._"));
+        assert!(!out.contains("Per-category detail elided"));
     }
 
     #[test]

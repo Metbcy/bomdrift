@@ -79,10 +79,22 @@ fn run_diff(args: DiffArgs) -> Result<()> {
             if std::io::stdout().is_terminal() {
                 render::term::render(&cs, &enrichment)
             } else {
-                render::markdown::render(&cs, &enrichment)
+                render::markdown::render_with_options(
+                    &cs,
+                    &enrichment,
+                    render::markdown::Options {
+                        summary_only: args.summary_only,
+                    },
+                )
             }
         }
-        OutputFormat::Markdown => render::markdown::render(&cs, &enrichment),
+        OutputFormat::Markdown => render::markdown::render_with_options(
+            &cs,
+            &enrichment,
+            render::markdown::Options {
+                summary_only: args.summary_only,
+            },
+        ),
         OutputFormat::Json => render::json::render(&cs, &enrichment),
         OutputFormat::Sarif => render::sarif::render(&cs, &enrichment),
     };

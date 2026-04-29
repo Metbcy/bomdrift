@@ -84,6 +84,15 @@ pub struct DiffArgs {
     /// successful run).
     #[arg(long, value_enum, default_value_t = FailOn::None)]
     pub fail_on: FailOn,
+    /// Emit only the summary table (counts per change/finding category) and
+    /// a footer pointing at the full output, omitting every per-category
+    /// section. The PR-comment-friendly form for diffs that would otherwise
+    /// blow past GitHub's 65,536-character comment-body cap.
+    ///
+    /// Markdown-only: terminal / JSON / SARIF outputs ignore the flag (the
+    /// goal is comment-size compression, not data loss).
+    #[arg(long)]
+    pub summary_only: bool,
 }
 
 /// Threshold for `--fail-on` exit-code-2 behavior.
