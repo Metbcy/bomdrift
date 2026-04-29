@@ -67,6 +67,16 @@ if [ -z "$advisory_id" ]; then
   fail "could not parse advisory id from comment body: $comment_body"
 fi
 
+# Optional `reason: <free text>` line in the comment body. v0.8+: when
+# present, the entry is recorded in the v0.8 object form so the reason
+# is preserved alongside the advisory id. Pattern matches the start of
+# any line (case-insensitive) so reviewers can write
+# `reason: awaiting upstream patch (issue #42)` on a continuation line.
+reason="$(printf '%s\n' "$comment_body" \
+  | grep -iE '^\s*reason:\s*' \
+  | head -n1 \
+  | sed -E 's/^\s*[Rr]eason:\s*//')"
+
 # Validate it looks like an advisory id we'd expect from OSV.dev. Reject
 # anything else early so a typo doesn't turn into a no-op suppress with no
 # user-visible feedback.
@@ -213,7 +223,11 @@ git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 baseline_path="${BASELINE_PATH:-.bomdrift/baseline.json}"
 
 log "Adding ${advisory_id} to ${baseline_path}"
-"$bomdrift_bin" baseline add "$advisory_id" --path "$baseline_path"
+baseline_args=(baseline add "$advisory_id" --path "$baseline_path")
+if [ -n "$reason" ]; then
+  baseline_args+=(--reason "$reason")
+fi
+"$bomdrift_bin" "${baseline_args[@]}"
 endlog
 
 # Stage + commit. If `bomdrift baseline add` was a no-op (idempotent

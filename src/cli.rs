@@ -75,6 +75,19 @@ pub struct BaselineAddArgs {
     /// created if missing.
     #[arg(long, default_value = ".bomdrift/baseline.json")]
     pub path: PathBuf,
+
+    /// Optional expiry date (YYYY-MM-DD). Once today is past this date,
+    /// the entry stops suppressing and bomdrift prints a warning to
+    /// stderr. Useful for time-boxed risk acceptance ("ignore until
+    /// upstream ships a fix"). Strict format: zero-padded month/day.
+    #[arg(long)]
+    pub expires: Option<String>,
+
+    /// Optional human-readable reason recorded alongside the entry.
+    /// Surfaces in the v0.9 VEX export and in the warning printed when
+    /// the entry expires. Free-form text.
+    #[arg(long)]
+    pub reason: Option<String>,
 }
 
 #[derive(Args, Debug)]

@@ -68,7 +68,18 @@ fn write_scaffold_file(path: &Path, contents: &str, force: bool) -> Result<()> {
 fn run_baseline(action: BaselineAction) -> Result<()> {
     match action {
         BaselineAction::Add(args) => {
-            let outcome = baseline::add_suppression(&args.path, &args.id)?;
+            // Validate --expires upfront so a typo'd date doesn't write a
+            // bad entry that errors on the NEXT diff load.
+            if let Some(s) = &args.expires {
+                clock::parse_ymd(s)
+                    .with_context(|| format!("--expires must be YYYY-MM-DD, got {s:?}"))?;
+            }
+            let outcome = baseline::add_suppression_full(
+                &args.path,
+                &args.id,
+                args.expires.as_deref(),
+                args.reason.as_deref(),
+            )?;
             match outcome {
                 baseline::AddOutcome::Added => {
                     eprintln!(
@@ -161,6 +172,23 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
     // type that the baseline doesn't know about simply isn't suppressed.
     if let Some(path) = &args.baseline {
         let baseline = baseline::Baseline::load(path)?;
+        for ent in &baseline.expired_entries {
+            eprintln!(
+                "warning: baseline entry {id}{purl} expired {expires}; finding will surface in this run{reason}",
+                id = ent.id,
+                purl = ent
+                    .purl
+                    .as_deref()
+                    .map(|p| format!(" ({p})"))
+                    .unwrap_or_default(),
+                expires = ent.expires,
+                reason = ent
+                    .reason
+                    .as_deref()
+                    .map(|r| format!(" — was: {r}"))
+                    .unwrap_or_default(),
+            );
+        }
         baseline::apply(&mut cs, &mut enrichment, &baseline);
     }
 

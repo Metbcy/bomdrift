@@ -40,6 +40,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
+use crate::clock;
 use crate::diff::ChangeSet;
 use crate::enrich::Enrichment;
 
@@ -57,6 +58,21 @@ pub struct Baseline {
     /// comment-driven suppression flow). The exact-match `vuln_keys` set
     /// remains the canonical match for diff-output-style baselines.
     suppressed_advisories: HashSet<String>,
+    /// v0.8+ entries that have already passed their `expires` date.
+    /// Surface to the caller for stderr warnings; do NOT contribute to
+    /// suppression.
+    pub expired_entries: Vec<ExpiredEntry>,
+}
+
+/// A baseline entry whose `expires` date is strictly before today. The diff
+/// will surface the underlying finding; bomdrift prints one warning per
+/// expired entry to stderr after baseline load.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpiredEntry {
+    pub id: String,
+    pub purl: Option<String>,
+    pub expires: String,
+    pub reason: Option<String>,
 }
 
 impl Baseline {
@@ -65,15 +81,26 @@ impl Baseline {
             .with_context(|| format!("reading baseline file: {}", path.display()))?;
         let value: serde_json::Value = serde_json::from_str(&body)
             .with_context(|| format!("parsing baseline JSON: {}", path.display()))?;
-        Ok(Self::from_value(&value))
+        Self::from_value_strict(&value)
     }
 
-    /// Build a `Baseline` from an already-parsed bomdrift JSON document. Every
-    /// extraction step is best-effort — a baseline missing the `enrichment`
-    /// or `changes` block produces an empty key set for that section, never
-    /// an error. (Pinning the parser to a strict schema would force users to
-    /// regenerate baselines on every minor version bump; not worth it.)
+    /// Build a `Baseline` from an already-parsed bomdrift JSON document.
+    /// Tolerant: a missing `enrichment` or `changes` block produces an
+    /// empty key set for that section, never an error. Malformed
+    /// `expires` dates are silently ignored — use [`Self::from_value_strict`]
+    /// if you want to surface those as errors.
     pub fn from_value(value: &serde_json::Value) -> Self {
+        Self::from_value_inner(value, false).unwrap_or_default()
+    }
+
+    /// Strict variant: an object-form `suppressed_advisories` entry with a
+    /// malformed `expires` date is an error rather than a silent skip.
+    /// Used by [`Self::load`] so users see typos immediately.
+    pub fn from_value_strict(value: &serde_json::Value) -> Result<Self> {
+        Self::from_value_inner(value, true)
+    }
+
+    fn from_value_inner(value: &serde_json::Value, strict: bool) -> Result<Self> {
         let mut out = Self::default();
 
         let enrichment = &value["enrichment"];
@@ -128,26 +155,68 @@ impl Baseline {
             }
         }
 
-        // v0.5+ simple suppression list — written by
-        // `bomdrift baseline add <ADVISORY_ID>`. Any advisory ID in this
-        // array suppresses across ALL purls. The shape is forgiving:
-        // accepts a JSON array of strings under either
-        // `suppressed_advisories` (canonical) or `suppressed_ids` (alias
-        // we kept short for hand-edited use). Both are read; either form
-        // is valid output from `baseline add`.
+        // v0.5+ simple suppression list, optionally extended in v0.8 to
+        // object form `{ "id": ..., "purl": ..., "expires": ..., "reason": ... }`.
+        // Both shapes coexist in one array. Keys read: `suppressed_advisories`
+        // (canonical) and `suppressed_ids` (alias retained for back-compat).
         for key in ["suppressed_advisories", "suppressed_ids"] {
             if let Some(arr) = value[key].as_array() {
                 for entry in arr {
+                    // String form (v0.5+).
                     if let Some(id) = entry.as_str() {
                         if !id.is_empty() {
                             out.suppressed_advisories.insert(id.to_string());
                         }
+                        continue;
+                    }
+                    // Object form (v0.8+).
+                    if let Some(obj) = entry.as_object() {
+                        let id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                        if id.is_empty() {
+                            if strict {
+                                anyhow::bail!(
+                                    "baseline `{key}` entry missing required `id` field: {entry}"
+                                );
+                            }
+                            continue;
+                        }
+                        let purl = obj.get("purl").and_then(|v| v.as_str()).map(str::to_string);
+                        let reason = obj
+                            .get("reason")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string);
+                        if let Some(expires_s) = obj.get("expires").and_then(|v| v.as_str()) {
+                            match clock::parse_ymd(expires_s) {
+                                Ok(date) => {
+                                    if clock::is_expired(date) {
+                                        out.expired_entries.push(ExpiredEntry {
+                                            id: id.to_string(),
+                                            purl: purl.clone(),
+                                            expires: expires_s.to_string(),
+                                            reason: reason.clone(),
+                                        });
+                                        // Expired entries do NOT contribute to suppression.
+                                        continue;
+                                    }
+                                }
+                                Err(err) => {
+                                    if strict {
+                                        return Err(err.context(format!(
+                                            "baseline entry {id} ({}): malformed expires",
+                                            purl.as_deref().unwrap_or("*")
+                                        )));
+                                    }
+                                    continue;
+                                }
+                            }
+                        }
+                        out.suppressed_advisories.insert(id.to_string());
                     }
                 }
             }
         }
 
-        out
+        Ok(out)
     }
 
     /// True when this baseline contains zero suppressible entries (e.g. an
@@ -226,9 +295,25 @@ pub fn apply(_cs: &mut ChangeSet, e: &mut Enrichment, baseline: &Baseline) {
 /// safely be run against a baseline generated by `bomdrift diff
 /// --output json`.
 pub fn add_suppression(path: &Path, id: &str) -> Result<AddOutcome> {
+    add_suppression_full(path, id, None, None)
+}
+
+/// Like [`add_suppression`] but accepts optional `expires` (YYYY-MM-DD) and
+/// `reason` fields. When either is provided, the new entry is written in
+/// the v0.8 object form `{id, expires?, reason?}`; existing string-form
+/// entries elsewhere in the array are left untouched.
+pub fn add_suppression_full(
+    path: &Path,
+    id: &str,
+    expires: Option<&str>,
+    reason: Option<&str>,
+) -> Result<AddOutcome> {
     let trimmed = id.trim();
     if trimmed.is_empty() {
         anyhow::bail!("advisory id must not be empty");
+    }
+    if let Some(s) = expires {
+        clock::parse_ymd(s).with_context(|| format!("invalid --expires {s:?}"))?;
     }
 
     let mut doc: serde_json::Value = if path.exists() {
@@ -262,13 +347,27 @@ pub fn add_suppression(path: &Path, id: &str) -> Result<AddOutcome> {
         .as_array_mut()
         .ok_or_else(|| anyhow::anyhow!("baseline `suppressed_advisories` field is not an array"))?;
 
-    let already_present = arr
-        .iter()
-        .any(|v| v.as_str().map(|s| s == trimmed).unwrap_or(false));
+    let already_present = arr.iter().any(|v| match v {
+        serde_json::Value::String(s) => s == trimmed,
+        serde_json::Value::Object(o) => o.get("id").and_then(|x| x.as_str()) == Some(trimmed),
+        _ => false,
+    });
     if already_present {
         return Ok(AddOutcome::AlreadyPresent);
     }
-    arr.push(serde_json::Value::String(trimmed.to_string()));
+    if expires.is_some() || reason.is_some() {
+        let mut entry = serde_json::Map::new();
+        entry.insert("id".into(), serde_json::Value::String(trimmed.to_string()));
+        if let Some(s) = expires {
+            entry.insert("expires".into(), serde_json::Value::String(s.to_string()));
+        }
+        if let Some(s) = reason {
+            entry.insert("reason".into(), serde_json::Value::String(s.to_string()));
+        }
+        arr.push(serde_json::Value::Object(entry));
+    } else {
+        arr.push(serde_json::Value::String(trimmed.to_string()));
+    }
 
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -622,6 +721,120 @@ mod tests {
         assert!(add_suppression(&path, "   ").is_err());
         // No file should have been created.
         assert!(!path.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---- v0.8 expires + reason -----------------------------------------
+
+    fn lock_today(epoch: i64) -> impl Drop {
+        // SAFETY: tests serialize on these env mutations via a process-wide
+        // mutex inside crate::clock; see clock::tests for the same pattern.
+        struct Guard;
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                unsafe {
+                    std::env::remove_var("SOURCE_DATE_EPOCH");
+                }
+            }
+        }
+        unsafe {
+            std::env::set_var("SOURCE_DATE_EPOCH", epoch.to_string());
+        }
+        Guard
+    }
+
+    #[test]
+    fn expired_object_entry_warns_and_does_not_suppress() {
+        // 2026-05-01 (epoch 1777593600) is "today"; the entry expired 2026-04-30.
+        let _g = lock_today(1777593600);
+        let baseline = Baseline::from_value(&json!({
+            "suppressed_advisories": [
+                { "id": "GHSA-old", "expires": "2026-04-30", "reason": "awaiting upstream" }
+            ]
+        }));
+        assert_eq!(baseline.expired_entries.len(), 1);
+        assert_eq!(baseline.expired_entries[0].id, "GHSA-old");
+        assert!(
+            !baseline.suppressed_advisories.contains("GHSA-old"),
+            "expired entry must NOT contribute to suppression"
+        );
+    }
+
+    #[test]
+    fn active_object_entry_suppresses() {
+        let _g = lock_today(1777593600); // 2026-05-01
+        let baseline = Baseline::from_value(&json!({
+            "suppressed_advisories": [
+                { "id": "GHSA-future", "expires": "2030-01-01" }
+            ]
+        }));
+        assert!(baseline.suppressed_advisories.contains("GHSA-future"));
+        assert!(baseline.expired_entries.is_empty());
+    }
+
+    #[test]
+    fn no_expires_object_entry_suppresses_indefinitely() {
+        let baseline = Baseline::from_value(&json!({
+            "suppressed_advisories": [
+                { "id": "GHSA-perma", "reason": "false positive" }
+            ]
+        }));
+        assert!(baseline.suppressed_advisories.contains("GHSA-perma"));
+    }
+
+    #[test]
+    fn malformed_expires_errors_strict() {
+        let v = json!({
+            "suppressed_advisories": [
+                { "id": "GHSA-bad", "expires": "yesterday" }
+            ]
+        });
+        let err = Baseline::from_value_strict(&v).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("GHSA-bad"), "error must name the entry: {msg}");
+    }
+
+    #[test]
+    fn add_suppression_full_writes_object_form_when_metadata_present() {
+        let dir = tempdir_unique("add-full");
+        let path = dir.join("baseline.json");
+        let outcome = add_suppression_full(
+            &path,
+            "GHSA-x",
+            Some("2030-12-31"),
+            Some("Awaiting upstream patch"),
+        )
+        .unwrap();
+        assert_eq!(outcome, AddOutcome::Added);
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let entry = &v["suppressed_advisories"][0];
+        assert_eq!(entry["id"], "GHSA-x");
+        assert_eq!(entry["expires"], "2030-12-31");
+        assert_eq!(entry["reason"], "Awaiting upstream patch");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn add_suppression_full_rejects_malformed_expires() {
+        let dir = tempdir_unique("add-bad-date");
+        let path = dir.join("baseline.json");
+        let err = add_suppression_full(&path, "GHSA-x", Some("2030/12/31"), None);
+        assert!(err.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn add_suppression_full_idempotent_against_existing_object_entry() {
+        let dir = tempdir_unique("add-idem-obj");
+        let path = dir.join("baseline.json");
+        std::fs::write(
+            &path,
+            r#"{"suppressed_advisories": [{"id": "GHSA-dupe", "expires": "2030-01-01"}]}"#,
+        )
+        .unwrap();
+        let outcome = add_suppression_full(&path, "GHSA-dupe", Some("2031-01-01"), None).unwrap();
+        assert_eq!(outcome, AddOutcome::AlreadyPresent);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
