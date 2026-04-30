@@ -12,6 +12,11 @@
  *   PIPELINE_TRIGGER_TOKEN.
  */
 
+// Suppress-comment regex. CANONICAL DEFINITION lives in
+// scripts/parse-suppress-comment.sh — keep these in sync.
+// CI guard: scripts/check-suppress-regex-sync.sh diffs the two.
+const BOMDRIFT_SUPPRESS_REGEX = /^\s*\/bomdrift\s+suppress\s+([A-Za-z0-9-]+)(\s+reason:\s*(.+))?\s*$/m;
+
 export default {
   async fetch(request, env) {
     if (request.method !== "POST") return new Response("method", { status: 405 });
@@ -52,7 +57,7 @@ export default {
 
     // Quick parse: comment looks like a directive?
     const text = body?.object_attributes?.note ?? "";
-    if (!/\/bomdrift\s+suppress\s+\S+/.test(text)) {
+    if (!BOMDRIFT_SUPPRESS_REGEX.test(text)) {
       return new Response("no directive", { status: 204 });
     }
 

@@ -57,3 +57,25 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
+
+  shell-bridges:
+    name: shell-bridges (parser tests + regex sync)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: comment-suppress parser unit tests
+        run: bash comment-suppress/test.sh
+      - name: suppress-regex sync (shell ↔ bridge JS)
+        run: bash scripts/check-suppress-regex-sync.sh
+      - name: bash syntax check (scripts/, comment-suppress/)
+        run: |
+          for f in scripts/*.sh comment-suppress/*.sh; do
+            [ -f "$f" ] || continue
+            bash -n "$f"
+          done
+      - name: node syntax check (bridge workers)
+        run: |
+          for f in examples/*/comment-bridge/worker.js; do
+            [ -f "$f" ] || continue
+            node --check "$f"
+          done
