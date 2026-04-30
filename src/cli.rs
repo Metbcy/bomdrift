@@ -410,6 +410,11 @@ pub struct DiffArgs {
     /// v0.9.6+.
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     pub cache_ttl_hours: Option<u64>,
+    /// Override the version-jump minimum major-delta threshold (default
+    /// 2). A delta of 1 flags every cross-major upgrade; higher values
+    /// only flag larger jumps. Must be >= 1. v0.9.7+.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    pub multi_major_delta: Option<u32>,
     /// Fetch the "before" SBOM as a cosign-verified attestation
     /// attached to an OCI artifact instead of reading a local file.
     /// Mutually exclusive with the positional `before` argument.

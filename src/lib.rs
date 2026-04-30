@@ -209,7 +209,7 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
 
     // Multi-major version-jump detection is pure-compute and also always runs.
     // Findings are informational.
-    enrichment.version_jumps = enrich::version_jump::enrich(&cs);
+    enrichment.version_jumps = enrich::version_jump::enrich_with(&cs, args.multi_major_delta);
 
     // Maintainer-age enrichment hits the GitHub REST API; gated behind
     // `--no-maintainer-age` for offline runs. Best-effort: failures warn and
@@ -354,6 +354,7 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
             CalibrationOverrides {
                 similarity_threshold: args.typosquat_similarity_threshold,
                 young_maintainer_days: args.young_maintainer_days,
+                multi_major_delta: args.multi_major_delta,
             },
         );
     }
@@ -525,6 +526,7 @@ pub fn budget_tripped(
 pub(crate) struct CalibrationOverrides {
     pub similarity_threshold: Option<f64>,
     pub young_maintainer_days: Option<i64>,
+    pub multi_major_delta: Option<u32>,
 }
 
 fn write_calibration_lines<W: std::io::Write>(
@@ -543,6 +545,7 @@ fn write_calibration_lines<W: std::io::Write>(
     let active_young = overrides
         .young_maintainer_days
         .unwrap_or(YOUNG_MAINTAINER_DAYS);
+    let active_major_delta = overrides.multi_major_delta.unwrap_or(MIN_MAJOR_DELTA);
 
     for f in &e.typosquats {
         write_calibration_row(
@@ -563,7 +566,7 @@ fn write_calibration_lines<W: std::io::Write>(
             "version-jump",
             f.after.purl.as_deref().unwrap_or(f.after.name.as_str()),
             CalibrationScore::Int(f.after_major.saturating_sub(f.before_major) as i64),
-            CalibrationThreshold::Int(MIN_MAJOR_DELTA as i64),
+            CalibrationThreshold::Int(active_major_delta as i64),
             format,
         );
     }

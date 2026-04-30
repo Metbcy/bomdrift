@@ -1087,6 +1087,52 @@ fn diff_young_maintainer_days_rejects_zero_and_negative() {
 }
 
 #[test]
+fn diff_multi_major_delta_rejects_zero_and_negative() {
+    for bad in &["0", "-1", "abc"] {
+        let out = Command::new(bin())
+            .current_dir(manifest_dir())
+            .args([
+                "diff",
+                "tests/fixtures/cdx-minimal.json",
+                "tests/fixtures/cdx-after.json",
+                "--no-osv",
+                "--multi-major-delta",
+                bad,
+            ])
+            .output()
+            .expect("spawn bomdrift");
+        assert!(
+            !out.status.success(),
+            "expected clap to reject --multi-major-delta {bad}"
+        );
+    }
+}
+
+#[test]
+fn diff_multi_major_delta_accepts_valid_value() {
+    // Smoke test that clap accepts the flag and the diff still runs.
+    // The behavioral assertion for the threshold lives in the lib-level
+    // unit tests; here we just need to verify the wiring doesn't panic.
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--multi-major-delta",
+            "3",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+    assert!(
+        out.status.success(),
+        "diff with --multi-major-delta 3 should succeed; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn diff_cache_ttl_hours_rejects_zero_and_negative() {
     for bad in &["0", "-3", "x"] {
         let out = Command::new(bin())
