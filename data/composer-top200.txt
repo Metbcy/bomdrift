@@ -1,4 +1,4 @@
-# Top ~100 Composer (Packagist) packages, hand-curated from
+# Top ~200 Composer (Packagist) packages, hand-curated from
 # packagist.org's "most installed" categories. Snapshot date: 2026-04-28.
 #
 # Packagist's public statistics API has gone through several breaking
@@ -34,6 +34,7 @@ symfony/polyfill-php80
 symfony/cache
 symfony/serializer
 symfony/validator
+symfony/uid
 
 # --- Laravel ---
 laravel/framework
@@ -46,6 +47,8 @@ laravel/scout
 laravel/cashier
 laravel/breeze
 laravel/jetstream
+tymon/jwt-auth
+laravel/ui
 
 # --- Composer / packagist core ---
 composer/composer
@@ -62,6 +65,11 @@ psr/http-message
 psr/http-client
 psr/http-factory
 nyholm/psr7
+middlewares/utils
+middlewares/psr15
+middlewares/fast-route
+relay/relay
+http-interop/http-middleware
 
 # --- Logging / PSR ---
 monolog/monolog
@@ -70,6 +78,10 @@ psr/cache
 psr/container
 psr/event-dispatcher
 psr/simple-cache
+maxbanton/cwh
+graylog2/gelf-php
+sentry/sentry
+sentry/sentry-laravel
 
 # --- Templating / output ---
 twig/twig
@@ -99,6 +111,9 @@ mockery/mockery
 pestphp/pest
 pestphp/pest-plugin-laravel
 fakerphp/faker
+codeception/codeception
+kahlan/kahlan
+orchestra/testbench
 
 # --- Doctrine / ORM ---
 doctrine/dbal
@@ -129,6 +144,12 @@ phpseclib/phpseclib
 firebase/php-jwt
 lcobucci/jwt
 defuse/php-encryption
+delight-im/auth
+bacon/bacon-qr-code
+pragmarx/google2fa
+opis/closure
+brick/math
+webmozart/assert
 
 # --- WordPress ---
 johnpbloch/wordpress-core
