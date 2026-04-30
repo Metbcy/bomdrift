@@ -1,0 +1,48 @@
+name: Fuzz
+
+# cargo-fuzz requires nightly Rust, so this lives in its own workflow
+# rather than bolting onto ci.yml's stable-pinned matrix. PR runs use
+# a 60s budget per target (signal: did the seed corpus crash?); the
+# weekly schedule extends to 600s for deeper coverage.
+on:
+  pull_request:
+    paths:
+      - 'src/parse/**'
+      - 'fuzz/**'
+      - '.github/workflows/fuzz.yml'
+  schedule:
+    - cron: '17 3 * * 0'   # Sundays 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [parse_cyclonedx, parse_spdx, parse_syft]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Run fuzz target
+        run: |
+          BUDGET=60
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            BUDGET=600
+          fi
+          cd fuzz
+          cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=$BUDGET
+      - name: Upload artifacts on crash
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-${{ matrix.target }}-artifacts
+          path: fuzz/artifacts/
