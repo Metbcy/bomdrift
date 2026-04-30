@@ -18,6 +18,7 @@
 - [VEX](./vex.md)
 - [License policy](./license-policy.md)
 - [Baseline & suppression](./baseline.md)
+- [OCI attestation](./attestation.md)
 
 # Enrichers
 
