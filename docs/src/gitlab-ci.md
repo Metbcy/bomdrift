@@ -212,6 +212,62 @@ The threat model is documented in
 The same logic ports to Vercel / Netlify / AWS Lambda — see
 [`vercel-equivalent.md`](https://github.com/Metbcy/bomdrift/blob/main/examples/gitlab-ci/comment-bridge/vercel-equivalent.md).
 
+### How notes are upserted
+
+bomdrift posts the diff as a single MR **note**, not as a Discussion.
+The lifecycle is:
+
+- **First run:** `POST /projects/:id/merge_requests/:iid/notes` creates
+  the note. The response carries an integer `id` which bomdrift
+  records implicitly by re-finding the note via the
+  `<!-- bomdrift:diff -->` marker on subsequent runs.
+- **Subsequent runs:** `PUT /projects/:id/merge_requests/:iid/notes/:note_id`
+  modifies the existing note's `body` in place.
+
+Concretely the upsert:
+
+- **Modifies the note body in place.** The note ID is stable across
+  pipeline runs, so any permalink to the note (right-click → Copy
+  link on the timestamp) keeps working for the lifetime of the MR.
+- **Does not regenerate the note.** GitLab does not delete-and-recreate
+  on PUT; the comment's position in the MR timeline does not move.
+- **Does not re-fire `Note Hook` webhooks for unchanged content.**
+  GitLab fires `Note Hook` on note creation but not on body-only
+  edits, so a comment-bridge wired to `Note Hook` will not loop on
+  bomdrift's own upserts. (The bridge's event-type filter is a
+  defence-in-depth here, not the primary guard.)
+- **Does not affect threaded replies.** GitLab's data model puts
+  notes and replies under a parent **discussion**; replies attached
+  to bomdrift's note (e.g. a reviewer typing "ack — accepting this")
+  remain attached to the same discussion thread regardless of how
+  many times bomdrift edits the parent body. This matches the
+  GitHub-side behaviour where reviewer threaded replies under the
+  bot comment survive each upsert.
+
+bomdrift deliberately uses the **Notes API**, not the **Discussions
+API**, for the diff template. The Discussions API creates a thread
+root that is awkward to update (you'd be editing the first note of
+a discussion, with subtly different permission semantics), and the
+diff comment isn't trying to start a structured conversation — it's
+a single living status comment that reviewers may reply to. Other
+reviewers can still reply to the bot's note and GitLab will create
+a discussion implicitly around their reply; bomdrift just doesn't
+seed the discussion itself.
+
+#### Author and signing
+
+The note's `author` is whatever identity owns `BOMDRIFT_API_TOKEN`
+(typically a Project Access Token, which surfaces as a bot user on
+the project). On every PUT, GitLab updates the note's `updated_at`
+and `last_edited_by_id` fields to point at that same bot identity —
+**not** the original MR author. This is expected and matches the
+GitHub equivalent's behaviour with a bot token: edits show up under
+the bot's identity, while the original commit/MR authorship is
+untouched. If your review process audits comment-edit history
+(unusual but legitimate on regulated projects), give the token a
+descriptive name (e.g. `bomdrift-ci-bot`) so the audit trail reads
+clearly.
+
 ### Recommended hosting
 
 Cloudflare Workers — the reference. The free tier covers most
