@@ -1,6 +1,6 @@
 [package]
 name = "bomdrift"
-version = "0.9.5"
+version = "0.9.6"
 edition = "2024"
 rust-version = "1.88"
 description = "SBOM diff with supply-chain risk signals (CVEs, typosquats, maintainer-age)."
@@ -35,6 +35,7 @@ time = { version = "0.3", default-features = false, features = ["serde", "parsin
 sha2 = { version = "0.10", default-features = false }
 # Exact-pinned: SPDX list updates can shift LicenseId.is_gnu() / is_osi_approved membership and silently change license-policy semantics. Bump deliberately.
 spdx = { version = "=0.10.9", default-features = false }
+base64 = { version = "0.22", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["html_reports"] }

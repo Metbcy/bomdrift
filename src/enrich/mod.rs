@@ -82,6 +82,11 @@ pub struct Enrichment {
     /// the diff was filtered. v0.9+.
     #[serde(default, skip_serializing_if = "is_zero_usize")]
     pub vex_suppressed_count: usize,
+    /// Findings emitted by external `--plugin` processes (Phase C, v0.9.6).
+    /// One element per plugin-finding, already tagged with the plugin
+    /// that produced it. Renderers group by `plugin_name` for display.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugin_findings: Vec<crate::plugin::PluginFinding>,
 }
 
 fn is_zero_usize(n: &usize) -> bool {
@@ -105,6 +110,7 @@ impl Enrichment {
             || !self.recently_published.is_empty()
             || !self.deprecated.is_empty()
             || !self.maintainer_set_changed.is_empty()
+            || !self.plugin_findings.is_empty()
     }
 }
 

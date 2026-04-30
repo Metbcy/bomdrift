@@ -146,6 +146,13 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
             enrichment.maintainer_set_changed.len()
         );
     }
+    if !enrichment.plugin_findings.is_empty() {
+        let _ = writeln!(
+            out,
+            "| Plugin findings | {} |",
+            enrichment.plugin_findings.len()
+        );
+    }
     if enrichment.vex_suppressed_count > 0 {
         let _ = writeln!(
             out,
@@ -447,6 +454,43 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
                     f.removed.join(", ")
                 },
             );
+        }
+        section_close(&mut out);
+    }
+
+    if !enrichment.plugin_findings.is_empty() {
+        // Group findings by plugin_name so each plugin gets its own
+        // subsection. Use a BTreeMap-style stable ordering (already
+        // pre-sorted by run_plugins via manifest order); insertion
+        // order is preserved within each group.
+        use std::collections::BTreeMap;
+        let mut by_plugin: BTreeMap<&str, Vec<&crate::plugin::PluginFinding>> = BTreeMap::new();
+        for f in &enrichment.plugin_findings {
+            by_plugin.entry(f.plugin_name.as_str()).or_default().push(f);
+        }
+        let total = enrichment.plugin_findings.len();
+        section_open(&mut out, "Plugin findings", total, None);
+        out.push_str(
+            "External plugins reported the following findings against added \
+             or version-changed components. Plugin findings are best-effort \
+             — runtime failures (timeout, malformed JSON, non-zero exit) \
+             drop findings without failing the diff.\n\n",
+        );
+        for (name, findings) in &by_plugin {
+            let _ = writeln!(out, "**{name}** ({})\n", findings.len());
+            for f in findings {
+                let prefix = match f.severity {
+                    crate::plugin::PluginSeverity::Info => "ℹ️ info",
+                    crate::plugin::PluginSeverity::Warning => "⚠️ warning",
+                    crate::plugin::PluginSeverity::Error => "❌ error",
+                };
+                let _ = writeln!(
+                    out,
+                    "- {prefix} · `{}` · {} — {} (`{}`)",
+                    f.component_purl, f.kind, f.message, f.rule_id,
+                );
+            }
+            out.push('\n');
         }
         section_close(&mut out);
     }

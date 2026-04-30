@@ -9,33 +9,42 @@ the upsert contract.
 
 ```text
 src/
-├── main.rs           — clap entry point; dispatches to lib::run
-├── lib.rs            — top-level wiring: load_sbom -> diff -> enrich -> render
-├── cli.rs            — clap derive types: DiffArgs, RefreshArgs, FailOn, etc.
-├── model/            — unified component / SBOM types
-│   ├── component.rs  — Component, Ecosystem, Hash, Relationship
-│   └── sbom.rs       — Sbom, SbomFormat
-├── parse/            — format-specific parsers
-│   ├── cyclonedx.rs  — CDX 1.5/1.6 JSON
-│   ├── spdx.rs       — SPDX 2.3 JSON
-│   └── syft.rs       — Syft JSON
-├── diff/             — pair-by-version ChangeSet computation
-│   ├── mod.rs        — diff(), ChangeSet
-│   └── key.rs        — ComponentKey (purl-without-version | (eco, name))
-├── enrich/           — risk-signal enrichers
-│   ├── osv.rs        — OSV.dev /v1/querybatch + /v1/vulns/{id}
-│   ├── cache.rs      — on-disk OSV severity cache (24h TTL)
-│   ├── typosquat.rs  — Jaro-Winkler + suffix boost (npm/PyPI/Cargo); Levenshtein (Maven)
+├── main.rs            — clap entry point; dispatches to lib::run
+├── lib.rs             — top-level wiring: load_sbom -> diff -> enrich -> render
+├── cli.rs             — clap derive types: DiffArgs, RefreshArgs, FailOn, etc.
+├── config.rs          — `.bomdrift.toml` policy (de)serialization + merge
+├── clock.rs           — single source of truth for "now" (honors SOURCE_DATE_EPOCH)
+├── attestation.rs     — `cosign verify-attestation` shell-out (v0.9.6)
+├── plugin.rs          — external-process plugin loader (v0.9.6)
+├── vex.rs             — VEX consume (OpenVEX 0.2.0, CycloneDX VEX 1.6) + emit (OpenVEX)
+├── baseline.rs        — `--baseline` snapshot suppression + `expires`/`reason`/`vex_status`
+├── refresh.rs         — `bomdrift refresh-typosquat` subcommand
+├── model/             — unified component / SBOM types
+│   ├── component.rs   — Component, Ecosystem, Hash, Relationship
+│   └── sbom.rs        — Sbom, SbomFormat
+├── parse/             — format-specific parsers
+│   ├── cyclonedx.rs   — CDX 1.5/1.6 JSON
+│   ├── spdx.rs        — SPDX 2.3 JSON
+│   └── syft.rs        — Syft JSON
+├── diff/              — pair-by-version ChangeSet computation
+│   ├── mod.rs         — diff(), ChangeSet
+│   └── key.rs         — ComponentKey (purl-without-version | (eco, name))
+├── enrich/            — risk-signal enrichers
+│   ├── osv.rs         — OSV.dev /v1/querybatch + /v1/vulns/{id}
+│   ├── epss.rs        — FIRST.org EPSS per-CVE scores (v0.8)
+│   ├── kev.rs         — CISA KEV catalog (v0.8)
+│   ├── registry.rs    — npm / PyPI / crates.io metadata (v0.9)
+│   ├── license.rs     — SPDX expression evaluation + allow/deny + per-exception (v0.8 / v0.9 / v0.9.5)
+│   ├── typosquat.rs   — Jaro-Winkler + suffix boost / Levenshtein / last-segment / package-portion
 │   ├── version_jump.rs — major-delta >= 2 heuristic
-│   ├── maintainer.rs — GitHub REST contributor age
-│   └── mod.rs        — Enrichment graph aggregating findings
-├── baseline.rs       — load + apply --baseline JSON snapshots
-├── refresh.rs        — bomdrift refresh-typosquat subcommand
-└── render/           — output formatters
-    ├── markdown.rs   — GFM PR-comment body
-    ├── term.rs       — TTY-aware ANSI
-    ├── json.rs       — pretty-printed serde graph
-    └── sarif.rs      — SARIF v2.1.0 with stable rule IDs
+│   ├── maintainer.rs  — GitHub REST contributor-age (the xz pattern)
+│   ├── cache.rs       — single source of truth for CACHE_TTL_SECS (v0.9.6 unified)
+│   └── mod.rs         — Enrichment graph aggregating findings
+└── render/            — output formatters
+    ├── markdown.rs    — GFM PR-comment body
+    ├── term.rs        — TTY-aware ANSI
+    ├── json.rs        — pretty-printed serde graph
+    └── sarif.rs       — SARIF v2.1.0 with stable rule IDs + partialFingerprints
 ```
 
 ## The pipeline
@@ -143,6 +152,50 @@ Result: identical inputs render to byte-identical output every time,
 which is what `peter-evans/create-or-update-comment` relies on for the
 upsert behavior in the action.
 
+## Best-effort enricher contract
+
+Every enricher — network (OSV / EPSS / KEV / GitHub / registries),
+shell-out (cosign attestation), or external process (plugins) — honors
+the same fail-soft contract:
+
+1. **Per-request timeout** so a misbehaving upstream can't hang a CI job.
+2. **Errors warn once to stderr** (deduped by key) and the diff renders
+   without that source's findings.
+3. **Per-component caching within a single run** so monorepo subpackages
+   sharing a parent project don't multiply HTTP requests.
+4. **Best-effort never blocks the diff render.** Exit code stays 0 from
+   the enricher itself; the only way an enricher influences exit code is
+   indirectly via `--fail-on` thresholds tripping on findings it
+   produced.
+
+`src/enrich/osv.rs` is the canonical pattern; new enrichers MUST mirror
+its `Result<Vec<Finding>>`-where-`Err`-is-warned-not-propagated shape.
+The `attestation.rs` and `plugin.rs` modules apply the same contract to
+non-network shell-outs: a missing `cosign` binary, a plugin timeout, or
+a malformed plugin response all warn and continue.
+
+## Byte-determinism contract
+
+Identical inputs MUST render to byte-identical outputs across every
+format. This is what `peter-evans/create-or-update-comment` relies on
+to upsert a PR comment in place rather than accumulating duplicates,
+and what makes SARIF / VEX / JSON safe to commit to git.
+
+Concretely:
+
+- All `HashMap`s emitted into output are sorted by key first.
+- All `Vec`s populated from `cs.added` / `version_changed` iteration
+  inherit the diff core's BTreeMap-derived order.
+- Every "now" reference goes through `clock::now()`, which honors
+  `SOURCE_DATE_EPOCH` for reproducible-build contexts and for tests.
+- VEX `@id` UUIDs and CycloneDX VEX `bom-ref` strings are deterministic
+  hashes of the finding tuple, never random.
+
+Tests that mutate `SOURCE_DATE_EPOCH` MUST acquire `clock::test_env_lock()`
+to serialize across the crate's parallel test threads — a v0.9.5
+discovery during the `release/v0.9.5` cleanup. See
+[Contributing](./contributing.md#test-conventions-v095) for the recipe.
+
 ## Why no async / tokio?
 
 bomdrift is intentionally **synchronous**. The single-binary CLI runs
@@ -158,39 +211,55 @@ unique CVEs, at the cost of:
 The OSV `/v1/querybatch` endpoint already batches (1000 queries per
 request), so the parallelism we'd want is mostly already there. The
 N+1 stage-2 `/v1/vulns/{id}` calls are gated by the on-disk severity
-cache, which makes reruns within 24h essentially free.
+cache, which makes reruns within the configured TTL essentially free.
 
-## Why no chrono / no semver?
+Plugin processes (v0.9.6+) are also invoked synchronously: at most
+one external child at a time, with a per-component timeout. Parallel
+plugin execution would re-introduce the tokio dependency cost without
+solving a measured bottleneck.
+
+## Why no chrono / no semver / no octocrab?
 
 Same reasoning. We need:
-- **One** ISO-8601 timestamp shape (the canonical `YYYY-MM-DDTHH:MM:SSZ`
-  GitHub always emits). Hand-rolled parser is ~25 LOC.
-- **The major version** of a SemVer string. Hand-rolled extractor is ~5 LOC.
 
-Both pulls would add transitive weight for no functional gain. The
-constraint is documented at the top of each file (`enrich/maintainer.rs`,
-`enrich/version_jump.rs`) so future contributors don't reflexively
-reach for the popular crate.
+- **One** ISO-8601 timestamp shape (the canonical `YYYY-MM-DDTHH:MM:SSZ`
+  GitHub always emits). Hand-rolled parser is ~25 LOC, lives in
+  `clock.rs`.
+- **The major version** of a SemVer string. Hand-rolled extractor is
+  ~5 LOC in `enrich/version_jump.rs`.
+- **GitHub REST**: a small set of endpoints (contributors, commits)
+  hand-rolled atop `ureq`. `octocrab` would pull in tokio.
+
+All three pulls would add transitive weight for no functional gain.
+The constraint is documented at the top of each affected file so future
+contributors don't reflexively reach for the popular crate.
+
+## Approved dependencies
+
+As of v0.9.6:
+
+| Crate | Purpose | Notes |
+|---|---|---|
+| `clap` | CLI parsing | derive feature only |
+| `serde`, `serde_json` | (de)serialization | parse + render |
+| `anyhow`, `thiserror` | error types | |
+| `ureq` | HTTP | sync, rustls — no tokio |
+| `strsim` | typosquat scoring | Jaro-Winkler + Levenshtein |
+| `owo-colors`, `supports-color` | terminal renderer | |
+| `directories` | XDG paths | |
+| `toml` | `.bomdrift.toml` parsing | |
+| `time = "0.3.47"` | timestamp formatting | minimal feature set |
+| `sha2 = "0.10"` | partialFingerprint hashes (SARIF), VEX `@id` | |
+| `spdx = "=0.10.9"` | exact-pinned SPDX expression evaluation | License-policy semantics shift on minor list updates; pin exactly |
+| `base64 = "0.22"` | OCI attestation payload decoding (v0.9.6) | |
+
+Forbidden by policy: `tokio`, `chrono`, `semver`, `octocrab`,
+`async-trait`, anything pulling rustls + ring + tokio transitively
+beyond what `ureq` already brings.
 
 ## Binary size budget
 
 - **Target**: ≤ 5 MB stripped + LTO on Linux x86_64.
-- **Current** (v0.3.0): ~3.4 MB.
-- **Audit**: `cargo bloat --release --crates -n 20` periodically
-  to confirm no unexpected dep-tree growth.
-
-The dep tree as of v0.3:
-
-```text
-clap (CLI)
-serde + serde_json (parse/render)
-anyhow + thiserror (errors)
-ureq + rustls + ring (HTTP)
-strsim (typosquat)
-owo-colors + supports-color (terminal)
-directories (XDG paths)
-```
-
-No tokio, no chrono, no octocrab, no semver, no async-trait. The
-constraint is load-bearing: keep the binary small enough that cosign
-verification + extraction stay sub-second on cold runners.
+- **Current** (v0.9.6): ~3.4 MB.
+- **Audit**: `cargo bloat --release --crates -n 20` periodically to
+  confirm no unexpected dep-tree growth.

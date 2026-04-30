@@ -210,6 +210,7 @@ mod tests {
             maintainer_set_changed: Vec::new(),
             vex_annotations: HashMap::new(),
             vex_suppressed_count: 0,
+            plugin_findings: Vec::new(),
         };
         let cs = ChangeSet::default();
 

@@ -52,6 +52,18 @@ use crate::enrich::Severity;
 /// propagate within a day.
 pub const CACHE_TTL_SECS: u64 = 24 * 60 * 60;
 
+/// Resolve the effective TTL in seconds. When `override_hours` is `Some`
+/// (driven by `--cache-ttl-hours` / `[diff] cache_ttl_hours`), uses that
+/// uniformly across OSV / EPSS / KEV / Registry caches; otherwise falls
+/// back to the [`CACHE_TTL_SECS`] default. Single source of truth so the
+/// override semantics stay identical across enrichers.
+pub fn effective_ttl_secs(override_hours: Option<u64>) -> u64 {
+    match override_hours {
+        Some(h) if h > 0 => h.saturating_mul(3600),
+        _ => CACHE_TTL_SECS,
+    }
+}
+
 /// Subdirectory under the cache root where per-advisory entries live.
 const OSV_SUBDIR: &str = "osv";
 
@@ -72,6 +84,7 @@ struct CacheEntry {
 pub struct Cache {
     root: PathBuf,
     now_secs: fn() -> u64,
+    ttl_secs: u64,
 }
 
 impl Cache {
@@ -79,10 +92,17 @@ impl Cache {
     /// `None` when the platform doesn't expose one (extremely rare; degraded
     /// to "always miss" so callers don't have to special-case).
     pub fn open() -> Option<Self> {
+        Self::open_with_ttl(None)
+    }
+
+    /// Like [`Cache::open`] but lets the caller override the on-disk TTL
+    /// (driven by `--cache-ttl-hours`). `None` means use the default.
+    pub fn open_with_ttl(ttl_hours: Option<u64>) -> Option<Self> {
         let root = crate::refresh::default_cache_root().ok()?.join(OSV_SUBDIR);
         Some(Self {
             root,
             now_secs: default_now_secs,
+            ttl_secs: effective_ttl_secs(ttl_hours),
         })
     }
 
@@ -90,7 +110,11 @@ impl Cache {
     /// directory and pin the clock for deterministic TTL assertions.
     #[cfg(test)]
     pub fn with_root(root: PathBuf, now_secs: fn() -> u64) -> Self {
-        Self { root, now_secs }
+        Self {
+            root,
+            now_secs,
+            ttl_secs: CACHE_TTL_SECS,
+        }
     }
 
     /// Look up cached severity + aliases for `advisory_id`. Returns
@@ -108,7 +132,7 @@ impl Cache {
         let body = std::fs::read(&path).ok()?;
         let entry: CacheEntry = serde_json::from_slice(&body).ok()?;
         let now = (self.now_secs)();
-        if now.saturating_sub(entry.fetched_at) > CACHE_TTL_SECS {
+        if now.saturating_sub(entry.fetched_at) > self.ttl_secs {
             return None;
         }
         Some((entry.severity, entry.aliases))
@@ -175,7 +199,17 @@ fn sanitize(id: &str) -> String {
 /// `--no-osv-cache`: when `disabled` is true, return `None` so callers
 /// uniformly skip both reads and writes.
 pub fn open_unless_disabled(disabled: bool) -> Option<Cache> {
-    if disabled { None } else { Cache::open() }
+    open_unless_disabled_with_ttl(disabled, None)
+}
+
+/// Like [`open_unless_disabled`] but threads the `--cache-ttl-hours`
+/// override through to [`Cache::open_with_ttl`].
+pub fn open_unless_disabled_with_ttl(disabled: bool, ttl_hours: Option<u64>) -> Option<Cache> {
+    if disabled {
+        None
+    } else {
+        Cache::open_with_ttl(ttl_hours)
+    }
 }
 
 #[cfg(test)]
@@ -313,5 +347,37 @@ mod tests {
         // Enabled path may or may not return Some depending on the host's
         // ProjectDirs availability; just assert the function doesn't panic.
         let _ = open_unless_disabled(false);
+    }
+
+    #[test]
+    fn effective_ttl_secs_falls_back_to_default_when_none() {
+        assert_eq!(effective_ttl_secs(None), CACHE_TTL_SECS);
+        // 0 is a degenerate override; treat it as "use default" rather
+        // than "never cache" so a misread config doesn't disable the cache.
+        assert_eq!(effective_ttl_secs(Some(0)), CACHE_TTL_SECS);
+    }
+
+    #[test]
+    fn effective_ttl_secs_converts_hours_to_seconds() {
+        assert_eq!(effective_ttl_secs(Some(1)), 3600);
+        assert_eq!(effective_ttl_secs(Some(48)), 48 * 3600);
+    }
+
+    #[test]
+    fn cache_with_overridden_ttl_expires_independently_of_const() {
+        // Build a Cache whose TTL is 1 hour, then read past that window.
+        // Validates that the per-instance ttl_secs (not CACHE_TTL_SECS)
+        // gates expiration.
+        let dir = tempdir_unique("override-ttl");
+        let writer = Cache::with_root(dir.clone(), fixed_clock);
+        writer.put("GHSA-override", Severity::Low);
+        let mut reader = Cache::with_root(dir.clone(), || 1_700_000_000 + 3600 + 1);
+        reader.ttl_secs = effective_ttl_secs(Some(1));
+        assert_eq!(
+            reader.get("GHSA-override"),
+            None,
+            "1h-TTL cache must miss after 1h+1s"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

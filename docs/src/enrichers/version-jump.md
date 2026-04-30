@@ -43,18 +43,22 @@ and pulling the dep would add transitive weight for no functional gain.
 - leading-zero numbers (`01.2.3`) — ambiguous and almost always a sign
   of a non-SemVer scheme; safer to skip than misinterpret.
 
-## Threshold
+## Calibration
 
-`MIN_MAJOR_DELTA = 2` is the minimum delta to flag. Hardcoded; not
-exposed as a CLI flag for two reasons:
+The `MIN_MAJOR_DELTA = 2` threshold is intentionally hardcoded. Letting
+users configure it down to 1 just duplicates the standard SemVer-bump
+signal reviewers already see; letting users configure it up (3, 4, …)
+silences legitimate xz-pattern signals. The
+[`--young-maintainer-days`](../cli-reference.md#--young-maintainer-days-n)
+threshold already serves the "tune for false-positive rate" knob.
 
-1. The signal's whole point is "the standard SemVer signal of a
-   single-major bump is already well understood." Letting users
-   configure it down to 1 just duplicates the SemVer-bump signal
-   reviewers already see.
-2. Letting users configure it up (3, 4, ...) would silence legitimate
-   xz-pattern signals. The 90-day maintainer-age threshold already
-   serves the "tune for false-positive rate" knob.
+## Disabling
+
+There is no `--no-version-jump` flag — pure compute, zero cost. If you
+need to gate exit code only on version-jump findings, use `--fail-on
+any`. To suppress a specific bump as a known-acceptable, write a
+per-component baseline entry — see
+[Baseline — When the bump is the false positive](../baseline.md#when-the-bump-is-the-false-positive).
 
 ## Examples
 

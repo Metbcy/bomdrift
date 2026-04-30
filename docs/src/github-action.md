@@ -59,6 +59,22 @@ documents that path; both flows continue to be supported in v1.
 | `max-version-changed` | no | `` (empty) | Exit 2 when more than this many dependencies change version. |
 | `baseline` | no | `` (empty) | Path to a previously captured `bomdrift diff --output json` snapshot. Findings present in the baseline are suppressed from the rendered output and the `--fail-on` trip evaluation. See [Baseline & suppression](./baseline.md) for match-key semantics. |
 | `github-token` | no | `${{ github.token }}` | Token used to post PR comments. |
+| `upload-to-code-scanning` | no | `false` | When `true` AND `output: sarif`, upload the rendered SARIF artifact to GitHub Code Scanning via `github/codeql-action/upload-sarif@v3`. Requires the calling workflow to grant `permissions.security-events: write`. Off by default for back-compat — v0.7 callers see no behavior change. See [SARIF + Code Scanning](./sarif.md). (v0.8+) |
+
+## Inputs not exposed by the action
+
+The composite action surfaces a small, opinionated subset of the CLI.
+For features without a matching action input — VEX consume / emit
+(`--vex`, `--emit-vex`), license policy
+(`--allow-licenses`/`--deny-licenses`/`--allow-exception`/`--deny-exception`),
+calibration knobs (`--typosquat-similarity-threshold`,
+`--young-maintainer-days`, `--cache-ttl-hours`), the failure thresholds
+(`--fail-on-epss`, `--fail-on kev`), OCI attestation
+(`--before-attestation`, `--cosign-identity`, …), or plugins
+(`--plugin`) — drive them through a checked-in `.bomdrift.toml` (loaded
+via the `config:` input) or run the binary directly with
+`actions/setup-rust` + `cargo install`. The CLI flag set in
+[CLI reference](./cli-reference.md) is the authoritative full surface.
 
 ## Outputs
 
@@ -200,6 +216,28 @@ want the diff in the step summary:
 
 The `output: sarif` produces SARIF v2.1.0 with stable rule IDs (see
 [Output formats](./output-formats.md#sarif-v210)).
+
+### Comment-driven suppression bridges (other forges)
+
+The `comment-suppress` companion sub-action is GitHub-only — it relies
+on the `issue_comment` workflow event. For GitLab, Bitbucket Cloud,
+and Azure DevOps, bomdrift ships parallel **Cloudflare Worker bridges**
+that listen on each forge's webhook, validate the trigger, and dispatch
+the equivalent `bomdrift baseline add --from-comment "<body>"` run on
+the underlying CI:
+
+- [`examples/gitlab-ci/comment-bridge/`](https://github.com/Metbcy/bomdrift/tree/main/examples/gitlab-ci/comment-bridge) (v0.9+)
+- [`examples/bitbucket-pipelines/comment-bridge/`](https://github.com/Metbcy/bomdrift/tree/main/examples/bitbucket-pipelines/comment-bridge) (v0.9.5+)
+- [`examples/azure-devops/comment-bridge/`](https://github.com/Metbcy/bomdrift/tree/main/examples/azure-devops/comment-bridge) (v0.9.5+)
+
+Each bridge enforces the same five guards: webhook secret /
+HMAC verification, event-type filter, repo / project allowlist,
+commenter-permission check, and a PR-context guard. The
+`/bomdrift suppress <ID> [reason: …]` grammar is identical across all
+four SCMs and shares a single regex (`scripts/parse-suppress-comment.sh`)
+so behavior cannot drift. See the per-forge chapters
+[GitLab CI](./gitlab-ci.md) · [Bitbucket](./bitbucket.md) ·
+[Azure DevOps](./azure-devops.md) for setup.
 
 ## Action permissions
 

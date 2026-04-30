@@ -127,17 +127,17 @@ from the MR's pipeline view with a `BOMDRIFT_SUPPRESS_ID` variable.
 On trigger it runs `bomdrift baseline add` and pushes the result back
 to the MR branch using `BOMDRIFT_PUSH_TOKEN`.
 
-### What's NOT in v0.7 (deferred to v0.8)
+### Comment-driven suppression on GitLab (v0.9+)
 
-In-comment `/bomdrift suppress <ID>` flow on GitLab. GitLab's note
-webhook fires on every comment on every MR with no command-prefix
-filter, so wiring it safely (rate-limit, fork-MR safety, command
-parsing, double-trigger debouncing) is materially harder than on
-GitHub. v0.7 ships the manual-job path because it covers the same
-user need (one click per accepted finding) without standing up a
-webhook handler. v0.8 will track the comment-driven flow under a
-follow-up issue once we see real adoption data on the v0.7 manual
-path.
+In-comment `/bomdrift suppress <ID>` is supported on GitLab as of v0.9
+via the [Cloudflare Worker bridge](https://github.com/Metbcy/bomdrift/tree/main/examples/gitlab-ci/comment-bridge).
+GitLab's note webhook fires on every comment on every MR with no
+command-prefix filter, so the bridge enforces five guards (webhook
+secret, event-type filter, repo allowlist, commenter-permission check,
+PR-context guard) before invoking `bomdrift baseline add --from-comment
+"<body>"` against the underlying CI. The grammar is identical to the
+GitHub `comment-suppress` sub-action; both share the
+`scripts/parse-suppress-comment.sh` regex so behavior cannot drift.
 
 ## Self-Managed GitLab
 

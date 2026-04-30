@@ -95,14 +95,16 @@ struct MaintainerInfo {
 }
 
 pub fn enrich(cs: &ChangeSet) -> Result<Vec<MaintainerAgeFinding>> {
-    enrich_with(cs, GITHUB_API_BASE, DEFAULT_TIMEOUT)
+    enrich_with(cs, GITHUB_API_BASE, DEFAULT_TIMEOUT, None)
 }
 
 pub fn enrich_with(
     cs: &ChangeSet,
     base_url: &str,
     timeout: Duration,
+    young_maintainer_days: Option<i64>,
 ) -> Result<Vec<MaintainerAgeFinding>> {
+    let threshold = young_maintainer_days.unwrap_or(YOUNG_MAINTAINER_DAYS);
     if cs.added.is_empty() {
         return Ok(Vec::new());
     }
@@ -148,7 +150,7 @@ pub fn enrich_with(
         };
 
         if let Some((login, date, days)) = info.finding
-            && days < YOUNG_MAINTAINER_DAYS
+            && days < threshold
         {
             out.push(MaintainerAgeFinding {
                 component: comp.clone(),
@@ -543,7 +545,7 @@ mod tests {
             added: vec![comp_with_url("foo", None)],
             ..Default::default()
         };
-        let out = enrich_with(&cs, "http://127.0.0.1:1", Duration::from_millis(50))
+        let out = enrich_with(&cs, "http://127.0.0.1:1", Duration::from_millis(50), None)
             .expect("no source_url means no HTTP, must succeed");
         assert!(out.is_empty());
     }
@@ -554,7 +556,7 @@ mod tests {
             added: vec![comp_with_url("foo", Some("https://gitlab.com/foo/bar"))],
             ..Default::default()
         };
-        let out = enrich_with(&cs, "http://127.0.0.1:1", Duration::from_millis(50))
+        let out = enrich_with(&cs, "http://127.0.0.1:1", Duration::from_millis(50), None)
             .expect("non-github means no HTTP, must succeed");
         assert!(out.is_empty());
     }

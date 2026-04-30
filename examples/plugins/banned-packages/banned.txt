@@ -1,0 +1,23 @@
+# banned-packages list — one purl prefix per line, '#' comments allowed.
+# Prefix match: an entry "pkg:npm/foo" matches every version of foo,
+# while "pkg:npm/foo@1.2.3" only matches that exact version.
+#
+# Entries are illustrative only; replace with your org's curated list.
+
+# event-stream supply-chain compromise (2018; flatmap-stream backdoor).
+pkg:npm/event-stream
+
+# coa was hijacked in November 2021 with a credential-stealer payload.
+pkg:npm/coa@2.0.3
+
+# colors-noise typosquat of `colors` (illustrative).
+pkg:npm/colors-noise
+
+# Example PyPI typosquat used in published research; replace with current data.
+pkg:pypi/typosquatted-pkg
+
+# ctx PyPI hijack (May 2022) shipped a credential exfiltrator.
+pkg:pypi/ctx@0.2.2
+
+# rustdecimal — the August 2022 crates.io typosquat of `rust_decimal`.
+pkg:cargo/rustdecimal

@@ -313,6 +313,49 @@ the `typosquat` array with `version_jump`, key by the after-version's
 `purl`. Update the entry on the next jump.
 
 
+## Schema reference
+
+The unified `BaselineEntry` shape (introduced in v0.9.5; v0.5 string
+entries continue to parse as the back-compat case):
+
+| Field | Type | Required | Introduced | Description |
+|---|---|---|---|---|
+| `id` | string | yes (when not the bare-string form) | v0.5 | Advisory identifier — `GHSA-…`, `CVE-…`, `MAL-…`, or `OSV-…`. |
+| `purl` | string | no | v0.5 | Restrict the suppression to a specific component (otherwise wildcards across all components). May be versionless (`pkg:npm/foo`) or version-pinned (`pkg:npm/foo@1.2.3`). |
+| `expires` | string `YYYY-MM-DD` | no | v0.8 | Strict-format expiry date. After this date the entry surfaces a warning and stops suppressing. Malformed dates fail loudly — no silent never-expiring entries. |
+| `reason` | string | no | v0.8 | Free-form rationale; surfaces in the expiry warning and as the OpenVEX `statement_text` in `--emit-vex` output. |
+| `vex_status` | string | no | v0.9 | One of OpenVEX's vocabulary: `not_affected`, `affected`, `fixed`, `under_investigation`. Drives `--emit-vex` output. Defaults to `under_investigation` so `--emit-vex` doesn't fabricate `not_affected` claims. |
+| `vex_justification` | string | no | v0.9 | OpenVEX justification when `vex_status = not_affected`. E.g., `vulnerable_code_not_in_execute_path`, `component_not_present`. |
+
+Cross-link: `vex_status` and `vex_justification` are passthrough to the
+[VEX emit format](./vex.md#emitting-vex). The
+[License policy](./license-policy.md#suppression)
+chapter covers using baseline entries to suppress `LicenseViolation`
+findings (the same `id` / `purl` / `reason` schema applies; license
+violations key by a synthetic ID `bomdrift.license-violation:<purl>`).
+
+### Two valid shapes per entry
+
+The `suppressed_advisories` array accepts either form per entry:
+
+```json
+{
+  "suppressed_advisories": [
+    "GHSA-old-school",
+    {
+      "id": "GHSA-evil-1234",
+      "purl": "pkg:npm/foo",
+      "expires": "2026-12-31",
+      "reason": "Awaiting upstream patch (issue #42)",
+      "vex_status": "under_investigation"
+    }
+  ]
+}
+```
+
+Bare strings remain in the file for v0.5 compatibility; `bomdrift
+baseline add --reason …` always emits the object form.
+
 ## Time-boxed suppressions (`expires` + `reason`)
 
 v0.8 adds two optional fields on each `suppressed_advisories` entry:

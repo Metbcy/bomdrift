@@ -182,19 +182,33 @@ impl SupportedEcosystem {
 }
 
 pub fn enrich(cs: &ChangeSet) -> Vec<TyposquatFinding> {
+    enrich_with_threshold(cs, None)
+}
+
+/// Like [`enrich`] but lets the caller override [`SIMILARITY_THRESHOLD`]
+/// (driven by `--typosquat-similarity-threshold`). `None` uses the default.
+pub fn enrich_with_threshold(
+    cs: &ChangeSet,
+    similarity_threshold: Option<f64>,
+) -> Vec<TyposquatFinding> {
+    let threshold = similarity_threshold.unwrap_or(SIMILARITY_THRESHOLD);
     let mut out = Vec::new();
     for comp in &cs.added {
         let Some(eco) = SupportedEcosystem::from(&comp.ecosystem) else {
             continue;
         };
-        if let Some(finding) = check_one(comp, eco) {
+        if let Some(finding) = check_one(comp, eco, threshold) {
             out.push(finding);
         }
     }
     out
 }
 
-fn check_one(comp: &Component, eco: SupportedEcosystem) -> Option<TyposquatFinding> {
+fn check_one(
+    comp: &Component,
+    eco: SupportedEcosystem,
+    threshold: f64,
+) -> Option<TyposquatFinding> {
     let candidate = canonicalize(eco, &comp.name);
     let legit_list = legit_list_for(eco);
     let legit_set = legit_set_for(eco);
@@ -202,7 +216,7 @@ fn check_one(comp: &Component, eco: SupportedEcosystem) -> Option<TyposquatFindi
         return None;
     }
     let (closest, score) = match eco {
-        SupportedEcosystem::Maven => best_match_maven(&candidate, legit_list)?,
+        SupportedEcosystem::Maven => best_match_maven(&candidate, legit_list, threshold)?,
         SupportedEcosystem::Npm
         | SupportedEcosystem::PyPI
         | SupportedEcosystem::Cargo
@@ -211,7 +225,7 @@ fn check_one(comp: &Component, eco: SupportedEcosystem) -> Option<TyposquatFindi
         | SupportedEcosystem::NuGet
         | SupportedEcosystem::Composer => best_match_jw(&candidate, legit_list, eco)?,
     };
-    if score >= SIMILARITY_THRESHOLD {
+    if score >= threshold {
         Some(TyposquatFinding {
             component: comp.clone(),
             closest: closest.to_string(),
@@ -337,7 +351,11 @@ fn best_match_jw<'a>(
 /// Returning JW-equivalent score so the rendered table is consistent with
 /// the other ecosystems: dist=1 → 0.97-ish, dist=2 → 0.94-ish, both above
 /// [`SIMILARITY_THRESHOLD`].
-fn best_match_maven<'a>(candidate: &str, legit: &'a [String]) -> Option<(&'a str, f64)> {
+fn best_match_maven<'a>(
+    candidate: &str,
+    legit: &'a [String],
+    threshold: f64,
+) -> Option<(&'a str, f64)> {
     let cand_artifact = artifact_id(candidate);
     let mut best: Option<(&'a str, usize, &str)> = None;
     for name in legit {
@@ -361,7 +379,7 @@ fn best_match_maven<'a>(candidate: &str, legit: &'a [String]) -> Option<(&'a str
     best.map(|(name, dist, legit_artifact)| {
         let denom = (legit_artifact.len() as f64) + 1.0;
         let raw = 1.0 - (dist as f64) / denom;
-        (name, raw.max(SIMILARITY_THRESHOLD))
+        (name, raw.max(threshold))
     })
 }
 
@@ -1045,5 +1063,19 @@ mod tests {
             let cs = ChangeSet { added, ..Default::default() };
             let _ = enrich(&cs);
         }
+    }
+
+    #[test]
+    fn similarity_threshold_override_widens_match_set() {
+        // Pick a near-miss candidate; relaxing the threshold must not
+        // reduce the finding count vs a strict 0.99 cutoff.
+        let candidate = comp("expressss");
+        let cs = cs_added(vec![candidate.clone()]);
+        let strict = enrich_with_threshold(&cs, Some(0.99));
+        let relaxed = enrich_with_threshold(&cs, Some(0.80));
+        assert!(
+            relaxed.len() >= strict.len(),
+            "lowering the threshold must not reduce findings"
+        );
     }
 }
