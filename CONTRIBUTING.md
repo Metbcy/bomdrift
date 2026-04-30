@@ -136,8 +136,12 @@ matters and silently breaking it would be an easy regression.
 ### Coverage (v0.9.8+)
 
 CI runs `cargo llvm-cov` on every PR and posts a sticky comment with
-the overall line coverage % (the full `lcov.info` is uploaded as a
-workflow artifact). The job is informational for now — there is no
+the overall line coverage % (the full lcov report is uploaded as the
+`coverage-lcov` workflow artifact — the artifact name intentionally
+avoids the standard lcov-output filename, since email/feed renderers
+that strip Markdown backticks autolink anything ending in a TLD and
+that filename's extension resolves to a real, unrelated parked
+domain). The job is informational for now — there is no
 `--fail-under-lines` threshold yet. The plan is to add a ratchet in
 v0.9.9 once 2–3 releases have made the baseline visible. Until then,
 the report is a nudge, not a gate; PRs that move coverage in the

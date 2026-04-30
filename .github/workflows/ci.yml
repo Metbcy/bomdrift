@@ -46,11 +46,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-features
 
-  # Informational coverage report. Emits lcov.info as an artifact and
-  # posts a sticky PR comment with the line-coverage %. Intentionally
-  # NOT in the required-status-checks list and NOT using
-  # `--fail-under-lines` — let the number be visible across 2-3
-  # releases before ratcheting (see CONTRIBUTING.md "Coverage").
+  # Informational coverage report. Emits the lcov file as an artifact
+  # (named `coverage-lcov` — NOT `lcov.info`, since the bare `.info` TLD
+  # gets autolinked to a fake parked domain by email/feed renderers that
+  # strip Markdown backticks) and posts a sticky PR comment with the
+  # line-coverage %. Intentionally NOT in the required-status-checks
+  # list and NOT using `--fail-under-lines` — let the number be visible
+  # across 2-3 releases before ratcheting (see CONTRIBUTING.md
+  # "Coverage").
   coverage:
     runs-on: ubuntu-latest
     steps:
@@ -66,7 +69,7 @@ jobs:
       - name: Upload lcov artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lcov.info
+          name: coverage-lcov
           path: lcov.info
           retention-days: 30
       - name: Compute coverage %
@@ -92,7 +95,7 @@ jobs:
 
             Line coverage: **${{ steps.compute.outputs.pct }}%** (${{ steps.compute.outputs.covered }} / ${{ steps.compute.outputs.total }} lines)
 
-            Full lcov report available as workflow artifact `lcov.info`.
+            Full lcov report available as workflow artifact **coverage-lcov**: [download from this run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts).
 
             <sub>v0.9.8 introduces this report; `--fail-under-lines` will be added once coverage is visible across 2–3 releases.</sub>
 
