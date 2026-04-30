@@ -164,9 +164,121 @@ export SIGSTORE_REKOR_URL=https://rekor.internal.example.com
 bomdrift diff --before-attestation ... --after-attestation ... ...
 ```
 
-This path works in principle but is **not specifically tested in
-v0.9.6**; please file an issue with the Sigstore stack you're
-running if anything misbehaves.
+## Air-gapped / self-hosted Sigstore
+
+Regulated environments — finance, defense, healthcare on-prem, government
+cloud — frequently can't reach the public-good Sigstore instance
+(`rekor.sigstore.dev`, `fulcio.sigstore.dev`, `tuf-repo-cdn.sigstore.dev`).
+The org runs its own Sigstore stack inside the trust boundary, with its
+own TUF root, Fulcio CA, and Rekor transparency log. bomdrift supports
+this without any bomdrift-side configuration: the attestation module
+shells out to cosign and **does not scrub or modify** the calling
+environment, so every Sigstore env var cosign respects flows through
+unchanged.
+
+### Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `SIGSTORE_REKOR_URL` / `COSIGN_REKOR_URL` | Transparency-log endpoint (your private Rekor). |
+| `SIGSTORE_FULCIO_URL` / `COSIGN_FULCIO_URL` | Short-lived cert issuer (your private Fulcio). |
+| `SIGSTORE_OIDC_ISSUER` / `COSIGN_OIDC_ISSUER` | OIDC issuer used by the keyless flow. In a true air-gap you'll likely use key-based attestations instead — see below. |
+| `SIGSTORE_ROOT_FILE` | Path to a custom Sigstore TUF root JSON (`root.json`). |
+| `TUF_ROOT` | Directory containing TUF metadata (root + targets). |
+| `COSIGN_REPOSITORY` | Alternate cosign-data registry, when attestations are stored separately from the artifact's registry. |
+
+bomdrift forwards the unchanged process environment to every cosign
+invocation, so exporting the variables on the workflow / shell that
+invokes bomdrift is enough — no bomdrift flag is needed.
+
+### Worked example: GitHub Actions against a private Sigstore
+
+```yaml
+- uses: Metbcy/bomdrift@v1
+  with:
+    before-attestation: oci://registry.internal.example/myapp@sha256:abc...
+    after-attestation:  oci://registry.internal.example/myapp@sha256:def...
+    cosign-identity:    '^https://github.example.internal/.+$'
+    cosign-issuer:      https://oidc.internal.example
+    require-attestation: 'true'
+  env:
+    SIGSTORE_REKOR_URL:  https://internal-rekor.example
+    COSIGN_FULCIO_URL:   https://internal-fulcio.example
+    SIGSTORE_OIDC_ISSUER: https://oidc.internal.example
+    TUF_ROOT:            ${{ github.workspace }}/.sigstore/tuf
+    SIGSTORE_ROOT_FILE:  ${{ github.workspace }}/.sigstore/tuf/root.json
+```
+
+The action's composite step inherits this `env:` block, propagates it to
+the bomdrift binary, and bomdrift propagates it again to cosign. No
+input on the action surface is needed for any of these — they are
+cosign's own contract.
+
+### Key-based (non-keyless) attestations
+
+In a true air-gap, the OIDC keyless flow may not be reachable: there's
+no public-good Fulcio CA to mint short-lived certificates, and your
+internal OIDC issuer may not be wired up to your internal Fulcio yet.
+cosign's fallback is **key-based** attestation:
+
+```bash
+cosign attest --key cosign.key --predicate sbom.cdx.json \
+  --type cyclonedx registry.internal.example/myapp@sha256:abc...
+```
+
+For verification, cosign auto-detects a `cosign.pub` in the working
+directory or honors the `COSIGN_PUBLIC_KEY` env var. bomdrift's current
+`--cosign-identity` / `--cosign-issuer` flags target the keyless flow;
+for the key-based flow, leave them empty (or pass identity values that
+match how cosign records key-based attestations) and rely on env-var
+passthrough:
+
+```bash
+export COSIGN_PUBLIC_KEY=$PWD/cosign.pub
+bomdrift diff \
+  --before-attestation oci://registry.internal.example/myapp@sha256:abc... \
+  --after-attestation  oci://registry.internal.example/myapp@sha256:def...
+```
+
+cosign reads `COSIGN_PUBLIC_KEY` directly when no certificate-identity
+flags are present. bomdrift forwards the env unchanged, so no
+bomdrift-side configuration is required.
+
+### Troubleshooting checklist
+
+When verification fails in an air-gapped setup, walk this list:
+
+1. **`Error: updating local metadata and targets`** — TUF can't reach
+   the configured TUF repo. Verify `TUF_ROOT` points at a directory
+   pre-populated with your org's TUF metadata, and that
+   `SIGSTORE_ROOT_FILE` references a valid `root.json`.
+2. **`Error: getting Rekor public keys`** — Rekor URL is unreachable
+   from the runner. `curl -v "$SIGSTORE_REKOR_URL/api/v1/log/publicKey"`
+   from the same runner identity to confirm network reachability.
+3. **`x509: certificate signed by unknown authority`** — your private
+   Fulcio's intermediate CA isn't in the system trust store. Either
+   install it on the runner image, or set `SSL_CERT_FILE` to a bundle
+   that includes it.
+4. **`Error: no matching signatures`** with key-based attestations —
+   cosign found the attestation but the public key didn't match. Confirm
+   `COSIGN_PUBLIC_KEY` resolves to the same key that signed the
+   attestation, and that no `--cosign-identity` / `--cosign-issuer`
+   values are present (those force the keyless code path).
+5. **`Error: dial tcp: lookup rekor.sigstore.dev`** — cosign fell back
+   to the public-good defaults because one of the SIGSTORE\_\* env vars
+   wasn't actually exported into bomdrift's process. On GitHub Actions,
+   double-check the `env:` block lives on the same step as the action
+   (or a parent `jobs.<id>.env:` block), not on a different step.
+6. **Verification works locally but not in CI** — the runner image lacks
+   cosign, or cosign was installed but `PATH` isn't propagated to the
+   composite-action subshell. The `verify-signatures: true` codepath
+   already installs cosign for release signature verification; reuse
+   that install or pin a known cosign version explicitly.
+
+The air-gapped path uses cosign's own contract, so any deeper diagnosis
+is a cosign problem, not a bomdrift problem. Reproduce with `cosign
+verify-attestation --type cyclonedx ...` directly, with the same env
+vars exported, before opening a bomdrift issue.
 
 ## Troubleshooting
 
@@ -213,9 +325,9 @@ the cosign command above with `-o json` and look at
   predicate parser is the only piece that needs to grow.
 - **Direct Rekor verification.** Deferred to cosign. bomdrift will
   not grow a Sigstore client implementation.
-- **Air-gapped Sigstore.** The env-var path described above works
-  in principle (cosign supports it) but isn't part of bomdrift's
-  v0.9.6 test matrix. Treat it as best-effort.
+- **Air-gapped Sigstore.** Documented as a first-class flow via
+  cosign-respected env-var passthrough; see
+  [Air-gapped / self-hosted Sigstore](#air-gapped--self-hosted-sigstore).
 - **In-process attestation (no shell-out).** Pulling in a
   full-fat Sigstore Rust SDK contradicts the OSS-first /
   small-dep-tree design constraint. Revisit once a minimal,

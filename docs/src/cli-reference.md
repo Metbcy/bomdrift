@@ -222,6 +222,26 @@ Time-to-live for the OSV / EPSS / KEV / registry-metadata caches under
 fast-changing security feeds in long-running self-hosted runners; raise
 to `168` (one week) when running offline.
 
+#### `--multi-major-delta <N>`
+*Introduced in v0.9.7.*
+
+Type: positive integer (`>= 1`). Default: `2`.
+Config key: `[diff] multi_major_delta`.
+
+Major-version delta at or above which the version-jump enricher classifies
+an upgrade as a multi-major jump. With the default of `2`, an upgrade
+from `1.x` to `2.x` is a single-major bump (treated normally), while
+`1.x → 3.x` (delta = 2) trips the multi-major signal. Lower to `1` to
+flag every cross-major bump as multi-major; raise to `3` or higher to
+quiet noisy ecosystems that release majors aggressively.
+
+This flag closes the last hardcoded calibration threshold: pre-v0.9.7
+the multi-major boundary lived as a `const` in the version-jump
+enricher. With the knob exposed, every gating decision in `--debug-calibration`
+output emits the *active* threshold rather than the const default — so
+debug rows for the `version-jump` kind are now portable across repos
+with different calibrations.
+
 ### License policy
 
 #### `--allow-licenses <LIST>` / `--deny-licenses <LIST>`

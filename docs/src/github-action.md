@@ -39,42 +39,126 @@ documents that path; both flows continue to be supported in v1.
 
 ## Inputs
 
-| Input | Required | Default | Description |
+The action exposes the full bomdrift CLI surface as inputs (v0.9.7+). For
+the canonical flag semantics see [CLI reference](./cli-reference.md); the
+tables below document only the action-side wrapper. Empty defaults mean
+"don't pass the flag" — bomdrift then uses its own CLI/config defaults.
+
+### What's new in v0.9.7
+
+These inputs are newly exposed (the underlying CLI flags shipped earlier):
+
+- VEX: `vex`, `emit-vex`, `vex-author`, `vex-default-justification`
+- License policy: `allow-licenses`, `deny-licenses`, `allow-exception`,
+  `deny-exception`, `allow-ambiguous-licenses`
+- Enrichment toggles: `no-epss`, `no-kev`, `no-registry`
+- Failure thresholds: `fail-on-epss`
+- Calibration knobs: `recently-published-days`,
+  `typosquat-similarity-threshold`, `young-maintainer-days`,
+  `cache-ttl-hours`, `multi-major-delta` *(new CLI flag in v0.9.7)*
+- Attestation: `before-attestation`, `after-attestation`,
+  `cosign-identity`, `cosign-issuer`, `require-attestation`
+- Plugins: `plugin`
+
+Before v0.9.7 these had to be driven through `.bomdrift.toml` or a direct
+`cargo install` invocation. The config-file path remains supported and is
+still preferred for repo-wide policy.
+
+### Core: refs, paths, SBOMs
+
+| Input | Type | Default | Description |
 |---|---|---|---|
-| `before-ref` | no | `${{ github.event.pull_request.base.ref }}` | Git ref / SHA to check out as the "before" side. The default works on `pull_request` events; supply explicitly on other events. Ignored when `before-sbom` is set. |
-| `after-ref`  | no | `${{ github.event.pull_request.head.sha }}`  | Git ref / SHA for the "after" side. Same defaulting story. Ignored when `after-sbom` is set. |
-| `path`       | no | `.` | Subdirectory of the checked-out ref to scan with Syft. Useful for monorepos (`path: services/api`). Ignored when both `*-sbom` inputs are set. |
-| `before-sbom` | no | `` (empty) | Path to the "before" SBOM (CycloneDX, SPDX, or Syft JSON). When set, bypasses the v0.5 zero-config Syft invocation and uses this file directly. The escape hatch for non-Syft toolchains. |
-| `after-sbom`  | no | `` (empty) | Path to the "after" SBOM. Same migration story as `before-sbom`. |
-| `format`      | no  | `auto` | Force input format detection: `auto`/`cdx`/`spdx`/`syft`. |
-| `output`      | no  | `markdown` | Output format: `terminal`/`markdown`/`json`/`sarif`. The PR-comment path requires `markdown`. |
-| `comment-on-pr` | no | `true` | Post the rendered diff as a PR comment when the workflow runs on a `pull_request` event. Set to `false` for diff-only / report-only workflows. |
-| `fail-on`     | no  | `none` | Exit code 2 on findings of the configured kind: `none`/`cve`/`critical-cve`/`typosquat`/`license-change`/`any`. The PR comment is still posted on a tripped run. |
-| `comment-size-limit` | no | `60000` | Bytes. When the rendered diff exceeds this size, bomdrift re-renders with `--summary-only` for the PR comment while keeping the full body in the workflow step summary. Set to `0` to disable the fallback. GitHub's hard cap is 65,536 chars. |
-| `verify-signatures` | no | `true` | Whether to install cosign and verify the bomdrift release archive's Sigstore signature. Set to `false` on trusted mirrors / cached runners to skip the cosign-installer step (~15s saved). |
-| `config` | no | `` (empty) | Path to `.bomdrift.toml`. Leave empty to auto-load `.bomdrift.toml` from the repo root when present. |
-| `findings-only` | no | `false` | Markdown-only. Keep summary + risk-bearing sections, but omit raw Added / Removed / Version changed detail rows from the PR comment. |
-| `max-added` | no | `` (empty) | Exit 2 when more than this many dependencies are added. |
-| `max-removed` | no | `` (empty) | Exit 2 when more than this many dependencies are removed. |
-| `max-version-changed` | no | `` (empty) | Exit 2 when more than this many dependencies change version. |
-| `baseline` | no | `` (empty) | Path to a previously captured `bomdrift diff --output json` snapshot. Findings present in the baseline are suppressed from the rendered output and the `--fail-on` trip evaluation. See [Baseline & suppression](./baseline.md) for match-key semantics. |
-| `github-token` | no | `${{ github.token }}` | Token used to post PR comments. |
-| `upload-to-code-scanning` | no | `false` | When `true` AND `output: sarif`, upload the rendered SARIF artifact to GitHub Code Scanning via `github/codeql-action/upload-sarif@v3`. Requires the calling workflow to grant `permissions.security-events: write`. Off by default for back-compat — v0.7 callers see no behavior change. See [SARIF + Code Scanning](./sarif.md). (v0.8+) |
+| `before-ref` | string | `${{ github.event.pull_request.base.ref }}` | Git ref / SHA to check out as the "before" side. Default works on `pull_request` events. |
+| `after-ref`  | string | `${{ github.event.pull_request.head.sha }}`  | Git ref / SHA for the "after" side. |
+| `path`       | string | `.` | Subdirectory of the checked-out ref to scan with Syft (monorepos: `path: services/api`). |
+| `before-sbom` | string (path) | `''` | Pre-generated "before" SBOM. Bypasses the in-action Syft invocation. |
+| `after-sbom`  | string (path) | `''` | Pre-generated "after" SBOM. |
+| `format`      | enum | `auto` | Force input format: `auto`/`cdx`/`spdx`/`syft`. Maps to [`--format`](./cli-reference.md#--format). |
 
-## Inputs not exposed by the action
+### Output
 
-The composite action surfaces a small, opinionated subset of the CLI.
-For features without a matching action input — VEX consume / emit
-(`--vex`, `--emit-vex`), license policy
-(`--allow-licenses`/`--deny-licenses`/`--allow-exception`/`--deny-exception`),
-calibration knobs (`--typosquat-similarity-threshold`,
-`--young-maintainer-days`, `--cache-ttl-hours`), the failure thresholds
-(`--fail-on-epss`, `--fail-on kev`), OCI attestation
-(`--before-attestation`, `--cosign-identity`, …), or plugins
-(`--plugin`) — drive them through a checked-in `.bomdrift.toml` (loaded
-via the `config:` input) or run the binary directly with
-`actions/setup-rust` + `cargo install`. The CLI flag set in
-[CLI reference](./cli-reference.md) is the authoritative full surface.
+| Input | Type | Default | Description |
+|---|---|---|---|
+| `output` | enum | `markdown` | Output format: `terminal`/`markdown`/`json`/`sarif`. PR comments require `markdown`. Maps to [`--output`](./cli-reference.md#--output). |
+| `comment-on-pr` | bool | `true` | Post the rendered diff as a PR comment on `pull_request` events. |
+| `comment-size-limit` | number | `60000` | Bytes. Above this size, the PR-comment body is re-rendered with `--summary-only`. `0` disables the fallback. |
+| `findings-only` | bool | `false` | Markdown-only. Maps to [`--findings-only`](./cli-reference.md#--findings-only). |
+| `upload-to-code-scanning` | bool | `false` | Upload SARIF to GitHub Code Scanning. Requires `output: sarif`. |
+| `github-token` | string | `${{ github.token }}` | Token used to post PR comments. |
+
+### Suppression and policy
+
+| Input | Type | Default | Description |
+|---|---|---|---|
+| `config` | string (path) | `''` | Path to `.bomdrift.toml`. Empty auto-loads from the repo root when present. Maps to [`--config`](./cli-reference.md#--config). |
+| `baseline` | string (path) | `''` | Pre-captured `bomdrift diff --output json` snapshot to suppress against. Maps to [`--baseline`](./cli-reference.md#--baseline). |
+| `vex` | string (multi-line paths) | `''` | OpenVEX documents to consume; one path per line, each becomes a repeated [`--vex`](./cli-reference.md#--vex). |
+| `emit-vex` | string (path) | `''` | Path to write a freshly emitted OpenVEX document. Maps to [`--emit-vex`](./cli-reference.md#--emit-vex). |
+| `vex-author` | string | `''` | Author identity for the emitted OpenVEX. Maps to [`--vex-author`](./cli-reference.md#--vex-author). |
+| `vex-default-justification` | string | `''` | OpenVEX `not_affected` justification ID applied by default. Maps to [`--vex-default-justification`](./cli-reference.md#--vex-default-justification). |
+
+### License policy
+
+| Input | Type | Default | Description |
+|---|---|---|---|
+| `allow-licenses` | string (comma list) | `''` | SPDX expressions to allow. Maps to [`--allow-licenses`](./cli-reference.md#--allow-licenses). |
+| `deny-licenses`  | string (comma list) | `''` | SPDX expressions to deny. Maps to [`--deny-licenses`](./cli-reference.md#--deny-licenses). |
+| `allow-exception` | string (comma list) | `''` | SPDX exception identifiers to allow inside `WITH` clauses. v0.9.7 refines compound-expression inheritance. Maps to [`--allow-exception`](./cli-reference.md#--allow-exception). |
+| `deny-exception`  | string (comma list) | `''` | SPDX exception identifiers to deny. Maps to [`--deny-exception`](./cli-reference.md#--deny-exception). |
+| `allow-ambiguous-licenses` | bool | `false` | Treat unresolved license expressions as allowed. Maps to [`--allow-ambiguous-licenses`](./cli-reference.md#--allow-ambiguous-licenses). |
+
+### Enrichment toggles
+
+| Input | Type | Default | Description |
+|---|---|---|---|
+| `no-epss` | bool | `false` | Disable EPSS exploit-likelihood enrichment. Maps to [`--no-epss`](./cli-reference.md#--no-epss). |
+| `no-kev`  | bool | `false` | Disable CISA KEV enrichment. Maps to [`--no-kev`](./cli-reference.md#--no-kev). |
+| `no-registry` | bool | `false` | Disable registry / maintainer-age enrichment (no network calls to package registries). Maps to [`--no-registry`](./cli-reference.md#--no-registry). |
+
+### Calibration knobs
+
+| Input | Type | Default | Description |
+|---|---|---|---|
+| `recently-published-days` | number | `''` | "Recently published" maintainer-age window. Maps to [`--recently-published-days`](./cli-reference.md#--recently-published-days). |
+| `typosquat-similarity-threshold` | number (0.0–1.0) | `''` | Damerau-Levenshtein threshold for typosquat detection. Maps to [`--typosquat-similarity-threshold`](./cli-reference.md#--typosquat-similarity-threshold). |
+| `young-maintainer-days` | number | `''` | Age below which a maintainer is flagged as "young". Maps to [`--young-maintainer-days`](./cli-reference.md#--young-maintainer-days). |
+| `cache-ttl-hours` | number | `''` | TTL for the on-disk enrichment cache. Maps to [`--cache-ttl-hours`](./cli-reference.md#--cache-ttl-hours). |
+| `multi-major-delta` | number (≥1) | `''` | Major-version delta at or above which an upgrade is flagged as multi-major (CLI default 2). Maps to [`--multi-major-delta`](./cli-reference.md#--multi-major-delta). **New in v0.9.7.** |
+
+### Failure thresholds
+
+| Input | Type | Default | Description |
+|---|---|---|---|
+| `fail-on` | enum | `none` | Trip exit 2 on findings of the configured kind: `none`/`cve`/`critical-cve`/`typosquat`/`license-change`/`any`. The PR comment is still posted on a tripped run. |
+| `fail-on-epss` | number (0.0–1.0) | `''` | Trip exit 2 when any new advisory has an EPSS score at or above this value. Maps to [`--fail-on-epss`](./cli-reference.md#--fail-on-epss). |
+| `max-added` | number | `''` | Exit 2 when more than this many dependencies are added. |
+| `max-removed` | number | `''` | Exit 2 when more than this many dependencies are removed. |
+| `max-version-changed` | number | `''` | Exit 2 when more than this many dependencies change version. |
+
+### OCI attestation
+
+| Input | Type | Default | Description |
+|---|---|---|---|
+| `before-attestation` | string (OCI ref) | `''` | OCI reference for the cosign attestation covering the "before" SBOM. Maps to [`--before-attestation`](./cli-reference.md#--before-attestation). |
+| `after-attestation`  | string (OCI ref) | `''` | OCI reference for the "after" SBOM attestation. Maps to [`--after-attestation`](./cli-reference.md#--after-attestation). |
+| `cosign-identity` | string (regex) | `''` | Regex matched against the cosign certificate identity (`--certificate-identity-regexp`). Maps to [`--cosign-identity`](./cli-reference.md#--cosign-identity). |
+| `cosign-issuer` | string (URL) | `''` | OIDC issuer URL for keyless cosign verification. Maps to [`--cosign-issuer`](./cli-reference.md#--cosign-issuer). |
+| `require-attestation` | bool | `false` | Fail when either side is missing a verified attestation. Maps to [`--require-attestation`](./cli-reference.md#--require-attestation). |
+
+For air-gapped / self-hosted Sigstore deployments, see
+[Air-gapped / self-hosted Sigstore](./attestation.md#air-gapped--self-hosted-sigstore).
+
+### Plugins
+
+| Input | Type | Default | Description |
+|---|---|---|---|
+| `plugin` | string (multi-line paths) | `''` | Plugin manifests to load; one path per line, each becomes a repeated [`--plugin`](./cli-reference.md#--plugin). See [Plugins](./plugins.md). |
+
+### Release verification
+
+| Input | Type | Default | Description |
+|---|---|---|---|
+| `verify-signatures` | bool | `true` | Install cosign and verify the bomdrift release archive's Sigstore signature. Set `false` on trusted mirrors / cached runners (saves ~15s). When `true` and cosign is missing, the action **fails loudly**. |
 
 ## Outputs
 

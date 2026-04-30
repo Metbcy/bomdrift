@@ -45,12 +45,25 @@ and pulling the dep would add transitive weight for no functional gain.
 
 ## Calibration
 
-The `MIN_MAJOR_DELTA = 2` threshold is intentionally hardcoded. Letting
-users configure it down to 1 just duplicates the standard SemVer-bump
-signal reviewers already see; letting users configure it up (3, 4, …)
-silences legitimate xz-pattern signals. The
-[`--young-maintainer-days`](../cli-reference.md#--young-maintainer-days-n)
-threshold already serves the "tune for false-positive rate" knob.
+The multi-major delta threshold is exposed as
+[`--multi-major-delta <N>`](../cli-reference.md#--multi-major-delta-n)
+(introduced in v0.9.7) with the matching `[diff] multi_major_delta`
+config key. Default `2`; minimum `1`.
+
+**Raising** the threshold to `3` or higher quiets noisy ecosystems that
+release majors aggressively (some npm web frameworks ship a major every
+few months). The signal still fires for genuinely unusual jumps but
+stops competing with everyday upgrades for reviewer attention.
+
+**Lowering** to `1` is supported but discouraged: it duplicates the
+standard SemVer-bump signal reviewers already see on every PR, and
+drowns the multi-major signal's actual purpose (catching the xz pattern
+and namespace-reuse swaps). bomdrift validates `>= 1` so `0` is
+rejected at the clap layer rather than silently disabling the enricher.
+
+For per-component carve-outs use a baseline entry instead of dropping
+the global threshold; see
+[Baseline — When the bump is the false positive](../baseline.md#when-the-bump-is-the-false-positive).
 
 ## Disabling
 
