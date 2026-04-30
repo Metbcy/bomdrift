@@ -252,6 +252,7 @@ As of v0.9.6:
 | `sha2 = "0.10"` | partialFingerprint hashes (SARIF), VEX `@id` | |
 | `spdx = "=0.10.9"` | exact-pinned SPDX expression evaluation | License-policy semantics shift on minor list updates; pin exactly |
 | `base64 = "0.22"` | OCI attestation payload decoding (v0.9.6) | |
+| `wait-timeout = "0.2"` | bounded plugin-process wait on Windows (v0.9.7) | sidesteps `Command::kill()`'s Windows quirks; tiny dep, no transitive weight |
 
 Forbidden by policy: `tokio`, `chrono`, `semver`, `octocrab`,
 `async-trait`, anything pulling rustls + ring + tokio transitively
