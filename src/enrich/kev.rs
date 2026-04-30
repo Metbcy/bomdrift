@@ -18,7 +18,6 @@ use anyhow::Result;
 use serde::Deserialize;
 
 use crate::enrich::Enrichment;
-use crate::enrich::cache::CACHE_TTL_SECS;
 
 const KEV_FEED_URL: &str =
     "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
@@ -41,14 +40,25 @@ struct KevEntry {
 /// Apply KEV flags to every [`VulnRef`] in `e.vulns`. `--no-kev` callers
 /// should skip calling this entirely.
 pub fn enrich(e: &mut Enrichment) -> Result<()> {
-    enrich_with_url(e, KEV_FEED_URL, DEFAULT_TIMEOUT)
+    enrich_with_ttl(e, None)
 }
 
-fn enrich_with_url(e: &mut Enrichment, url: &str, timeout: Duration) -> Result<()> {
+/// Like [`enrich`] but lets the caller override the on-disk cache TTL
+/// (driven by `--cache-ttl-hours`). `None` means use the default.
+pub fn enrich_with_ttl(e: &mut Enrichment, ttl_hours: Option<u64>) -> Result<()> {
+    enrich_with_url(e, KEV_FEED_URL, DEFAULT_TIMEOUT, ttl_hours)
+}
+
+fn enrich_with_url(
+    e: &mut Enrichment,
+    url: &str,
+    timeout: Duration,
+    ttl_hours: Option<u64>,
+) -> Result<()> {
     if e.vulns.is_empty() {
         return Ok(());
     }
-    let kev_ids = match load_or_fetch(url, timeout) {
+    let kev_ids = match load_or_fetch(url, timeout, ttl_hours) {
         Ok(ids) => ids,
         Err(err) => {
             if std::env::var("BOMDRIFT_DEBUG").is_ok() {
@@ -72,10 +82,11 @@ fn apply_kev(e: &mut Enrichment, kev: &HashSet<String>) {
     }
 }
 
-fn load_or_fetch(url: &str, timeout: Duration) -> Result<HashSet<String>> {
+fn load_or_fetch(url: &str, timeout: Duration, ttl_hours: Option<u64>) -> Result<HashSet<String>> {
     let cache_path = cache_path();
+    let ttl = crate::enrich::cache::effective_ttl_secs(ttl_hours);
     if let Some(path) = &cache_path
-        && let Some(ids) = read_cache(path)
+        && let Some(ids) = read_cache(path, ttl)
     {
         return Ok(ids);
     }
@@ -107,12 +118,12 @@ fn cache_path() -> Option<PathBuf> {
         .map(|p| p.join(SUBDIR).join(CACHE_FILE))
 }
 
-fn read_cache(path: &std::path::Path) -> Option<HashSet<String>> {
+fn read_cache(path: &std::path::Path, ttl_secs: u64) -> Option<HashSet<String>> {
     let meta = std::fs::metadata(path).ok()?;
     let modified = meta.modified().ok()?;
     let now = SystemTime::now();
     let age = now.duration_since(modified).ok()?;
-    if age.as_secs() > CACHE_TTL_SECS {
+    if age.as_secs() > ttl_secs {
         return None;
     }
     let body = std::fs::read(path).ok()?;

@@ -73,6 +73,12 @@ pub struct DiffConfig {
     pub no_registry: Option<bool>,
     /// Override the default 14-day recently-published threshold. v0.9+.
     pub recently_published_days: Option<i64>,
+    /// Override the typosquat similarity threshold (default 0.92). v0.9.6+.
+    pub typosquat_similarity_threshold: Option<f64>,
+    /// Override the young-maintainer-days threshold (default 90). v0.9.6+.
+    pub young_maintainer_days: Option<i64>,
+    /// Override the on-disk cache TTL in hours (default 24). v0.9.6+.
+    pub cache_ttl_hours: Option<u64>,
 }
 
 pub fn apply_diff_config(args: &mut DiffArgs) -> Result<()> {
@@ -157,6 +163,15 @@ fn apply_loaded_diff_config(args: &mut DiffArgs, config: Config) {
     if args.recently_published_days.is_none() {
         args.recently_published_days = diff.recently_published_days;
     }
+    if args.typosquat_similarity_threshold.is_none() {
+        args.typosquat_similarity_threshold = diff.typosquat_similarity_threshold;
+    }
+    if args.young_maintainer_days.is_none() {
+        args.young_maintainer_days = diff.young_maintainer_days;
+    }
+    if args.cache_ttl_hours.is_none() {
+        args.cache_ttl_hours = diff.cache_ttl_hours;
+    }
 
     // [license] block: CLI flags override (not merge) when set. Mirrors
     // Dependency Review Action semantics so users moving between bomdrift
@@ -239,6 +254,9 @@ mod tests {
             vex_default_justification: None,
             no_registry: false,
             recently_published_days: None,
+            typosquat_similarity_threshold: None,
+            young_maintainer_days: None,
+            cache_ttl_hours: None,
         }
     }
 

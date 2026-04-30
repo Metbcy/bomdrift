@@ -147,7 +147,7 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
     } else {
         // OSV enrichment is best-effort. Network failures must not block the diff
         // from rendering — a PR review is still useful without CVE data.
-        match enrich::osv::enrich_cached(&cs, args.no_osv_cache) {
+        match enrich::osv::enrich_cached_with_ttl(&cs, args.no_osv_cache, args.cache_ttl_hours) {
             Ok(e) => e,
             Err(err) => {
                 eprintln!("warning: OSV enrichment failed, continuing without it: {err:#}");
@@ -161,20 +161,21 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
     // there are no vulns.
     if !args.no_epss
         && !enrichment.vulns.is_empty()
-        && let Err(err) = enrich::epss::enrich(&mut enrichment)
+        && let Err(err) = enrich::epss::enrich_with_ttl(&mut enrichment, args.cache_ttl_hours)
     {
         eprintln!("warning: EPSS enrichment failed, continuing without it: {err:#}");
     }
     if !args.no_kev
         && !enrichment.vulns.is_empty()
-        && let Err(err) = enrich::kev::enrich(&mut enrichment)
+        && let Err(err) = enrich::kev::enrich_with_ttl(&mut enrichment, args.cache_ttl_hours)
     {
         eprintln!("warning: KEV enrichment failed, continuing without it: {err:#}");
     }
 
     // Typosquat detection is pure-compute (embedded reference list) and always
     // runs, regardless of `--no-osv`. Findings are informational.
-    enrichment.typosquats = enrich::typosquat::enrich(&cs);
+    enrichment.typosquats =
+        enrich::typosquat::enrich_with_threshold(&cs, args.typosquat_similarity_threshold);
 
     // Multi-major version-jump detection is pure-compute and also always runs.
     // Findings are informational.
@@ -184,7 +185,12 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
     // `--no-maintainer-age` for offline runs. Best-effort: failures warn and
     // continue, mirroring the OSV enricher's contract.
     if !args.no_maintainer_age {
-        match enrich::maintainer::enrich(&cs) {
+        match enrich::maintainer::enrich_with(
+            &cs,
+            "https://api.github.com",
+            std::time::Duration::from_secs(15),
+            args.young_maintainer_days,
+        ) {
             Ok(findings) => enrichment.maintainer_age = findings,
             Err(err) => {
                 eprintln!(
@@ -209,7 +215,8 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
     // Registry-metadata enrichers (Phase K, v0.9). Best-effort — a
     // registry timeout returns Ok with no findings.
     if !args.no_registry {
-        let findings = enrich::registry::enrich(&cs, args.recently_published_days);
+        let findings =
+            enrich::registry::enrich(&cs, args.recently_published_days, args.cache_ttl_hours);
         enrichment.recently_published = findings.recently_published;
         enrichment.deprecated = findings.deprecated;
         enrichment.maintainer_set_changed = findings.maintainer_set_changed;
@@ -298,6 +305,10 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
             &enrichment,
             &mut std::io::stderr(),
             args.debug_calibration_format,
+            CalibrationOverrides {
+                similarity_threshold: args.typosquat_similarity_threshold,
+                young_maintainer_days: args.young_maintainer_days,
+            },
         );
     }
 
@@ -461,14 +472,31 @@ pub fn budget_tripped(
 /// `threshold` is the constant the score was gated against. CVE rows
 /// surface every advisory (no internal threshold) so adopters can see
 /// the score distribution before tuning `--fail-on critical-cve`.
+/// Active overrides for the configurable calibration thresholds. Threaded
+/// into [`write_calibration_lines`] so emitted rows reflect the effective
+/// threshold the enricher actually used, not the unconditional const default.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct CalibrationOverrides {
+    pub similarity_threshold: Option<f64>,
+    pub young_maintainer_days: Option<i64>,
+}
+
 fn write_calibration_lines<W: std::io::Write>(
     e: &Enrichment,
     out: &mut W,
     format: crate::cli::DebugFormat,
+    overrides: CalibrationOverrides,
 ) {
     use crate::enrich::maintainer::YOUNG_MAINTAINER_DAYS;
     use crate::enrich::typosquat::SIMILARITY_THRESHOLD;
     use crate::enrich::version_jump::MIN_MAJOR_DELTA;
+
+    let active_similarity = overrides
+        .similarity_threshold
+        .unwrap_or(SIMILARITY_THRESHOLD);
+    let active_young = overrides
+        .young_maintainer_days
+        .unwrap_or(YOUNG_MAINTAINER_DAYS);
 
     for f in &e.typosquats {
         write_calibration_row(
@@ -479,7 +507,7 @@ fn write_calibration_lines<W: std::io::Write>(
                 .as_deref()
                 .unwrap_or(f.component.name.as_str()),
             CalibrationScore::Float(f.score),
-            CalibrationThreshold::Float(SIMILARITY_THRESHOLD),
+            CalibrationThreshold::Float(active_similarity),
             format,
         );
     }
@@ -502,7 +530,7 @@ fn write_calibration_lines<W: std::io::Write>(
                 .as_deref()
                 .unwrap_or(f.component.name.as_str()),
             CalibrationScore::Int(f.days_old),
-            CalibrationThreshold::Int(YOUNG_MAINTAINER_DAYS),
+            CalibrationThreshold::Int(active_young),
             format,
         );
     }
@@ -1011,7 +1039,12 @@ mod tests {
     fn calibration_pipe_format_matches_v0_7_layout() {
         let e = enrichment_with_typosquat();
         let mut buf = Vec::new();
-        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Pipe);
+        write_calibration_lines(
+            &e,
+            &mut buf,
+            crate::cli::DebugFormat::Pipe,
+            CalibrationOverrides::default(),
+        );
         let s = String::from_utf8(buf).unwrap();
         assert!(s.starts_with("typosquat|"), "got: {s}");
         assert_eq!(
@@ -1025,7 +1058,12 @@ mod tests {
     fn calibration_jsonl_format_emits_one_object_per_line() {
         let e = enrichment_with_typosquat();
         let mut buf = Vec::new();
-        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Jsonl);
+        write_calibration_lines(
+            &e,
+            &mut buf,
+            crate::cli::DebugFormat::Jsonl,
+            CalibrationOverrides::default(),
+        );
         let s = String::from_utf8(buf).unwrap();
         let lines: Vec<&str> = s.lines().collect();
         assert_eq!(lines.len(), 1);
@@ -1040,7 +1078,12 @@ mod tests {
     fn calibration_jsonl_keeps_severity_label_as_string() {
         let e = enrichment_with_cve_at(Severity::High);
         let mut buf = Vec::new();
-        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Jsonl);
+        write_calibration_lines(
+            &e,
+            &mut buf,
+            crate::cli::DebugFormat::Jsonl,
+            CalibrationOverrides::default(),
+        );
         let s = String::from_utf8(buf).unwrap();
         let v: serde_json::Value = serde_json::from_str(s.trim()).unwrap();
         assert_eq!(v["kind"], "cve");
@@ -1082,7 +1125,12 @@ mod tests {
             refs[0].kev = true;
         }
         let mut buf = Vec::new();
-        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Pipe);
+        write_calibration_lines(
+            &e,
+            &mut buf,
+            crate::cli::DebugFormat::Pipe,
+            CalibrationOverrides::default(),
+        );
         let s = String::from_utf8(buf).unwrap();
         assert!(s.contains("epss|"), "missing epss row: {s}");
         assert!(s.contains("kev|"), "missing kev row: {s}");
@@ -1113,7 +1161,12 @@ mod tests {
             kind: crate::enrich::LicenseViolationKind::Deny,
         });
         let mut buf = Vec::new();
-        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Pipe);
+        write_calibration_lines(
+            &e,
+            &mut buf,
+            crate::cli::DebugFormat::Pipe,
+            CalibrationOverrides::default(),
+        );
         let s = String::from_utf8(buf).unwrap();
         assert!(
             s.contains("license|"),

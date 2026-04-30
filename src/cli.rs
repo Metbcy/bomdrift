@@ -388,6 +388,23 @@ pub struct DiffArgs {
     /// the OpenVEX spec.
     #[arg(long)]
     pub vex_default_justification: Option<String>,
+    /// Override the typosquat similarity threshold (default 0.92).
+    /// Range 0.0 - 1.0 inclusive. Lower values surface more findings
+    /// (and more false positives); higher values cut down to only
+    /// near-perfect matches. v0.9.6+.
+    #[arg(long, value_parser = parse_similarity_threshold)]
+    pub typosquat_similarity_threshold: Option<f64>,
+    /// Override the maintainer-age young-maintainer-days threshold
+    /// (default 90 days). Components whose top contributor's first
+    /// commit is younger than this trip a `YoungMaintainer` finding.
+    /// Must be >= 1. v0.9.6+.
+    #[arg(long, value_parser = clap::value_parser!(i64).range(1..))]
+    pub young_maintainer_days: Option<i64>,
+    /// Override the on-disk cache TTL in hours (default 24). Applies
+    /// uniformly to OSV / EPSS / KEV / Registry caches. Must be >= 1.
+    /// v0.9.6+.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    pub cache_ttl_hours: Option<u64>,
     #[arg(long)]
     pub debug_calibration: bool,
     /// Format for `--debug-calibration` rows. `pipe` (default, back-compat
@@ -485,4 +502,17 @@ impl InputFormat {
             InputFormat::Syft => Some(SbomFormat::Syft),
         }
     }
+}
+
+/// Clap value parser for `--typosquat-similarity-threshold`. Rejects
+/// values outside the inclusive 0.0..=1.0 range with a clear message
+/// (clap's built-in numeric range parser doesn't support `f64`).
+fn parse_similarity_threshold(s: &str) -> Result<f64, String> {
+    let v: f64 = s
+        .parse()
+        .map_err(|_| format!("expected a float in 0.0..=1.0, got {s:?}"))?;
+    if !v.is_finite() || !(0.0..=1.0).contains(&v) {
+        return Err(format!("expected a float in 0.0..=1.0, got {v}"));
+    }
+    Ok(v)
 }

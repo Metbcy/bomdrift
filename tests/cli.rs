@@ -1039,3 +1039,133 @@ fn diff_debug_calibration_prints_csv_lines_to_stderr() {
         "calibration output must NOT leak into stdout; got:\n{stdout}"
     );
 }
+
+#[test]
+fn diff_typosquat_similarity_threshold_rejects_out_of_range() {
+    // clap value_parser must reject < 0.0 / > 1.0 / non-numeric.
+    for bad in &["-0.1", "1.5", "two"] {
+        let out = Command::new(bin())
+            .current_dir(manifest_dir())
+            .args([
+                "diff",
+                "tests/fixtures/cdx-minimal.json",
+                "tests/fixtures/cdx-after.json",
+                "--no-osv",
+                "--typosquat-similarity-threshold",
+                bad,
+            ])
+            .output()
+            .expect("spawn bomdrift");
+        assert!(
+            !out.status.success(),
+            "expected clap to reject --typosquat-similarity-threshold {bad}, but exit was {}",
+            out.status
+        );
+    }
+}
+
+#[test]
+fn diff_young_maintainer_days_rejects_zero_and_negative() {
+    for bad in &["0", "-1", "abc"] {
+        let out = Command::new(bin())
+            .current_dir(manifest_dir())
+            .args([
+                "diff",
+                "tests/fixtures/cdx-minimal.json",
+                "tests/fixtures/cdx-after.json",
+                "--no-osv",
+                "--young-maintainer-days",
+                bad,
+            ])
+            .output()
+            .expect("spawn bomdrift");
+        assert!(
+            !out.status.success(),
+            "expected clap to reject --young-maintainer-days {bad}"
+        );
+    }
+}
+
+#[test]
+fn diff_cache_ttl_hours_rejects_zero_and_negative() {
+    for bad in &["0", "-3", "x"] {
+        let out = Command::new(bin())
+            .current_dir(manifest_dir())
+            .args([
+                "diff",
+                "tests/fixtures/cdx-minimal.json",
+                "tests/fixtures/cdx-after.json",
+                "--no-osv",
+                "--cache-ttl-hours",
+                bad,
+            ])
+            .output()
+            .expect("spawn bomdrift");
+        assert!(
+            !out.status.success(),
+            "expected clap to reject --cache-ttl-hours {bad}"
+        );
+    }
+}
+
+#[test]
+fn diff_typosquat_similarity_threshold_changes_calibration_row() {
+    // With a near-1.0 threshold, no typosquat findings surface — so no
+    // typosquat row in calibration output. Compare against the default
+    // run which DOES produce one.
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--debug-calibration",
+            "--typosquat-similarity-threshold",
+            "0.999",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+    assert!(out.status.success());
+    let stderr = String::from_utf8(out.stderr).expect("stderr utf-8");
+    let typosquat_lines: Vec<&str> = stderr
+        .lines()
+        .filter(|l| l.starts_with("typosquat|"))
+        .collect();
+    assert!(
+        typosquat_lines.is_empty(),
+        "raising similarity threshold to 0.999 must drop the existing typosquat finding; got: {stderr}"
+    );
+}
+
+#[test]
+fn diff_typosquat_similarity_threshold_surfaces_in_calibration_threshold_field() {
+    // Pick a low threshold that the existing axios-fixture finding still
+    // clears, and assert the threshold COLUMN reflects the override (not
+    // the unconditional 0.92 default).
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--debug-calibration",
+            "--typosquat-similarity-threshold",
+            "0.5",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+    assert!(out.status.success());
+    let stderr = String::from_utf8(out.stderr).expect("stderr utf-8");
+    let line = stderr
+        .lines()
+        .find(|l| l.starts_with("typosquat|"))
+        .expect("typosquat row");
+    let fields: Vec<&str> = line.split('|').collect();
+    let threshold: f64 = fields[3].parse().expect("threshold is float");
+    assert!(
+        (threshold - 0.5).abs() < 1e-9,
+        "calibration threshold field must reflect the active override; got {threshold}"
+    );
+}
