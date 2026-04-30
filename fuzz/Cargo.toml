@@ -1,0 +1,43 @@
+[package]
+name = "bomdrift-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+rust-version = "1.88"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = "1"
+
+[dependencies.bomdrift]
+path = ".."
+
+# Prevent cargo from treating this directory as part of the parent
+# workspace. cargo-fuzz expects fuzz/ to be its own workspace so the
+# nightly toolchain (required for libfuzzer instrumentation) doesn't
+# leak into the main build.
+[workspace]
+
+[[bin]]
+name = "parse_cyclonedx"
+path = "fuzz_targets/parse_cyclonedx.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_spdx"
+path = "fuzz_targets/parse_spdx.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_syft"
+path = "fuzz_targets/parse_syft.rs"
+test = false
+doc = false
+bench = false

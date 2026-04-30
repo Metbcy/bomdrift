@@ -1,0 +1,5 @@
+# cargo-fuzz / libFuzzer build + crash artifacts. The seed corpus
+# under corpus/ IS checked in (those are inputs, not outputs).
+/target
+/artifacts
+Cargo.lock

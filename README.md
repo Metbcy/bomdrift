@@ -293,6 +293,16 @@ cosign verify-blob \
 
 The Action verifies signatures automatically by default. Set `verify-signatures: false` on trusted mirrors to skip the cosign install step (~15s saved per run).
 
+### Continuous fuzzing (v0.9.8+)
+
+The CycloneDX, SPDX, and Syft JSON parsers are continuously fuzzed
+via [`cargo-fuzz`](https://rust-fuzz.github.io/book/cargo-fuzz/).
+Pull requests touching `src/parse/**` get a short fuzz pass per
+target on Linux nightly; a longer scheduled run executes weekly on
+`main`. Crash artifacts are uploaded for triage.
+See [`.github/workflows/fuzz.yml`](./.github/workflows/fuzz.yml) and
+[`fuzz/fuzz_targets/`](./fuzz/fuzz_targets/).
+
 ## Documentation
 
 - **[Docs site (mdBook)](https://metbcy.github.io/bomdrift/)** — full reference: CLI flags, every action input, output-format anatomy, per-enricher deep dives, architecture notes, roadmap.
