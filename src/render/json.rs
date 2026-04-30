@@ -39,11 +39,22 @@ use crate::enrich::Enrichment;
 
 pub fn render(cs: &ChangeSet, e: &Enrichment) -> String {
     let combined = serde_json::json!({"changes": cs, "enrichment": e});
+    #[allow(
+        clippy::expect_used,
+        reason = "invariant: serde_json::to_string_pretty cannot fail on a Value built from owned data with string keys"
+    )]
     serde_json::to_string_pretty(&combined).expect("serialize JSON")
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )]
     use super::*;
     use std::collections::HashMap;
 

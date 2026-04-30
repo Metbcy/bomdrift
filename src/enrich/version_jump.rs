@@ -106,6 +106,13 @@ fn extract_major(version: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )]
     use super::*;
     use crate::model::{Component, Ecosystem, Relationship};
 

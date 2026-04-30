@@ -138,6 +138,13 @@ fn diff_one_key(bs: &[&Component], as_: &[&Component], cs: &mut ChangeSet) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )]
     use super::*;
     use crate::model::{Ecosystem, Relationship, SbomFormat};
 

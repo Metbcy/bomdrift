@@ -214,6 +214,13 @@ pub fn open_unless_disabled_with_ttl(disabled: bool, ttl_hours: Option<u64>) -> 
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )]
     use super::*;
 
     fn fixed_clock() -> u64 {

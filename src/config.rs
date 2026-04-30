@@ -220,6 +220,13 @@ fn load_config(explicit: Option<&Path>) -> Result<Option<Config>> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )]
     use super::*;
     use crate::cli::DiffArgs;
 

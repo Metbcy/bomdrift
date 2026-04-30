@@ -93,6 +93,13 @@ pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )]
     use super::*;
 
     /// Re-export at module level for the existing tests below.
@@ -130,6 +137,7 @@ mod tests {
         let t = now();
         assert_eq!(t.unix_timestamp(), 1777593600);
         assert_eq!(format_ymd(t.date()), "2026-05-01");
+        // SAFETY: env mutation guarded by process-wide mutex above.
         unsafe {
             env::remove_var("SOURCE_DATE_EPOCH");
         }
@@ -138,10 +146,12 @@ mod tests {
     #[test]
     fn now_is_read_per_call_not_cached() {
         let _g = env_lock();
+        // SAFETY: env mutation guarded by process-wide mutex above.
         unsafe {
             env::set_var("SOURCE_DATE_EPOCH", "1000000000");
         }
         let a = now();
+        // SAFETY: env mutation guarded by process-wide mutex above.
         unsafe {
             env::set_var("SOURCE_DATE_EPOCH", "2000000000");
         }
@@ -149,6 +159,7 @@ mod tests {
         assert_ne!(a.unix_timestamp(), b.unix_timestamp());
         assert_eq!(a.unix_timestamp(), 1000000000);
         assert_eq!(b.unix_timestamp(), 2000000000);
+        // SAFETY: env mutation guarded by process-wide mutex above.
         unsafe {
             env::remove_var("SOURCE_DATE_EPOCH");
         }
@@ -157,11 +168,13 @@ mod tests {
     #[test]
     fn malformed_source_date_epoch_falls_back() {
         let _g = env_lock();
+        // SAFETY: env mutation guarded by process-wide mutex above.
         unsafe {
             env::set_var("SOURCE_DATE_EPOCH", "not-a-number");
         }
         // Should not panic; returns system clock now.
         let _ = now();
+        // SAFETY: env mutation guarded by process-wide mutex above.
         unsafe {
             env::remove_var("SOURCE_DATE_EPOCH");
         }
@@ -177,12 +190,14 @@ mod tests {
     #[test]
     fn is_expired_ordering() {
         let _g = env_lock();
+        // SAFETY: env mutation guarded by process-wide mutex above.
         unsafe {
             env::set_var("SOURCE_DATE_EPOCH", "1777593600");
         } // 2026-05-01
         assert!(is_expired(parse_ymd("2026-04-30").unwrap()));
         assert!(!is_expired(parse_ymd("2026-05-01").unwrap()));
         assert!(!is_expired(parse_ymd("2026-05-02").unwrap()));
+        // SAFETY: env mutation guarded by process-wide mutex above.
         unsafe {
             env::remove_var("SOURCE_DATE_EPOCH");
         }
