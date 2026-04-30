@@ -7,6 +7,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Coverage-report PR comment no longer autolinks to a fake parked
+  domain.** v0.9.8's coverage job uploaded the report under an
+  artifact name that ended in a real TLD and rendered the same string
+  in its sticky PR comment. Inside GitHub's web UI the backticks made
+  it inline code, but email and feed clients re-render comments with
+  their own autolinker that ignores backticks, so the bare
+  TLD-shaped token got linked to a real, unrelated parked domain and
+  produced exactly the kind of supply-chain-credibility hit a security
+  tool can't afford. The artifact is now named `coverage-lcov` (the
+  on-disk filename is still the standard one, so lcov-consuming tools
+  work unchanged), and the comment links directly to the workflow
+  run's artifacts tab so users have a real destination to follow.
+
 ## [0.9.8] - 2026-04-30
 
 The "code-review-driven hardening" milestone. External agent review surfaced
@@ -25,7 +40,7 @@ items, defers the rest as v1.0+ candidates with explicit rationale.
   Nightly Rust toolchain pinned per cargo-fuzz convention. Closes the
   textbook "untrusted-input parser" gap for a security tool.
 - **CI coverage report.** New `coverage` job in `.github/workflows/ci.yml`
-  runs `cargo-llvm-cov`, emits `lcov.info` as a workflow artifact, and posts
+  runs `cargo-llvm-cov`, emits the lcov report as a workflow artifact, and posts
   a sticky PR comment via `marocchino/sticky-pull-request-comment@v2` showing
   line-coverage percentage. **No `--fail-under-lines` gate yet** — coverage
   is informational for v0.9.8/v0.9.9 to establish a stable baseline before
