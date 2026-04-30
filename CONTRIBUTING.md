@@ -28,12 +28,14 @@ git clone https://github.com/Metbcy/bomdrift
 cd bomdrift
 
 cargo check --all-targets       # fast feedback while editing
-cargo test --release            # full test suite (~270+ tests as of v0.5)
-cargo clippy --all-targets --all-features -- -D warnings
-cargo fmt --all --check         # MUST pass; run `cargo fmt --all` to fix
+cargo test --release            # full test suite (~420 tests as of v0.9.6)
+rustup run 1.88 cargo clippy --all-targets --all-features -- -D warnings
+cargo fmt --all -- --check      # MUST pass; run `cargo fmt --all` to fix
 ```
 
-Rust 1.85+ required (the project uses edition 2024).
+Rust 1.88+ required (the project uses edition 2024; CI is pinned to
+1.88 to keep clippy lints stable across releases — see
+`Cargo.toml`'s `rust-version` field).
 
 ## Project conventions
 
@@ -100,6 +102,70 @@ Three layers, all run by `cargo test --release`:
 Network-touching enrichers should have a unit test for the network-
 failure path (fake fetcher returns `Err`) — the best-effort contract
 matters and silently breaking it would be an easy regression.
+
+### Test conventions (v0.9.5+)
+
+Tests that mutate `SOURCE_DATE_EPOCH` (directly or indirectly via
+`bomdrift::clock::*`) MUST acquire `clock::test_env_lock()` to serialize
+across the crate's parallel test threads. Without the lock, two tests
+running in parallel can read each other's mutated env var and
+intermittently fail in ways that look format-deterministic but aren't.
+
+```rust
+#[test]
+fn baseline_expiry_relative_to_source_date_epoch() {
+    let _lock = bomdrift::clock::test_env_lock();
+    // SAFETY: serialized by _lock above.
+    unsafe { std::env::set_var("SOURCE_DATE_EPOCH", "1735689600") }; // 2025-01-01
+    // ... test body ...
+}
+```
+
+The lock is a `std::sync::Mutex<()>` — re-entrant calls within a single
+test thread are fine, but a panic without the guard will poison it. If
+you see "PoisonError" in CI but not locally, a previous test panicked
+without releasing — fix the panicking test, not the poison handling.
+
+### Adding a new enricher
+
+The shortest viable PR shape, mirroring how `enrich::epss` was added in
+v0.8 and `enrich::registry` in v0.9:
+
+1. **`src/enrich/<name>.rs`** — pure `enrich(cs: &ChangeSet, ...) ->
+   Vec<<Name>Finding>` with a fail-soft fetcher boundary. Mirror the
+   shape of `src/enrich/osv.rs`.
+2. **Wire into `Enrichment`** — add a field to the
+   `bomdrift::enrich::Enrichment` struct in `src/enrich/mod.rs`; have
+   `lib.rs::run_diff` populate it.
+3. **Add a `--no-<name>` flag** to `src/cli.rs::DiffArgs`, plumb
+   through the `[diff] no_<name>` config key.
+4. **Renderers** — add a section to `render::markdown`,
+   `render::term`, `render::json`. For SARIF, add a stable rule ID
+   (`bomdrift.<name>`), a `partialFingerprints.primaryHash/v1`
+   identity tuple, and a fingerprint-stability test.
+5. **`--debug-calibration` row** — emit one
+   `<kind>|<key>|<score>|<threshold>` line per finding considered.
+6. **Docs** — add `docs/src/enrichers/<name>.md` and link it from
+   `docs/src/SUMMARY.md` and `docs/src/enrichers/overview.md`.
+7. **CHANGELOG** — `## [Unreleased]` entry under `### Added`.
+
+### Adding a new finding kind
+
+When a new finding kind is purely a rendering layer (e.g., a new
+synthetic ID for VEX export or a new SARIF rule for an existing
+enricher), the recipe is shorter:
+
+1. **Synthetic-id grammar** — extend
+   `bomdrift::vex::SyntheticFindingKind` and the
+   `parse_synthetic_id` parser. Round-trip must be exact.
+2. **SARIF rule** — add the rule descriptor to
+   `render::sarif::ALL_RULES` so it appears in `tool.driver.rules`
+   even with zero results, then a `partialFingerprints` identity
+   tuple for the new rule.
+3. **Markdown / terminal / JSON sections** — mirror the existing
+   per-finding sections.
+4. **Determinism test** — round-trip the rendered SARIF / VEX through
+   the parser and assert byte-for-byte equality with the input.
 
 ## Documentation
 
