@@ -7,6 +7,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Workflows opt into the Node.js 24 runner ahead of GitHub's
+  2026-06-02 forced-default.** Every workflow now sets
+  `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'` at the top-level
+  `env:` block, silencing the runner's "Node.js 20 actions are
+  deprecated" warning that was firing on every `actions/checkout`,
+  `upload-artifact`, and sticky-pull-request-comment step. Covers
+  `ci.yml`, `docs.yml`, `fuzz.yml`, `release.yml`, and
+  `sbom-diff.yml`. Remove the env var once Node.js 24 is the default
+  runtime (after 2026-09-16 per GitHub's deprecation timeline).
+
 ### Fixed
 
 - **Coverage-report PR comment no longer autolinks to a fake parked
