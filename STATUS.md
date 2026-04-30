@@ -19,8 +19,8 @@ keeping the project OSS-first: no hosted dashboard, no account, no telemetry.
 | Suppression expiry (`expires` + `reason`) | Supported (v0.8+) — time-boxed risk acceptance |
 | GitLab CI merge requests | Supported through the `examples/gitlab-ci/` template (v0.7+); comment-driven suppression supported via Cloudflare Worker bridge (v0.9+) |
 | GitHub Enterprise / self-hosted runners | Expected to work, not broadly tested yet |
-| Bitbucket Pipelines | Supported (v0.9+) — `examples/bitbucket-pipelines/` |
-| Azure DevOps Pipelines | Supported (v0.9+) — `examples/azure-devops/` |
+| Bitbucket Pipelines | Supported (v0.9+) — `examples/bitbucket-pipelines/`; comment-driven suppression via Cloudflare Worker bridge (v0.9.5+) |
+| Azure DevOps Pipelines | Supported (v0.9+) — `examples/azure-devops/`; comment-driven suppression via Cloudflare Worker bridge (v0.9.5+) |
 | VEX consume / emit | Supported (v0.9+) — OpenVEX 0.2.0 + CycloneDX VEX 1.6 |
 | SPDX expression evaluation | Supported (v0.9+) — full `Expression::evaluate` via `spdx` crate |
 | Registry-metadata enrichers (npm/PyPI/crates.io) | Supported (v0.9+) — recently-published, deprecated, maintainer-set-changed |

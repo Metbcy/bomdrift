@@ -1,3 +1,4 @@
+# Pinned to MSRV (1.88) intentionally; bump deliberately when updating Cargo.toml rust-version.
 name: docs
 
 on:
@@ -27,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.88
 
       - uses: Swatinem/rust-cache@v2
         with:

@@ -44,3 +44,33 @@ pipelines:
   pull-requests:
     "**":
       - step: *bomdrift-diff
+
+  # Custom (manual / API-triggered) pipelines. The comment-suppress bridge
+  # (examples/bitbucket-pipelines/comment-bridge/) triggers this one by
+  # name with a BOMDRIFT_NOTE_BODY variable carrying the raw comment body.
+  # See bridge README for the full security model. If you don't deploy
+  # the bridge, this step never runs.
+  custom:
+    bomdrift-comment-suppress:
+      - step:
+          name: bomdrift comment-driven suppress
+          script:
+            - |
+              if [ -z "${BOMDRIFT_NOTE_BODY:-}" ]; then
+                echo "BOMDRIFT_NOTE_BODY unset; refusing to run." >&2
+                exit 1
+              fi
+            - export BOMDRIFT_VERSION="0.9.0"
+            - apt-get update -qq && apt-get install -y -qq curl jq git
+            - cargo install bomdrift --locked --version "$BOMDRIFT_VERSION"
+            - bomdrift baseline add --from-comment "$BOMDRIFT_NOTE_BODY"
+            - git config user.name  "bomdrift-bot"
+            - git config user.email "bomdrift-bot@users.noreply.bitbucket.org"
+            - git add .bomdrift/baseline.json
+            - |
+              if git diff --cached --quiet; then
+                echo "baseline already contains the directive; nothing to commit"
+                exit 0
+              fi
+            - git commit -m "chore(bomdrift): suppress from PR comment"
+            - git push origin "HEAD:$BITBUCKET_BRANCH"
