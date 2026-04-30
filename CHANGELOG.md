@@ -7,6 +7,86 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-04-30
+
+The "code-review-driven hardening" milestone. External agent review surfaced
+nine recommendations across P1/P2/P3; v0.9.8 takes five of the six high-leverage
+items, defers the rest as v1.0+ candidates with explicit rationale.
+
+### Added
+
+- **Continuous parser fuzzing.** New `fuzz/` standalone sub-workspace with
+  three `cargo-fuzz` libfuzzer targets (`parse_cyclonedx`, `parse_spdx`,
+  `parse_syft`). Each target two-stages JSON validation before invoking the
+  bomdrift parser, scoping the fuzz to bomdrift-side parsing rather than
+  serde_json's well-tested layer. Seed corpus from `tests/fixtures/`.
+  New `.github/workflows/fuzz.yml` runs each target for 60s on PRs touching
+  `src/parse/**` or `fuzz/**`, and 600s weekly on a Sunday cron schedule.
+  Nightly Rust toolchain pinned per cargo-fuzz convention. Closes the
+  textbook "untrusted-input parser" gap for a security tool.
+- **CI coverage report.** New `coverage` job in `.github/workflows/ci.yml`
+  runs `cargo-llvm-cov`, emits `lcov.info` as a workflow artifact, and posts
+  a sticky PR comment via `marocchino/sticky-pull-request-comment@v2` showing
+  line-coverage percentage. **No `--fail-under-lines` gate yet** — coverage
+  is informational for v0.9.8/v0.9.9 to establish a stable baseline before
+  ratcheting in a later release. CONTRIBUTING.md gains a "Coverage" subsection
+  describing the policy.
+
+### Changed
+
+- **`unwrap`/`expect`/`panic`/`todo`/`unimplemented` lints now warn** at
+  crate root via `#![warn(clippy::unwrap_used, clippy::expect_used,
+  clippy::panic, clippy::todo, clippy::unimplemented)]`. Production code
+  audited; the four remaining `.expect()` sites
+  (`baseline.rs:389`, `render/json.rs:42`, `render/sarif.rs:84`,
+  `vex.rs:932`) are true invariants and gain explicit
+  `#[allow(clippy::expect_used, reason = "...")]` annotations citing the
+  why. Test modules opt-out via inner `#![allow(clippy::unwrap_used,
+  clippy::expect_used)]` (28 modules touched). Zero production `.unwrap()`
+  remain.
+- **Every `unsafe` block now carries a `// SAFETY:` comment.**
+  16 of 23 unsafe sites (the Rust 2024 `env::set_var` wrappers + a few
+  test helpers) lacked annotation. Added rationale to each, and enforce
+  going forward via `#![warn(clippy::undocumented_unsafe_blocks)]` at
+  crate root.
+
+### Refactored
+
+- **`src/lib.rs` 47 KB → 31 lines.** Extracted the 1,300-line `run_diff`
+  orchestration into a new `src/run.rs` module. `lib.rs` is now pure
+  re-exports + module declarations. Public API surface preserved
+  byte-for-byte: external consumers calling `bomdrift::run_diff(...)` get
+  the same function via re-export. Behavior-preserving — all 432 tests
+  pass without modification beyond import-path updates.
+
+### Documentation
+
+- README.md gains a "Continuous fuzzing (v0.9.8+)" subsection.
+- CONTRIBUTING.md gains a "Coverage" subsection.
+
+### Tests
+
+- 432 → 432 (no net change). Refactor commits are behavior-preserving.
+
+### Scope notes — what's deferred to v1.0
+
+The external review surfaced four other recommendations explicitly deferred:
+
+- **Remaining file splits** for `vex.rs` (50 KB), `render/markdown.rs`
+  (58 KB), `render/sarif.rs` (48 KB), `baseline.rs` (42 KB),
+  `enrich/typosquat.rs` (42 KB), `enrich/license.rs` (34 KB). The lib.rs
+  split was the highest-ROI single split; the others can land
+  organically as future PRs touch those files.
+- **Mutation testing audit** via `cargo-mutants`. High-signal but slow;
+  use as v1.0 audit tool, not a CI gate.
+- **Calibration FPR docs** — running bomdrift on top-1000 npm + PyPI for
+  12 months of releases needs data-collection infrastructure that
+  doesn't exist yet. Tracked separately.
+- **Coverage `--fail-under-lines` ratchet** — flip on after 2-3 releases
+  of visibility.
+- **WASM-sandboxed plugin model** — carryover from v0.9.7; conflicts with
+  single-binary tenet at current toolchain costs.
+
 ## [0.9.7] - 2026-04-29
 
 The "v0.9.6 follow-up backlog" milestone. Five concrete items from the

@@ -133,6 +133,17 @@ Network-touching enrichers should have a unit test for the network-
 failure path (fake fetcher returns `Err`) — the best-effort contract
 matters and silently breaking it would be an easy regression.
 
+### Coverage (v0.9.8+)
+
+CI runs `cargo llvm-cov` on every PR and posts a sticky comment with
+the overall line coverage % (the full `lcov.info` is uploaded as a
+workflow artifact). The job is informational for now — there is no
+`--fail-under-lines` threshold yet. The plan is to add a ratchet in
+v0.9.9 once 2–3 releases have made the baseline visible. Until then,
+the report is a nudge, not a gate; PRs that move coverage in the
+wrong direction without justification will get a review comment, not
+a red check.
+
 ### Test conventions (v0.9.5+)
 
 Tests that mutate `SOURCE_DATE_EPOCH` (directly or indirectly via

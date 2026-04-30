@@ -386,7 +386,13 @@ pub fn add_suppression_full(
         );
     }
 
-    let obj = doc.as_object_mut().expect("checked is_object above");
+    #[allow(
+        clippy::expect_used,
+        reason = "invariant: is_object() check above guarantees Value::Object so as_object_mut() returns Some"
+    )]
+    let obj = doc
+        .as_object_mut()
+        .expect("invariant: is_object() check above guarantees Value::Object");
     obj.entry("schema_version")
         .or_insert(serde_json::Value::from(1u64));
 
@@ -526,6 +532,13 @@ fn doc_kind(v: &serde_json::Value) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )]
     use super::*;
     use crate::enrich::typosquat::TyposquatFinding;
     use crate::enrich::version_jump::VersionJumpFinding;
@@ -852,12 +865,16 @@ mod tests {
         }
         impl Drop for Guard {
             fn drop(&mut self) {
+                // SAFETY: env mutation guarded by the `_lock` field below
+                // which holds the crate-wide `clock::test_env_lock()`
+                // mutex for the lifetime of this Guard.
                 unsafe {
                     std::env::remove_var("SOURCE_DATE_EPOCH");
                 }
             }
         }
         let _lock = crate::clock::test_env_lock();
+        // SAFETY: env mutation serialized by the `_lock` mutex guard above.
         unsafe {
             std::env::set_var("SOURCE_DATE_EPOCH", epoch.to_string());
         }

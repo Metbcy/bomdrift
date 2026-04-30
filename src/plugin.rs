@@ -351,6 +351,13 @@ fn invoke_blocking(
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )]
     use super::*;
     #[cfg(unix)]
     use crate::model::{Ecosystem, Relationship};
