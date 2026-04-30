@@ -2,10 +2,31 @@
 
 bomdrift is usable today as a local CLI and as a composite GitHub Action,
 with first-class templates + comment-driven suppression bridges for GitLab
-CI, Bitbucket Pipelines, and Azure DevOps Pipelines. The v0.9.6 line ships
+CI, Bitbucket Pipelines, and Azure DevOps Pipelines. The v0.9.x line ships
 the last items off the public roadmap (calibration knobs, OCI attestation,
 a plugin system) while keeping the project OSS-first: no hosted dashboard,
-no account, no telemetry.
+no account, no telemetry. v0.9.7 closes the v0.9.6 follow-up backlog
+(SPDX `WITH`-chain inheritance, last hardcoded threshold lifted, Windows
+plugin timeout, action.yml parity, air-gapped Sigstore).
+
+## What's new in v0.9.7
+
+Five polish items closing the v0.9.6 follow-up backlog:
+
+1. **SPDX `WITH`-chain exception inheritance.** `(X WITH ex) AND (Y)`
+   and `(X WITH ex_a) OR (X WITH ex_b)` now evaluate per-leaf with
+   proper AND/OR semantics: AND inherits a denied exception, OR
+   doesn't poison if another branch is permitted.
+2. **`--multi-major-delta <N>`.** Last hardcoded calibration threshold
+   lifted (default 2). Tunable via flag or `[diff] multi_major_delta`.
+3. **First-class Windows plugin timeout.** Replaced the manual
+   `Child::try_wait()` polling loop with the `wait-timeout` crate.
+4. **`action.yml` input parity** with the v0.7-v0.9.7 CLI surface.
+   Twenty-five new inputs cover VEX, license policy, enrichment
+   toggles, calibration, attestation, plugins.
+5. **Air-gapped / self-hosted Sigstore docs** — env-var passthrough
+   model documented (bomdrift inherits `SIGSTORE_REKOR_URL` etc.
+   without any flag-side changes).
 
 ## What's new in v0.9.6
 

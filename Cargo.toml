@@ -1,6 +1,6 @@
 [package]
 name = "bomdrift"
-version = "0.9.6"
+version = "0.9.7"
 edition = "2024"
 rust-version = "1.88"
 description = "SBOM diff with supply-chain risk signals (CVEs, typosquats, maintainer-age)."
