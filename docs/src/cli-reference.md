@@ -229,6 +229,48 @@ over the embedded snapshot when present and parseable.
 
 ## Calibration
 
+bomdrift's heuristic enrichers (typosquat, maintainer-age, registry
+metadata) ship with conservative defaults that work for most repos.
+When the defaults aren't right at scale, every threshold is tunable
+either through a `[diff]` block in `.bomdrift.toml` or via the
+matching CLI flag below. CLI flags override config values for
+one-off runs.
+
+#### `--typosquat-similarity-threshold <FLOAT>`
+
+Type: float in `[0.0, 1.0]`. Default: `0.92`.
+Config key: `[diff] typosquat_similarity_threshold`.
+
+Minimum normalized edit-distance similarity between a candidate
+package name and a top-list entry before bomdrift flags it as a
+possible typosquat. Higher values = stricter (fewer false
+positives, more false negatives). Lowering to `0.85` catches
+softer near-misses; raising to `0.95` only catches one- or
+two-character swaps on short names.
+
+#### `--young-maintainer-days <N>`
+
+Type: positive integer (days). Default: `90`.
+Config key: `[diff] young_maintainer_days`.
+
+A package's top contributor whose oldest commit is newer than this
+many days is flagged as a young-maintainer signal on
+Added / VersionChanged components. Defaults to a quarter; raise to
+`180` for stricter ecosystems, lower to `30` if your monorepo
+churns through new co-maintainers and you want a tighter signal.
+
+#### `--cache-ttl-hours <N>`
+
+Type: positive integer (hours). Default: `24`.
+Config key: `[diff] cache_ttl_hours`.
+
+Time-to-live for the OSV / EPSS / KEV / registry-metadata caches
+under `<XDG_CACHE_HOME>/bomdrift/`. The same TTL applies to all
+four caches (v0.9.6 unified the previously duplicated constants).
+Lower to `1` for fast-changing security feeds in a long-running
+self-hosted runner; raise to `168` (one week) when running offline
+or against archived SBOMs where freshness doesn't matter.
+
 #### `--debug-calibration`
 
 Off by default. When set, `bomdrift diff` writes one

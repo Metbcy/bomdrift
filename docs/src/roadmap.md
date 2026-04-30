@@ -3,6 +3,26 @@
 What's planned, what's deliberately out of scope, and what the
 acceptance criteria for new contributions look like.
 
+## Shipped (v0.9.6 — finish the roadmap)
+
+- **OCI artifact attestation verification** — `--before-attestation`,
+  `--after-attestation`, `--cosign-identity`, `--cosign-issuer`, and
+  `--require-attestation`. bomdrift shells out to
+  `cosign verify-attestation --type=cyclonedx` and consumes the
+  verified CycloneDX SBOM payload. See
+  [Attestation](./attestation.md).
+- **Custom rules / plugin system** — external-process plugins via
+  repeatable `--plugin <manifest.toml>`. JSON over stdin/stdout,
+  best-effort failures, new `bomdrift.plugin` SARIF rule. See
+  [Plugins](./plugins.md).
+- **Calibration knobs** — `--typosquat-similarity-threshold`,
+  `--young-maintainer-days`, `--cache-ttl-hours` flags plus matching
+  `[diff]` config keys. Every previously hardcoded threshold is now
+  configurable.
+- **Cache-TTL unification** — internal refactor consolidating the
+  four duplicated `CACHE_TTL_SECS` constants behind a single
+  `cache::ttl()` helper. No user-visible change.
+
 ## Shipped (v0.9.5 — polish + multi-SCM parity)
 
 - **Per-exception SPDX allow/deny** via `[license] allow_exceptions` /
@@ -59,31 +79,44 @@ acceptance criteria for new contributions look like.
 - OSV CVE aliases threaded through `VulnRef`.
 - `--debug-calibration-format jsonl` and `--output-file <PATH>`.
 
+## Investigated and decided
+
+- **GraphQL maintainer-age** — investigated again for v0.9.6 and
+  rejected. GitHub's GraphQL `history()` connection doesn't expose
+  ascending-date ordering, so finding the oldest contributor commit
+  still requires walking the cursor backward from the most recent
+  commit. REST's
+  `GET /repos/{o}/{r}/commits?author=X&per_page=1` plus `Link`-header
+  parsing for the last page lets bomdrift fetch a single author's
+  oldest commit in two requests. **Decided: REST stays.** Closing
+  this one off the roadmap permanently — re-open only if GitHub adds
+  ASC ordering to the GraphQL history connection.
+
+## Calibration
+
+All calibration thresholds are configurable via `.bomdrift.toml` and
+CLI flags. Tune `[diff] typosquat_similarity_threshold`,
+`young_maintainer_days`, `recently_published_days`, `cache_ttl_hours`.
+See [CLI reference](./cli-reference.md) for flag forms.
+
+## Blocked on upstream
+
+- **PyPI / crates.io maintainer-set-changed.** The npm enricher
+  (shipped v0.9) compares maintainer sets for VersionChanged
+  components by reading `registry.npmjs.org`'s per-version
+  `maintainers[]` array. PyPI's
+  `https://pypi.org/pypi/<pkg>/json` returns repository-level
+  maintainers but no per-version history. Crates.io's
+  `https://crates.io/api/v1/crates/<name>` returns repository-level
+  `crate.owners` but no per-version `published_by` history. If
+  either ecosystem ships a per-version maintainer endpoint, bomdrift
+  adds the enricher in a future minor release.
+
 ## Future candidates (not committed)
 
-- **PyPI / crates.io maintainer-set-changed** — blocked on
-  per-version maintainer data in upstream APIs.
-- **VEX vocabulary beyond OpenVEX's 8 justifications** — bomdrift
-  uses the spec's enum verbatim. If a richer vocab emerges we'll
-  follow.
-- **GraphQL maintainer-age** — was investigated for v0.4 and
-  deferred. Cursor-pagination cost still steers us toward REST.
-- **Custom rules / plugin system** — let consumers add
-  organization-specific enrichers. Probably WASM-based.
-- **OCI artifact attestation** — verify SBOMs are signed by the
-  build system before diffing.
-- **Reachability** — explicit non-goal; pair with Endor / Snyk for
-  call-graph analysis (see Non-goals below).
-
-### Calibration backlog
-
-Tunable thresholds where the default may not be the right answer
-at scale:
-
-- Typosquat `SIMILARITY_THRESHOLD` (currently 0.92).
-- Maintainer-age `YOUNG_MAINTAINER_DAYS` (currently 90).
-- Registry `MIN_PUBLISHED_AGE_DAYS` (currently 14).
-- OSV / EPSS / KEV / Registry cache TTL (currently 24h).
+_Empty as of v0.9.6._ The previously listed candidates have all been
+shipped, marked non-goal, decided against, or moved to "Blocked on
+upstream" above. New post-v0.9.6 ideas land here as they emerge.
 
 ## Non-goals
 
@@ -104,6 +137,20 @@ change-focused**: only on what's *new* in this diff. If you want
 "what's in my SBOM right now?", run an SCA scanner. If you want "what
 changed in this PR's deps that I should worry about?", that's
 bomdrift's question.
+
+### Reachability / call-graph analysis
+
+Determining whether the vulnerable function in a flagged advisory is
+actually invoked from your application's entry points is a
+fundamentally different analysis than diff-level supply-chain risk.
+It requires whole-program call-graph construction, language-specific
+runtime modeling (dynamic dispatch, reflection, eval), and an
+ever-growing per-CVE vulnerable-symbol database. The vendors who do
+this well — Endor Labs, Snyk Reachability — invest at a scale OSS
+bomdrift can't match, and the per-CVE symbol curation is the moat,
+not the call-graph engine itself. **Pair bomdrift with Endor or Snyk
+for reachability**; bomdrift answers "what changed", they answer
+"does the change reach prod code".
 
 ### Dependency-tree visualization
 
