@@ -843,9 +843,13 @@ mod tests {
     // ---- v0.8 expires + reason -----------------------------------------
 
     fn lock_today(epoch: i64) -> impl Drop {
-        // SAFETY: tests serialize on these env mutations via a process-wide
-        // mutex inside crate::clock; see clock::tests for the same pattern.
-        struct Guard;
+        // SAFETY: env mutations are serialized by the crate-wide
+        // `clock::test_env_lock()` mutex; `Guard` holds that lock for
+        // the lifetime of the returned token so `SOURCE_DATE_EPOCH`
+        // remains stable from set-time through baseline parse.
+        struct Guard {
+            _lock: std::sync::MutexGuard<'static, ()>,
+        }
         impl Drop for Guard {
             fn drop(&mut self) {
                 unsafe {
@@ -853,10 +857,11 @@ mod tests {
                 }
             }
         }
+        let _lock = crate::clock::test_env_lock();
         unsafe {
             std::env::set_var("SOURCE_DATE_EPOCH", epoch.to_string());
         }
-        Guard
+        Guard { _lock }
     }
 
     #[test]

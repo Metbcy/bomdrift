@@ -1110,11 +1110,14 @@ mod tests {
 
     // ---------- Phase H: emission ----------
 
-    fn pin_clock(secs: i64) {
-        // SAFETY: tests in this module are serialized by env_lock equivalence.
+    fn pin_clock(secs: i64) -> std::sync::MutexGuard<'static, ()> {
+        let lock = crate::clock::test_env_lock();
+        // SAFETY: env mutations are serialized by the returned mutex
+        // guard; the caller must hold it for the duration of the test.
         unsafe {
             std::env::set_var("SOURCE_DATE_EPOCH", secs.to_string());
         }
+        lock
     }
     fn unpin_clock() {
         unsafe {
@@ -1124,7 +1127,7 @@ mod tests {
 
     #[test]
     fn emission_roundtrip_via_loader() {
-        pin_clock(1_700_000_000);
+        let _lock = pin_clock(1_700_000_000);
         let cs = crate::diff::ChangeSet::default();
         let e = crate::enrich::Enrichment::default();
         let entries = vec![crate::baseline::BaselineEntry {
@@ -1165,7 +1168,7 @@ mod tests {
     fn emission_default_status_is_under_investigation() {
         // Anti-false-claim guard: a plain baseline entry without
         // `vex_status` must NOT be auto-promoted to `not_affected`.
-        pin_clock(1_700_000_000);
+        let _lock = pin_clock(1_700_000_000);
         let cs = crate::diff::ChangeSet::default();
         let e = crate::enrich::Enrichment::default();
         let entries = vec![crate::baseline::BaselineEntry {
@@ -1195,7 +1198,7 @@ mod tests {
 
     #[test]
     fn emission_byte_deterministic_with_source_date_epoch() {
-        pin_clock(1_700_000_000);
+        let _lock = pin_clock(1_700_000_000);
         let cs = crate::diff::ChangeSet::default();
         let e = crate::enrich::Enrichment::default();
         let entries = vec![crate::baseline::BaselineEntry {
