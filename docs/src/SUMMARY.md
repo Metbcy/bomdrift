@@ -33,6 +33,7 @@
 
 # Operations
 
+- [Plugins](./plugins.md)
 - [Release signing](./release-signing.md)
 - [Architecture](./architecture.md)
 
