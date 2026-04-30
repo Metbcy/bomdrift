@@ -10,6 +10,8 @@ pub mod refresh;
 pub mod render;
 pub mod vex;
 
+pub use crate::vex::{SyntheticFindingKind, parse_synthetic_id};
+
 use std::fs;
 use std::io::IsTerminal;
 use std::path::Path;
