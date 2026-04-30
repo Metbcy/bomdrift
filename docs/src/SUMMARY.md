@@ -18,6 +18,7 @@
 - [VEX](./vex.md)
 - [License policy](./license-policy.md)
 - [Baseline & suppression](./baseline.md)
+- [OCI attestation](./attestation.md)
 
 # Enrichers
 
@@ -32,6 +33,7 @@
 
 # Operations
 
+- [Plugins](./plugins.md)
 - [Release signing](./release-signing.md)
 - [Architecture](./architecture.md)
 

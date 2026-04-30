@@ -24,6 +24,8 @@ keeping the project OSS-first: no hosted dashboard, no account, no telemetry.
 | VEX consume / emit | Supported (v0.9+) — OpenVEX 0.2.0 + CycloneDX VEX 1.6 |
 | SPDX expression evaluation | Supported (v0.9+) — full `Expression::evaluate` via `spdx` crate |
 | Registry-metadata enrichers (npm/PyPI/crates.io) | Supported (v0.9+) — recently-published, deprecated, maintainer-set-changed |
+| Custom rules / plugin system | Supported (v0.9.6+) — external-process plugins via `--plugin <manifest>`; see [docs/src/plugins.md](docs/src/plugins.md) |
+| OCI attestation verification | Supported (v0.9.6+) — via `cosign verify-attestation` shell-out; see [docs/src/attestation.md](docs/src/attestation.md) |
 | Hosted dashboard / SaaS | Not planned |
 
 ## Out-of-scope by design

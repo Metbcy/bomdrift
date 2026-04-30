@@ -1,0 +1,6 @@
+[plugin]
+name = "banned-packages"
+description = "Flag dependencies on the org-maintained banned-packages list"
+exec = "./check-banned.sh"
+timeout_ms = 5000
+invoke_on = ["added", "version-changed"]

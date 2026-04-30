@@ -120,6 +120,21 @@ vex_default_justification = "vulnerable_code_not_in_execute_path"
 `vex_author` falls back to `repo_url` when unset; falls back to
 `"bomdrift"` when both are missing.
 
+## Justification vocabulary
+
+bomdrift uses the OpenVEX 0.2.0 spec's standard justification values
+verbatim: `component_not_present`, `vulnerable_code_not_present`,
+`vulnerable_code_not_in_execute_path`,
+`vulnerable_code_cannot_be_controlled_by_adversary`,
+`inline_mitigations_already_exist`, plus the
+`under_investigation`-related justifications the spec defines.
+Richer justification vocabularies (per-organization tags,
+custom-reason strings, tool-specific extensions) are out of scope —
+authoring against a single canonical enum keeps `--emit-vex` output
+interoperable with any OpenVEX consumer. If the OpenVEX spec evolves
+to add new justifications, bomdrift follows the spec; non-spec
+justifications won't be invented here.
+
 ## Worked rotation example
 
 1. Run a diff that surfaces `GHSA-evil` on `pkg:npm/foo@1.0.0`.
