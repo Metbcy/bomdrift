@@ -262,6 +262,7 @@ mod tests {
             cosign_identity: None,
             cosign_issuer: None,
             require_attestation: false,
+            plugin: Vec::new(),
         }
     }
 

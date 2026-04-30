@@ -179,6 +179,7 @@ fn enrich_with(
         maintainer_set_changed: Vec::new(),
         vex_annotations: std::collections::HashMap::new(),
         vex_suppressed_count: 0,
+        plugin_findings: Vec::new(),
     })
 }
 

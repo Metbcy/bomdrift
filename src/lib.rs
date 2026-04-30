@@ -7,6 +7,7 @@ pub mod diff;
 pub mod enrich;
 pub mod model;
 pub mod parse;
+pub mod plugin;
 pub mod refresh;
 pub mod render;
 pub mod vex;
@@ -249,6 +250,22 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
         enrichment.recently_published = findings.recently_published;
         enrichment.deprecated = findings.deprecated;
         enrichment.maintainer_set_changed = findings.maintainer_set_changed;
+    }
+
+    // Plugin findings (Phase C, v0.9.6). Run after every built-in
+    // enricher so plugins observe the same `cs` view bomdrift renders;
+    // before baseline so plugin findings can be baselined too. Plugin
+    // failures degrade gracefully — a malformed manifest aborts the
+    // run (config error), but plugin runtime failures emit only a
+    // BOMDRIFT_DEBUG-gated stderr warning and contribute no findings.
+    if !args.plugin.is_empty() {
+        let mut manifests = Vec::with_capacity(args.plugin.len());
+        for path in &args.plugin {
+            let manifest = plugin::load_manifest(path)
+                .with_context(|| format!("loading --plugin {}", path.display()))?;
+            manifests.push(manifest);
+        }
+        enrichment.plugin_findings = plugin::run_plugins(&manifests, &cs);
     }
 
     // Apply the baseline AFTER all enrichers run — suppression operates on

@@ -438,6 +438,13 @@ pub struct DiffArgs {
     /// v0.9.6+.
     #[arg(long)]
     pub require_attestation: bool,
+    /// Path to a plugin manifest TOML. Repeatable. Each plugin is an
+    /// external executable invoked once per added / version-changed
+    /// component with JSON over stdin/stdout. Plugin failures (timeout,
+    /// non-zero exit, malformed JSON) drop their findings without
+    /// failing the diff. v0.9.6+.
+    #[arg(long, action = clap::ArgAction::Append)]
+    pub plugin: Vec<PathBuf>,
     #[arg(long)]
     pub debug_calibration: bool,
     /// Format for `--debug-calibration` rows. `pipe` (default, back-compat

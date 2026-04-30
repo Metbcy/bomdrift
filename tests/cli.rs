@@ -1215,3 +1215,95 @@ fn diff_require_attestation_demands_both_attestation_flags() {
         "expected clap to reject --require-attestation without both attestation flags"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn diff_plugin_end_to_end_emits_finding_in_markdown_and_sarif() {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = temp_dir("plugin-e2e");
+
+    let script = dir.join("flag.sh");
+    {
+        let mut f = fs::File::create(&script).unwrap();
+        f.write_all(
+            b"#!/bin/sh\ncat > /dev/null\necho '{\"findings\":[{\"kind\":\"banned\",\"message\":\"left-pad is banned\",\"severity\":\"warning\",\"rule_id\":\"banned/left-pad\"}]}'\n"
+        ).unwrap();
+        f.sync_all().unwrap();
+    }
+    let mut perms = fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script, perms).unwrap();
+
+    let manifest_path = dir.join("plugin.toml");
+    fs::write(
+        &manifest_path,
+        format!(
+            r#"
+[plugin]
+name = "banned"
+exec = "{}"
+invoke_on = ["added"]
+"#,
+            script.display()
+        ),
+    )
+    .unwrap();
+
+    // Markdown
+    let md = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--output",
+            "markdown",
+            "--plugin",
+            &manifest_path.display().to_string(),
+        ])
+        .output()
+        .expect("spawn bomdrift");
+    assert!(
+        md.status.success(),
+        "exit: {} stderr: {}",
+        md.status,
+        String::from_utf8_lossy(&md.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&md.stdout);
+    assert!(
+        stdout.contains("Plugin findings"),
+        "missing 'Plugin findings' header in:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("banned/left-pad"),
+        "missing rule_id in markdown:\n{stdout}"
+    );
+
+    // SARIF
+    let sarif = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--output",
+            "sarif",
+            "--plugin",
+            &manifest_path.display().to_string(),
+        ])
+        .output()
+        .expect("spawn bomdrift");
+    assert!(sarif.status.success());
+    let sarif_str = String::from_utf8_lossy(&sarif.stdout);
+    assert!(
+        sarif_str.contains("\"ruleId\": \"bomdrift.plugin\""),
+        "missing bomdrift.plugin result in SARIF"
+    );
+    assert!(sarif_str.contains("banned/left-pad"));
+
+    fs::remove_dir_all(&dir).ok();
+}
