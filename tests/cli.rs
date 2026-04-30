@@ -1169,3 +1169,49 @@ fn diff_typosquat_similarity_threshold_surfaces_in_calibration_threshold_field()
         "calibration threshold field must reflect the active override; got {threshold}"
     );
 }
+
+#[test]
+fn diff_before_attestation_conflicts_with_positional_before() {
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--before-attestation",
+            "ghcr.io/example/img:tag",
+            "--cosign-identity",
+            "https://github.com/example/.+",
+            "--cosign-issuer",
+            "https://token.actions.githubusercontent.com",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+    assert!(
+        !out.status.success(),
+        "expected clap to reject --before-attestation alongside positional `before`"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("cannot be used with") || stderr.contains("conflicts"),
+        "expected conflicts-with diagnostic; got: {stderr}"
+    );
+}
+
+#[test]
+fn diff_require_attestation_demands_both_attestation_flags() {
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--require-attestation",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+    assert!(
+        !out.status.success(),
+        "expected clap to reject --require-attestation without both attestation flags"
+    );
+}

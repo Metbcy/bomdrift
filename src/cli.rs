@@ -210,9 +210,14 @@ impl From<Platform> for markdown::Platform {
 #[derive(Args, Debug)]
 pub struct DiffArgs {
     /// Path to the "before" SBOM (CycloneDX, SPDX, or Syft JSON).
-    pub before: PathBuf,
+    /// Optional when `--before-attestation` is used to fetch the SBOM
+    /// from an OCI registry instead.
+    #[arg(required_unless_present = "before_attestation")]
+    pub before: Option<PathBuf>,
     /// Path to the "after" SBOM (CycloneDX, SPDX, or Syft JSON).
-    pub after: PathBuf,
+    /// Optional when `--after-attestation` is used.
+    #[arg(required_unless_present = "after_attestation")]
+    pub after: Option<PathBuf>,
     /// Path to a repo policy config file. When omitted, `.bomdrift.toml` is
     /// loaded if it exists in the current working directory.
     #[arg(long)]
@@ -405,6 +410,34 @@ pub struct DiffArgs {
     /// v0.9.6+.
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     pub cache_ttl_hours: Option<u64>,
+    /// Fetch the "before" SBOM as a cosign-verified attestation
+    /// attached to an OCI artifact instead of reading a local file.
+    /// Mutually exclusive with the positional `before` argument.
+    /// Requires `--cosign-identity` and `--cosign-issuer`. v0.9.6+.
+    #[arg(long, conflicts_with = "before")]
+    pub before_attestation: Option<String>,
+    /// Fetch the "after" SBOM as a cosign-verified attestation
+    /// attached to an OCI artifact. v0.9.6+.
+    #[arg(long, conflicts_with = "after")]
+    pub after_attestation: Option<String>,
+    /// Regex passed to `cosign verify-attestation
+    /// --certificate-identity-regexp`. Required when either
+    /// `--before-attestation` or `--after-attestation` is set.
+    /// Example: `https://github.com/owner/.+`. v0.9.6+.
+    #[arg(long)]
+    pub cosign_identity: Option<String>,
+    /// URL passed to `cosign verify-attestation
+    /// --certificate-oidc-issuer`. Required alongside
+    /// `--cosign-identity`. Example:
+    /// `https://token.actions.githubusercontent.com`. v0.9.6+.
+    #[arg(long)]
+    pub cosign_issuer: Option<String>,
+    /// Refuse to fall back to local-file SBOMs: both sides MUST come
+    /// from a verified OCI attestation. Implies that
+    /// `--before-attestation` and `--after-attestation` are both set.
+    /// v0.9.6+.
+    #[arg(long)]
+    pub require_attestation: bool,
     #[arg(long)]
     pub debug_calibration: bool,
     /// Format for `--debug-calibration` rows. `pipe` (default, back-compat

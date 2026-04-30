@@ -1,3 +1,4 @@
+pub mod attestation;
 pub mod baseline;
 pub mod cli;
 pub mod clock;
@@ -132,13 +133,41 @@ fn run_baseline(action: BaselineAction) -> Result<()> {
 fn run_diff(mut args: DiffArgs) -> Result<()> {
     config::apply_diff_config(&mut args)?;
 
+    if args.require_attestation
+        && (args.before_attestation.is_none() || args.after_attestation.is_none())
+    {
+        anyhow::bail!(
+            "--require-attestation needs both --before-attestation and --after-attestation"
+        );
+    }
+
     let output = args.output.unwrap_or(OutputFormat::Terminal);
     let format = args.format.unwrap_or(cli::InputFormat::Auto);
     let fail_on = args.fail_on.unwrap_or(FailOn::None);
 
     let format_hint = format.to_sbom_format();
-    let before = load_sbom(&args.before, format_hint, args.include_file_components)?;
-    let after = load_sbom(&args.after, format_hint, args.include_file_components)?;
+    let before = load_sbom_or_attestation(
+        args.before.as_deref(),
+        args.before_attestation.as_deref(),
+        args.cosign_identity.as_deref(),
+        args.cosign_issuer.as_deref(),
+        format_hint,
+        args.include_file_components,
+        "before",
+        args.debug_calibration,
+        args.debug_calibration_format,
+    )?;
+    let after = load_sbom_or_attestation(
+        args.after.as_deref(),
+        args.after_attestation.as_deref(),
+        args.cosign_identity.as_deref(),
+        args.cosign_issuer.as_deref(),
+        format_hint,
+        args.include_file_components,
+        "after",
+        args.debug_calibration,
+        args.debug_calibration_format,
+    )?;
 
     let mut cs = diff::diff(&before, &after);
 
@@ -778,14 +807,96 @@ fn load_sbom(
 ) -> Result<model::Sbom> {
     let raw = fs::read_to_string(path)
         .with_context(|| format!("reading SBOM file: {}", path.display()))?;
-    let value: serde_json::Value = serde_json::from_str(&raw)
-        .with_context(|| format!("parsing JSON in: {}", path.display()))?;
+    parse_sbom_bytes(
+        &raw,
+        &path.display().to_string(),
+        format_hint,
+        include_file_components,
+    )
+}
+
+fn parse_sbom_bytes(
+    raw: &str,
+    source_label: &str,
+    format_hint: Option<model::SbomFormat>,
+    include_file_components: bool,
+) -> Result<model::Sbom> {
+    let value: serde_json::Value =
+        serde_json::from_str(raw).with_context(|| format!("parsing JSON in: {source_label}"))?;
     let mut sbom = parse::parse_with_format(value, format_hint)
-        .with_context(|| format!("normalizing SBOM from: {}", path.display()))?;
+        .with_context(|| format!("normalizing SBOM from: {source_label}"))?;
     if !include_file_components {
         parse::filter_file_components(&mut sbom);
     }
     Ok(sbom)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn load_sbom_or_attestation(
+    path: Option<&Path>,
+    oci_ref: Option<&str>,
+    cosign_identity: Option<&str>,
+    cosign_issuer: Option<&str>,
+    format_hint: Option<model::SbomFormat>,
+    include_file_components: bool,
+    side: &str,
+    debug_calibration: bool,
+    debug_format: crate::cli::DebugFormat,
+) -> Result<model::Sbom> {
+    if let Some(oci) = oci_ref {
+        let identity = cosign_identity.ok_or_else(|| {
+            anyhow::anyhow!(
+                "--{side}-attestation requires --cosign-identity (regex passed to cosign --certificate-identity-regexp)"
+            )
+        })?;
+        let issuer = cosign_issuer.ok_or_else(|| {
+            anyhow::anyhow!(
+                "--{side}-attestation requires --cosign-issuer (URL passed to cosign --certificate-oidc-issuer)"
+            )
+        })?;
+        let body = attestation::fetch_verified_sbom(oci, identity, issuer)
+            .with_context(|| format!("fetching --{side}-attestation {oci}"))?;
+        if debug_calibration {
+            // One row per verified attestation; surfaces the cert
+            // regex cosign accepted so adopters can confirm policy.
+            let _ =
+                write_attestation_calibration(&mut std::io::stderr(), oci, identity, debug_format);
+        }
+        return parse_sbom_bytes(
+            &body,
+            &format!("attestation:{oci}"),
+            format_hint,
+            include_file_components,
+        );
+    }
+    let path = path.ok_or_else(|| {
+        anyhow::anyhow!(
+            "internal: {side} requires either a positional path or --{side}-attestation"
+        )
+    })?;
+    load_sbom(path, format_hint, include_file_components)
+}
+
+fn write_attestation_calibration<W: std::io::Write>(
+    out: &mut W,
+    oci_ref: &str,
+    identity: &str,
+    format: crate::cli::DebugFormat,
+) -> std::io::Result<()> {
+    match format {
+        crate::cli::DebugFormat::Pipe => {
+            writeln!(out, "attestation|{oci_ref}|verified|{identity}")
+        }
+        crate::cli::DebugFormat::Jsonl => {
+            let row = serde_json::json!({
+                "kind": "attestation",
+                "key": oci_ref,
+                "score": "verified",
+                "threshold": identity,
+            });
+            writeln!(out, "{row}")
+        }
+    }
 }
 
 #[cfg(test)]

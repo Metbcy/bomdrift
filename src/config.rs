@@ -219,8 +219,8 @@ mod tests {
 
     fn args() -> DiffArgs {
         DiffArgs {
-            before: "before.json".into(),
-            after: "after.json".into(),
+            before: Some("before.json".into()),
+            after: Some("after.json".into()),
             config: None,
             output: None,
             format: None,
@@ -257,6 +257,11 @@ mod tests {
             typosquat_similarity_threshold: None,
             young_maintainer_days: None,
             cache_ttl_hours: None,
+            before_attestation: None,
+            after_attestation: None,
+            cosign_identity: None,
+            cosign_issuer: None,
+            require_attestation: false,
         }
     }
 
