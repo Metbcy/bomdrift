@@ -79,6 +79,9 @@ pub struct DiffConfig {
     pub young_maintainer_days: Option<i64>,
     /// Override the on-disk cache TTL in hours (default 24). v0.9.6+.
     pub cache_ttl_hours: Option<u64>,
+    /// Override the version-jump multi-major-delta threshold (default 2).
+    /// v0.9.7+.
+    pub multi_major_delta: Option<u32>,
 }
 
 pub fn apply_diff_config(args: &mut DiffArgs) -> Result<()> {
@@ -172,6 +175,9 @@ fn apply_loaded_diff_config(args: &mut DiffArgs, config: Config) {
     if args.cache_ttl_hours.is_none() {
         args.cache_ttl_hours = diff.cache_ttl_hours;
     }
+    if args.multi_major_delta.is_none() {
+        args.multi_major_delta = diff.multi_major_delta;
+    }
 
     // [license] block: CLI flags override (not merge) when set. Mirrors
     // Dependency Review Action semantics so users moving between bomdrift
@@ -257,6 +263,7 @@ mod tests {
             typosquat_similarity_threshold: None,
             young_maintainer_days: None,
             cache_ttl_hours: None,
+            multi_major_delta: None,
             before_attestation: None,
             after_attestation: None,
             cosign_identity: None,

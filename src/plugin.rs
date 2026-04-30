@@ -40,6 +40,12 @@
 //! still renders. This matches the contract used by every other v0.9
 //! enricher (OSV / EPSS / KEV / Registry).
 //!
+//! Timeouts are enforced via the `wait-timeout` crate (v0.9.7+), which
+//! provides a proper platform-aware wait primitive — a real
+//! `WaitForSingleObject` on Windows and a self-pipe / sigchld setup
+//! on Unix. The earlier 25ms `try_wait()` polling loop is gone; this
+//! makes Windows plugin timeouts first-class instead of best-effort.
+//!
 //! ## Stability
 //!
 //! The wire shape above is `v1` and may evolve. We expose
@@ -54,16 +60,13 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use wait_timeout::ChildExt;
 
 use crate::diff::ChangeSet;
 use crate::model::Component;
 
 const PROTOCOL_VERSION: u32 = 1;
 const DEFAULT_TIMEOUT_MS: u64 = 5000;
-/// Polling interval used while waiting for a plugin to exit. Small
-/// enough that a 100ms timeout is observed within ~110ms; large enough
-/// that a fast plugin doesn't pay a full poll-cycle cost.
-const POLL_INTERVAL_MS: u64 = 25;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -314,40 +317,36 @@ fn invoke_blocking(
     }
 
     let timeout = Duration::from_millis(manifest.timeout_ms);
-    let poll = Duration::from_millis(POLL_INTERVAL_MS);
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait().context("polling plugin process")? {
-            Some(status) => {
-                let mut stdout = String::new();
-                if let Some(mut s) = child.stdout.take() {
-                    use std::io::Read;
-                    let _ = s.read_to_string(&mut stdout);
-                }
-                if !status.success() {
-                    let mut stderr = String::new();
-                    if let Some(mut s) = child.stderr.take() {
-                        use std::io::Read;
-                        let _ = s.read_to_string(&mut stderr);
-                    }
-                    anyhow::bail!("plugin exited {status}; stderr: {}", stderr.trim());
-                }
-                let parsed: PluginOutput =
-                    serde_json::from_str(stdout.trim()).with_context(|| {
-                        format!("parsing plugin stdout as JSON (got {} bytes)", stdout.len())
-                    })?;
-                return Ok(parsed.findings);
-            }
-            None => {
-                if start.elapsed() >= timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    anyhow::bail!("plugin timed out after {}ms", manifest.timeout_ms);
-                }
-                std::thread::sleep(poll);
-            }
+    // `wait_timeout` returns `Some(status)` if the child exits within
+    // the budget, or `None` on timeout. The crate handles platform
+    // differences (a real WaitForSingleObject on Windows; a
+    // self-pipe + sigchld setup on Unix) which the previous
+    // try_wait()-polling loop only approximated.
+    let status = match child.wait_timeout(timeout).context("waiting for plugin")? {
+        Some(status) => status,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            anyhow::bail!("plugin timed out after {}ms", manifest.timeout_ms);
         }
+    };
+
+    let mut stdout = String::new();
+    if let Some(mut s) = child.stdout.take() {
+        use std::io::Read;
+        let _ = s.read_to_string(&mut stdout);
     }
+    if !status.success() {
+        let mut stderr = String::new();
+        if let Some(mut s) = child.stderr.take() {
+            use std::io::Read;
+            let _ = s.read_to_string(&mut stderr);
+        }
+        anyhow::bail!("plugin exited {status}; stderr: {}", stderr.trim());
+    }
+    let parsed: PluginOutput = serde_json::from_str(stdout.trim())
+        .with_context(|| format!("parsing plugin stdout as JSON (got {} bytes)", stdout.len()))?;
+    Ok(parsed.findings)
 }
 
 #[cfg(test)]

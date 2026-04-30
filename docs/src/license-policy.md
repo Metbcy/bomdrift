@@ -114,7 +114,52 @@ back-compat; it will be removed in v1.0.
 
 ### `WITH` (exception) granularity
 
-`WITH <exception>` parses cleanly and the base license is checked
-against allow/deny. Per-exception allow/deny granularity (e.g.
-"allow `Apache-2.0 WITH LLVM-exception` but not other Apache-with-X
-combos") is a future ask — not in v0.9 scope.
+Per-exception allow/deny is configured with
+[`--allow-exception` / `--deny-exception`](./cli-reference.md#--allow-exception-list--deny-exception-list)
+(or `[license] allow_exceptions` / `deny_exceptions` in `.bomdrift.toml`).
+When either list is non-empty, the right-hand side of every `WITH`
+clause is evaluated against it: `Apache-2.0 WITH LLVM-exception` is
+permitted iff `Apache-2.0` passes the base policy AND `LLVM-exception`
+is on the allow list (or absent from a non-empty deny list). Empty
+exception lists preserve v0.9 behavior — exceptions are informational
+only.
+
+#### Compound-expression inheritance (v0.9.7)
+
+v0.9.7 refines how exception decisions propagate through compound
+expressions. The rules:
+
+1. **AND inherits**: `(X WITH ex) AND (Y)` denies if **either** sub-clause
+   would deny on its own. A denied exception in any conjunct denies the
+   whole expression — every required atomic must be satisfiable, so a
+   poisoned `WITH` clause poisons the conjunction.
+2. **OR does not poison**: `(X WITH ex_a) OR (X WITH ex_b)` is permitted
+   when **at least one** branch is permitted. A denied exception on one
+   branch doesn't sink the expression as long as another branch
+   resolves cleanly.
+3. **Bare exception lookup**: `WITH <exception>` without an
+   allow/deny exception list configured falls through to v0.9 behavior
+   (informational; the base license alone gates).
+4. **Deny still wins atomically**: a base license on the deny list
+   denies regardless of the exception attached.
+
+##### Worked examples
+
+Assume `[license] allow = ["Apache-2.0", "MIT"]`,
+`allow_exceptions = ["LLVM-exception"]`,
+`deny_exceptions = ["Classpath-exception-2.0"]`.
+
+| Expression | Resolution | Why |
+|---|---|---|
+| `Apache-2.0 WITH LLVM-exception` | **permit** | base allowed, exception allowed |
+| `Apache-2.0 WITH Classpath-exception-2.0` | **deny** | exception on deny list |
+| `Apache-2.0 WITH Some-other-exception` | **deny** | base allowed, but exception not on the non-empty allow list |
+| `(Apache-2.0 WITH LLVM-exception) AND BSD-3-Clause` | **deny** | AND inherits — `BSD-3-Clause` not on allow list, denies the conjunction even though the `WITH` half is fine |
+| `(Apache-2.0 WITH LLVM-exception) AND MIT` | **permit** | both conjuncts pass independently |
+| `(Apache-2.0 WITH Classpath-exception-2.0) AND MIT` | **deny** | denied exception poisons the AND |
+| `(Apache-2.0 WITH Classpath-exception-2.0) OR (Apache-2.0 WITH LLVM-exception)` | **permit** | OR doesn't poison — the LLVM branch resolves cleanly |
+| `(Apache-2.0 WITH Classpath-exception-2.0) OR (GPL-3.0-only)` | **deny** | both branches denied (one by exception, one by missing-from-allow) |
+
+The runtime evaluator constructs a closure over the allow / deny
+exception sets and lets the `spdx` crate's expression-evaluation walk
+the tree; the rules above describe the closure's per-leaf decision.

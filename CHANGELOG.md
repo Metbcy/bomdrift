@@ -7,6 +7,123 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-04-29
+
+The "v0.9.6 follow-up backlog" milestone. Five concrete items from the
+v0.9.6 release notes' "Suggested next milestone candidates" list shipped
+in one polish release: per-exception SPDX inheritance through compound
+expressions, the last hardcoded calibration threshold lifted, proper
+Windows plugin process timeouts, full `action.yml` parity with the CLI
+flag surface, and air-gapped Sigstore documentation.
+
+### Added
+
+- **`--multi-major-delta <u32>`** CLI flag and matching
+  `[diff] multi_major_delta` config key (default `2`, validated `>= 1`).
+  Lifts the last hardcoded calibration threshold:
+  `version_jump::MIN_MAJOR_DELTA`. Raise to reduce false positives on
+  legitimate major-version-bump-heavy ecosystems; lower to flag any
+  major bump (1.x → 2.x). `--debug-calibration` rows now emit the
+  *active* delta rather than the const default.
+- **`action.yml` input parity** with the v0.7-v0.9.7 CLI surface.
+  Twenty-five new inputs now map to their corresponding CLI flags:
+  `vex`, `emit-vex`, `vex-author`, `vex-default-justification`,
+  `allow-licenses`, `deny-licenses`, `allow-exception`,
+  `deny-exception`, `allow-ambiguous-licenses`, `no-epss`, `no-kev`,
+  `no-registry`, `fail-on-epss`, `recently-published-days`,
+  `typosquat-similarity-threshold`, `young-maintainer-days`,
+  `cache-ttl-hours`, `multi-major-delta`, `before-attestation`,
+  `after-attestation`, `cosign-identity`, `cosign-issuer`,
+  `require-attestation`, `plugin`. Multi-line inputs (`vex`, `plugin`)
+  iterate one flag per non-empty line. Empty inputs contribute no
+  CLI args, so existing workflows are byte-identical without changes.
+- **Air-gapped / self-hosted Sigstore documentation** in
+  `docs/src/attestation.md`. Documents env vars cosign respects and
+  bomdrift inherits unchanged: `SIGSTORE_REKOR_URL`,
+  `COSIGN_REKOR_URL`, `SIGSTORE_FULCIO_URL`, `COSIGN_FULCIO_URL`,
+  `SIGSTORE_OIDC_ISSUER`, `COSIGN_OIDC_ISSUER`, `SIGSTORE_ROOT_FILE`,
+  `COSIGN_REPOSITORY`, `TUF_ROOT`. Includes a worked GitHub Actions
+  example with internal Sigstore endpoints, key-based attestation
+  fallback notes (for true air-gap where keyless OIDC isn't
+  reachable), and a 6-item troubleshooting checklist.
+
+### Changed
+
+- **SPDX `WITH`-chain exception inheritance through compound
+  expressions.** v0.9.5 added per-exception allow/deny via
+  `[license] allow_exceptions` / `deny_exceptions`, but the evaluator
+  only checked the immediate atom. v0.9.7 evaluates each leaf in the
+  expression tree and combines outcomes via the SPDX crate's native
+  AND/OR semantics:
+  - `(Apache-2.0 WITH LLVM-exception) AND (BSD-3-Clause)` with
+    `deny_exceptions=[LLVM-exception]` is now correctly **denied**
+    (the AND-chain inherits the exception denial).
+  - `(Apache-2.0 WITH LLVM-exception) OR
+    (Apache-2.0 WITH Classpath-exception-2.0)` with
+    `allow_exceptions=[LLVM-exception]` (Classpath not allowed) is
+    correctly **permitted** (the LLVM branch wins; OR doesn't poison).
+  - Single-WITH expressions (no compound) keep the v0.9.5 wording for
+    back-compat. Compound violations append `" (in <raw expression>)"`
+    so users can locate the offending atom.
+- **Plugin process timeout** now uses the `wait-timeout` crate
+  (~50kb, `libc`-only transitive). Replaces the v0.9.6 manual
+  `Child::try_wait()` polling loop. Behavior unchanged on Unix; on
+  Windows the kill-on-timeout path is now first-class instead of
+  best-effort. Preserves the existing best-effort failure semantics
+  (timeout drops the offending plugin's findings, logs a warning at
+  `BOMDRIFT_DEBUG=1`, rest of the report renders).
+
+### Deps
+
+- Added `wait-timeout = "0.2"` to `[dependencies]` for cross-platform
+  process timeout in `src/plugin.rs`. Single transitive (`libc`,
+  already in tree).
+
+### Tests
+
+- 420 → 432 (+12). Eight new tests cover SPDX `WITH`-chain
+  inheritance through every operator combination
+  (AND-with-denied-exception, OR-with-permitted-fallback,
+  back-compat single-WITH); two tests cover the `--multi-major-delta`
+  knob (override default + reflect in `--debug-calibration`); two
+  cover the `wait-timeout`-based plugin timeout path.
+
+### Documentation
+
+- `docs/src/cli-reference.md`: new `--multi-major-delta` entry.
+- `docs/src/license-policy.md`: new "WITH-chain exception
+  inheritance" subsection with three worked examples.
+- `docs/src/enrichers/version-jump.md`: Calibration subsection
+  rewritten to cover the new knob.
+- `docs/src/architecture.md`: `wait-timeout = "0.2"` row added to
+  the approved-deps table.
+- `docs/src/github-action.md`: action input reference regrouped
+  by purpose; "What's new in v0.9.7" subsection added.
+- `docs/src/attestation.md`: air-gapped subsection (above).
+
+### Roadmap
+
+This release closes 5 of the 6 "Suggested next milestone candidates"
+from v0.9.6's release notes:
+
+| Item | Disposition |
+|---|---|
+| Per-exception SPDX granularity through `WITH` chains | **Shipped** |
+| Multi-major version-jump calibration knob | **Shipped** |
+| Windows plugin timeout (proper, not best-effort) | **Shipped** |
+| Action.yml parity with newer CLI flags | **Shipped** |
+| Cosign air-gapped Sigstore docs | **Shipped** |
+| WASM-sandboxed plugin model | **Deferred** (multi-week scope, conflicts with single-binary tenet; v1.0+ candidate if external-process model proves insufficient) |
+
+### Scope notes
+
+- **WASM-sandboxed plugin model** stayed deferred. The external-process
+  plugin model from v0.9.6 covers the use case adopters want; WASM
+  sandboxing would add a multi-week toolchain overhaul (`wasmtime`
+  ~30MB / 80 transitive deps, or `wasmi`'s slower runtime, plus a Rust
+  plugin SDK, plus dual-runtime support to not break v0.9.6 plugins).
+  Stays a v1.0+ candidate if demand materializes.
+
 ## [0.9.6] - 2026-04-29
 
 The "finish the roadmap" milestone. v0.9.6 closes out every entry in the

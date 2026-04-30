@@ -3,6 +3,24 @@
 What's planned, what's deliberately out of scope, and what the
 acceptance criteria for new contributions look like.
 
+## Shipped (v0.9.7 — milestone follow-ups)
+
+- **SPDX `WITH`-chain exception inheritance** — `(X WITH ex) AND (Y)` /
+  `(X WITH ex_a) OR (X WITH ex_b)` now evaluate per-leaf with proper
+  AND/OR semantics. AND inherits a denied exception; OR doesn't poison
+  if another branch is permitted.
+- **`--multi-major-delta <N>`** — last hardcoded calibration threshold
+  lifted. Default 2; tunable via flag or `[diff] multi_major_delta`
+  config key.
+- **Windows plugin timeout (first-class)** — replaced manual
+  `Child::try_wait()` polling with the `wait-timeout` crate. Behavior
+  unchanged on Unix; first-class on Windows.
+- **`action.yml` input parity** — twenty-five new inputs map every
+  v0.7-v0.9.7 CLI flag to an action input.
+- **Air-gapped / self-hosted Sigstore docs** — documents env-var
+  passthrough (`SIGSTORE_REKOR_URL`, `COSIGN_FULCIO_URL`, etc.) and
+  key-based attestation fallback.
+
 ## Shipped (v0.9.6 — finish the roadmap)
 
 - **OCI artifact attestation verification** — `--before-attestation`,
