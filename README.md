@@ -1,6 +1,6 @@
 # bomdrift
 
-> **SBOM diff with supply-chain risk signals.** Flags new CVEs, typosquats, multi-major version jumps, and young-maintainer signals on added or upgraded dependencies — posted as a GitHub PR comment.
+> **SBOM diff with supply-chain risk signals.** Flags new CVEs (with EPSS + CISA KEV signal), typosquats across 8 ecosystems, multi-major version jumps, young-maintainer takeovers, recently-published / deprecated / maintainer-set-changed registry signals, and license-policy violations on every changed dependency — posted as a comment on GitHub, GitLab, Bitbucket, or Azure DevOps PRs.
 
 [![CI](https://github.com/Metbcy/bomdrift/actions/workflows/ci.yml/badge.svg)](https://github.com/Metbcy/bomdrift/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Metbcy/bomdrift?sort=semver&display_name=tag)](https://github.com/Metbcy/bomdrift/releases/latest)
@@ -24,7 +24,7 @@ jobs:
 
 That's it. `Metbcy/bomdrift@v1` runs Syft against your project at the PR base + head, diffs the SBOMs, and posts a single PR comment that updates on every push. See it live on [#1](https://github.com/Metbcy/bomdrift/pull/1) — bomdrift dogfoods itself on its own PRs.
 
-**Quick links:** [Why?](#why-bomdrift) · [vs Socket / Snyk / Trivy](#how-it-compares) · [Action reference](https://metbcy.github.io/bomdrift/github-action.html) · [CLI reference](https://metbcy.github.io/bomdrift/cli-reference.html) · [Suppress findings](https://metbcy.github.io/bomdrift/baseline.html#in-comment-suppression-v05) · [Release signing](#release-signing) · [Examples](./examples/)
+**Quick links:** [Why?](#why-bomdrift) · [vs Socket / Snyk / Trivy / OSV-Scanner / Grype](#how-it-compares) · [Action reference](https://metbcy.github.io/bomdrift/github-action.html) · [CLI reference](https://metbcy.github.io/bomdrift/cli-reference.html) · [License policy](https://metbcy.github.io/bomdrift/license-policy.html) · [VEX](https://metbcy.github.io/bomdrift/vex.html) · [SARIF](https://metbcy.github.io/bomdrift/sarif.html) · [OCI attestation](https://metbcy.github.io/bomdrift/attestation.html) · [Plugins](https://metbcy.github.io/bomdrift/plugins.html) · [GitLab](https://metbcy.github.io/bomdrift/gitlab-ci.html) · [Bitbucket](https://metbcy.github.io/bomdrift/bitbucket.html) · [Azure DevOps](https://metbcy.github.io/bomdrift/azure-devops.html) · [Suppress findings](https://metbcy.github.io/bomdrift/baseline.html#in-comment-suppression-v05) · [Release signing](#release-signing) · [Examples](./examples/)
 
 ## Why bomdrift
 
@@ -43,20 +43,33 @@ Recent incidents bomdrift would have surfaced:
 
 ## How it compares
 
-|                                          | bomdrift | Socket | Snyk | Trivy |
-|------------------------------------------|:---:|:---:|:---:|:---:|
-| **Diff-focused** (what *changed*, not what *is*) | yes | yes | partial | no |
-| **Open source, no hosted dashboard required** | yes | no | no | yes |
-| **Maintainer-age signal (xz pattern)** | yes | partial | no | no |
-| **Cosign-signed releases (Sigstore + GitHub OIDC)** | yes | n/a | n/a | no |
-| **Single self-contained binary, no Docker** | yes | no | no | yes |
-| **In-comment suppression (`/bomdrift suppress`)** | yes | partial | yes | no |
-| **No telemetry / no account / no signup** | yes | no | no | yes |
-| **SARIF v2.1.0 to GitHub Code Scanning** | yes | no | yes | yes |
-| **Eight ecosystems for typosquat detection** | yes | yes | no | no |
-| **Apache-2.0** | yes | proprietary | proprietary | yes |
+The dimensions adopters actually filter on. Sourced from
+[`files/competitor-research-v0.7-v0.9.md`](./files/competitor-research-v0.7-v0.9.md);
+correct as of v0.9.6.
 
-bomdrift fills a specific gap: a free, OSS-first, single-binary tool for the *diff-time* question. It's not a replacement for Snyk's scan-everything posture or Socket's SaaS UX — it's the right answer when you want supply-chain risk signals on PRs without paying for a vendor or running a dashboard.
+|                                          | bomdrift | Socket | Snyk | Trivy | OSV-Scanner | Grype |
+|------------------------------------------|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Diff-focused** (what *changed*, not what *is*) | yes | yes | partial | no | no | no |
+| **Open source, no hosted dashboard required** | yes | no | no | yes | yes | yes |
+| **Maintainer-age signal (xz pattern)** | yes | partial | no | no | no | no |
+| **Multi-SCM PR comments** (GitHub / GitLab / Bitbucket / Azure DevOps) | yes (all four, v0.9.5+) | GitHub mainly | GitHub + GitLab | no | no | no |
+| **In-comment suppression** (`/bomdrift suppress`) | yes (all four SCMs) | partial | yes | no | no | no |
+| **License policy with SPDX expression evaluation + per-exception allow/deny** | yes (v0.9.5) | no | partial | no | no | no |
+| **VEX consume + emit** (OpenVEX 0.2.0 + CycloneDX VEX 1.6) | yes (v0.9) | no | partial | partial (consume) | no | no |
+| **OCI attestation verification** (`cosign verify-attestation`) | yes (v0.9.6) | no | no | partial | no | no |
+| **External-process plugin system** (custom rules) | yes (v0.9.6) | no | partial | no | no | no |
+| **SARIF v2.1.0 → GitHub Code Scanning** | yes (v0.8) | no | yes | yes | yes | yes |
+| **Eight-ecosystem typosquat detection** (npm/PyPI/Cargo/Maven/Go/Gem/NuGet/Composer) | yes | yes | no | no | no | no |
+| **EPSS + CISA KEV signals** | yes (v0.8) | partial | yes | no | partial | no |
+| **Cosign-signed releases (Sigstore + GitHub OIDC)** | yes | n/a | n/a | no | yes | yes |
+| **Byte-deterministic output** (SOURCE_DATE_EPOCH-honored) | yes | n/a | no | no | no | no |
+| **Single self-contained binary, no Docker** | yes | no | no | yes | yes | yes |
+| **No telemetry / no account / no signup** | yes | no | no | yes | yes | yes |
+| **Auto-fix PR generation** | **no** (pair with Renovate / Dependabot) | no | yes | no | no | no |
+| **Reachability / call-graph analysis** | **no** (pair with Endor / Snyk Reachability) | partial | yes | no | no | no |
+| **License** | Apache-2.0 | proprietary | proprietary | Apache-2.0 | Apache-2.0 | Apache-2.0 |
+
+bomdrift fills a specific gap: a free, OSS-first, single-binary tool for the *diff-time* question. It's not a replacement for Snyk's scan-everything posture or Socket's SaaS UX — it's the right answer when you want supply-chain risk signals on PRs without paying for a vendor or running a dashboard. For reachability and tarball-behavior analysis, pair bomdrift with the tools called out in the [Pair with…](#pair-with) table.
 
 ## Detailed install
 
@@ -81,7 +94,9 @@ jobs:
         #   verify-signatures: true   (set false on trusted mirrors)
 ```
 
-Pin to `@v1` for the latest v0.x; pin to `@v0.9.5` for reproducible builds. Run `bomdrift init` if you want a checked-in `.bomdrift.toml` policy and both workflows scaffolded locally. See the [Action reference](https://metbcy.github.io/bomdrift/github-action.html) for every input.
+Pin to `@v1` for the latest v0.x; pin to `@v0.9.6` for reproducible builds. Run `bomdrift init` if you want a checked-in `.bomdrift.toml` policy and both workflows scaffolded locally. See the [Action reference](https://metbcy.github.io/bomdrift/github-action.html) for every input — including `upload-to-code-scanning`, `verify-signatures`, `comment-size-limit`, and the `before-sbom`/`after-sbom` escape hatch.
+
+**Other forges:** GitLab CI, Bitbucket Pipelines, and Azure DevOps Pipelines all have ready-to-copy templates under [`examples/`](./examples/) and dedicated docs chapters: [GitLab CI](https://metbcy.github.io/bomdrift/gitlab-ci.html), [Bitbucket](https://metbcy.github.io/bomdrift/bitbucket.html), [Azure DevOps](https://metbcy.github.io/bomdrift/azure-devops.html). Comment-driven `/bomdrift suppress` works on all four SCMs via the Cloudflare Worker bridges added in v0.9.5.
 
 #### Optional: in-comment suppression (v0.5+)
 
@@ -112,7 +127,7 @@ Comment `/bomdrift suppress GHSA-xxxx` on any PR; the sub-action appends to `.bo
 Pre-built binaries cover Linux x86_64 + aarch64, macOS aarch64, and Windows x86_64. Each archive is cosign-signed via Sigstore + GitHub OIDC.
 
 ```bash
-VERSION=v0.9.5
+VERSION=v0.9.6
 TARGET=x86_64-unknown-linux-gnu
 curl -sSL -o bomdrift.tar.gz \
   "https://github.com/Metbcy/bomdrift/releases/download/${VERSION}/bomdrift-${VERSION}-${TARGET}.tar.gz"
@@ -128,7 +143,7 @@ Verify the archive's signature before you trust the binary — see [Release sign
 ### From source
 
 ```bash
-cargo install --locked --git https://github.com/Metbcy/bomdrift --tag v0.9.5 bomdrift
+cargo install --locked --git https://github.com/Metbcy/bomdrift --tag v0.9.6 bomdrift
 ```
 
 Requires Rust 1.85+ (the project uses edition 2024).
@@ -209,20 +224,54 @@ With network access, an additional Vulnerabilities section lists each advisory I
 
 ## Features
 
-- Diff **CycloneDX 1.5/1.6**, **SPDX 2.3**, and **Syft** JSON SBOMs against each other (any combination), via a unified component model.
-- For added & upgraded packages, enrich with **OSV.dev CVE data** through `/v1/querybatch`, then a per-advisory `/v1/vulns/{id}` follow-up to populate **severity** (Critical / High / Medium / Low).
-- 24h on-disk **OSV severity cache** (`<XDG_CACHE_HOME>/bomdrift/osv/`) so reruns within a working day don't re-fetch — opt out with `--no-osv-cache`.
-- Flag possible **typosquats** across **npm**, **PyPI**, **Cargo**, **Maven**, **Go**, **RubyGems**, **NuGet**, and **Composer** via Jaro-Winkler similarity (Levenshtein for Maven artifactIds), with a suffix-containment boost rule that catches the `plain-crypto-js` to `crypto-js` pattern that pure JW alone misses. Refreshable from each ecosystem's canonical upstream via `bomdrift refresh-typosquat`.
-- Flag deps whose **top GitHub maintainer joined the project recently** (the xz-style takeover signal). Honors `GITHUB_TOKEN`, rate-limit-aware, skipped when the repo has > 50 contributors.
-- Flag **multi-major version jumps** (≥ 2 majors) in a single diff — often correlates with takeover swaps and namespace reuse.
-- **Output formats**: terminal (colored, TTY-aware), Markdown (PR comment, with collapsible sections + severity sort), **JSON**, and **SARIF v2.1.0** for GitHub Code Scanning ingestion.
-- **`--fail-on`** thresholds (`cve` / `critical-cve` / `typosquat` / `license-change` / `any`) and diff budgets (`--max-added`, `--max-removed`, `--max-version-changed`) exit code 2 on trip while still emitting the comment body, so the PR comment posts even when the workflow step fails.
-- **`.bomdrift.toml` + `bomdrift init`** let repos keep policy in version control instead of repeating inputs in workflow YAML.
-- **`/bomdrift suppress <id>`** in-comment suppression (v0.5+) via a companion sub-action.
-- **`--baseline <path.json>`** suppresses findings already captured in a previously stored `bomdrift diff --output json` snapshot.
-- **`--summary-only`**, **`--findings-only`**, and automatic comment-size fallback (default 60 KB) keep big SBOM diffs under GitHub's 65,536-char comment-body cap.
-- Ships as a **single Rust binary** (~3.4 MB, stripped + LTO) **and** a composite GitHub Action — no Docker.
-- Releases are **cosign-signed** keyless via Sigstore + GitHub OIDC — eat-your-own-supply-chain-dogfood.
+### SBOM ingest
+
+- Diff **CycloneDX 1.5/1.6**, **SPDX 2.3**, and **Syft JSON** against each other (any combination), via a unified component model.
+- Optional **`--before-attestation` / `--after-attestation`**: fetch the SBOM from an OCI registry as a `cosign verify-attestation`-verified artifact instead of a local file (v0.9.6). See [OCI attestation](https://metbcy.github.io/bomdrift/attestation.html).
+
+### Risk-signal enrichers
+
+- **OSV.dev CVE lookup** via `/v1/querybatch` + per-advisory `/v1/vulns/{id}` for severity (Critical / High / Medium / Low). On-disk severity cache, configurable TTL via `--cache-ttl-hours` (v0.9.6).
+- **EPSS** (FIRST.org Exploit Prediction Scoring System) per CVE, with `--fail-on-epss <0.0–1.0>` threshold gating (v0.8).
+- **CISA KEV** known-exploited flag per advisory, with `--fail-on kev` gating (v0.8).
+- **Typosquat detection** across **npm**, **PyPI**, **Cargo**, **Maven**, **Go**, **RubyGems**, **NuGet**, and **Composer**. Jaro-Winkler + suffix-containment boost (Levenshtein for Maven artifactIds, last-path-segment match for Go, package-portion match for Composer). Threshold tunable via `--typosquat-similarity-threshold` (v0.9.6). Refreshable via `bomdrift refresh-typosquat`.
+- **Maintainer-age signal** — top GitHub contributor's first commit younger than `--young-maintainer-days` (default 90; tunable v0.9.6). The xz / Jia Tan pattern. Honors `GITHUB_TOKEN`, skipped on repos with > 50 contributors.
+- **Multi-major version jumps** (≥ 2 majors) — pure compute, correlates with takeover swaps and namespace reuse.
+- **Registry-metadata enrichers (npm / PyPI / crates.io)** — recently-published, deprecated, maintainer-set-changed (npm-only) (v0.9). Threshold via `--recently-published-days`, opt-out via `--no-registry`.
+- **License policy** — `--allow-licenses` / `--deny-licenses` with SPDX expression evaluation (v0.9), plus per-exception `--allow-exception` / `--deny-exception` for `WITH`-clause granularity (v0.9.5).
+
+### Suppression
+
+- **`--baseline <path.json>`** — JSON snapshot suppression with conservative per-purl-and-version match keys.
+- **`/bomdrift suppress <ID> [reason: …]`** in-comment workflow on **all four SCMs**: GitHub (v0.5), GitLab (v0.9 via Cloudflare Worker), Bitbucket Cloud (v0.9.5), Azure DevOps (v0.9.5).
+- **Time-boxed suppressions** with `expires` + `reason` fields per baseline entry (v0.8). Expired entries warn and surface; never silently keep suppressing.
+- **VEX consume / emit** — OpenVEX 0.2.0 + CycloneDX VEX 1.6 on input (`--vex <path>`, repeatable); OpenVEX 0.2.0 on output (`--emit-vex <path>`) (v0.9). See [VEX](https://metbcy.github.io/bomdrift/vex.html).
+
+### Output
+
+- Terminal (TTY-aware ANSI), Markdown (PR comment, severity-sorted), JSON, and **SARIF v2.1.0** with stable rule IDs + `partialFingerprints.primaryHash/v1` for Code Scanning ingestion (v0.8). See [SARIF](https://metbcy.github.io/bomdrift/sarif.html).
+- `--output-file <path>` writes to a file instead of stdout (v0.8) — useful for `--output sarif` in YAML pipelines where `>` redirection is fragile.
+- **Byte-deterministic** — identical inputs produce byte-identical output, honoring `SOURCE_DATE_EPOCH`. PR-comment upserts patch in place rather than accumulating duplicates.
+
+### Failure thresholds
+
+- `--fail-on` (`cve` / `critical-cve` / `typosquat` / `license-change` / `any` / `kev`) and `--fail-on-epss <N>`. Diff budgets (`--max-added`, `--max-removed`, `--max-version-changed`). All emit the comment body before the exit-2 trip so reviewers see findings even on failed runs.
+
+### Forge integration
+
+- `--platform <github|gitlab|bitbucket|azure-devops>` controls comment-footer shape; auto-detects from `GITLAB_CI` / `BITBUCKET_BUILD_NUMBER` / `TF_BUILD` env vars.
+- Composite GitHub Action with `upload-to-code-scanning`, `verify-signatures`, `comment-size-limit` inputs.
+- Per-SCM Cloudflare Worker bridges under `examples/<scm>/comment-bridge/` (v0.9 / v0.9.5).
+
+### Extensibility
+
+- **External-process plugin system** via `--plugin <manifest.toml>` (repeatable). JSON over stdin/stdout, fail-soft. See [Plugins](https://metbcy.github.io/bomdrift/plugins.html) and the worked example at [`examples/plugins/banned-packages/`](./examples/plugins/banned-packages/) (v0.9.6).
+
+### Packaging
+
+- Single Rust binary (~3.4 MB stripped + LTO) **and** a composite GitHub Action — no Docker.
+- Releases are **cosign-signed** keyless via Sigstore + GitHub OIDC.
+- `.bomdrift.toml` + `bomdrift init` keep policy in version control rather than repeating inputs in YAML.
 
 ## Release signing
 
@@ -230,7 +279,7 @@ Every release archive is signed with cosign keyless via Sigstore (GitHub OIDC).
 
 ```bash
 # Replace VERSION + TARGET with your downloaded archive's pair
-VERSION=v0.9.5
+VERSION=v0.9.6
 TARGET=x86_64-unknown-linux-gnu
 ARCHIVE=bomdrift-${VERSION}-${TARGET}.tar.gz
 
@@ -260,14 +309,26 @@ PRs welcome. The `good first issue` label tracks focused asks for new contributo
 bomdrift's design constraints (OSS-first, single-binary, no
 telemetry, change-focused) put a number of capabilities deliberately
 out of scope. We don't ship them, but we recommend pairing bomdrift
-with tools that do.
+with tools that do. See [STATUS.md](./STATUS.md) and the
+[roadmap](https://metbcy.github.io/bomdrift/roadmap.html) for the
+canonical, version-controlled list.
 
 - **SBOM generation.** Use [Syft](https://github.com/anchore/syft) —
   it's already great. bomdrift only consumes SBOMs (and as of v0.5
   invokes Syft itself inside the Action so consumers don't have to).
+- **Replacing your SCA scanner.** OSV-scanner, Grype, Trivy all
+  have richer vulnerability databases for *full-tree* scans.
+  bomdrift's CVE enrichment is **change-focused**: only on what's
+  new in this diff.
 - **Dependency-tree visualization.**
   [`cargo tree`](https://doc.rust-lang.org/cargo/commands/cargo-tree.html),
   [`pnpm why`](https://pnpm.io/cli/why), and friends do this well.
+- **Per-language deep parsing** (resolving lockfile edge cases beyond
+  what Syft already handles). bomdrift consumes whatever the
+  upstream SBOM generator produces.
+- **Web UI / dashboard.** bomdrift output is markdown / SARIF / JSON
+  for ingestion by tooling you already have (PR comments, Code
+  Scanning, your own scripts). No daemon, no hosted UI.
 - **Reachability / call-graph analysis.** "Is this CVE reachable
   from my code's entry points?" requires AST + call-graph
   infrastructure orthogonal to SBOM diffing. *Pair with Endor Labs
@@ -277,10 +338,6 @@ with tools that do.
   *Pair with [Socket](https://socket.dev/).*
 - **Auto-fix PR generation.** bomdrift surfaces findings; it doesn't
   open follow-up PRs. *Pair with Renovate or Dependabot.*
-- **Continuous monitoring / always-on agent.** bomdrift is a
-  one-shot CLI invoked from CI. There's no daemon, no telemetry, no
-  scheduled background polling. *Run bomdrift in a scheduled CI
-  workflow if you want periodic re-checks.*
 - **Container / OCI image scanning.** SBOM + image-layer scanning is
   Trivy / Grype's lane. Use them; bomdrift focuses on
   application-dependency drift between two SBOMs.
@@ -290,13 +347,13 @@ with tools that do.
   dashboards inevitably require telemetry, which violates bomdrift's
   no-telemetry tenet. *Pair with Endor / Snyk if your org needs
   centralized risk reporting.*
+- **Continuous monitoring / always-on agent.** bomdrift is a
+  one-shot CLI invoked from CI. There's no daemon, no telemetry, no
+  scheduled background polling. *Run bomdrift in a scheduled CI
+  workflow if you want periodic re-checks.*
 - **Closed-source advisory databases.** bomdrift uses OSV.dev (the
   open advisory aggregator). Closed proprietary feeds aren't
   consumed in the OSS distribution.
-- **Replacing your SCA scanner.** OSV-scanner, Grype, Trivy all
-  have richer vulnerability databases for *full-tree* scans.
-  bomdrift's CVE enrichment is **change-focused**: only on what's
-  new in this diff.
 
 ### Pair with…
 
