@@ -14,6 +14,13 @@ permissions:
   pages: write
   id-token: write
 
+env:
+  # Opt every JavaScript-based action in this workflow into the Node.js 24
+  # runner ahead of GitHub's 2026-06-02 forced-default. See ci.yml for the
+  # full rationale.
+  # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 # Allow only one concurrent deployment, skipping in-flight runs but always
 # letting the most recent push reach production. Manually-dispatched runs
 # fall outside the cancel-in-progress to support targeted re-deploys.

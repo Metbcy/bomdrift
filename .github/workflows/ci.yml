@@ -13,6 +13,13 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # Opt every JavaScript-based action in this workflow into the Node.js 24
+  # runner ahead of GitHub's 2026-06-02 forced-default. Silences the
+  # "Node.js 20 actions are deprecated" warning the runner emits on every
+  # checkout / upload-artifact / sticky-pull-request-comment step. Remove
+  # once Node.js 24 is the default runtime.
+  # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   fmt:
