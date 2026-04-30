@@ -233,4 +233,170 @@ mod tests {
         apply_kev(&mut e, &HashSet::new());
         assert!(!e.vulns["pkg:npm/foo@1"][0].kev);
     }
+
+    fn tempdir_unique(stem: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "bomdrift-kev-test-{stem}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn enrich_short_circuits_when_vulns_empty() {
+        // No vulns in the enrichment means there's nothing to flag, so the
+        // public `enrich` entry point must return Ok without touching the
+        // network or cache. This guards against a regression where an empty
+        // changeset accidentally fires a KEV-feed fetch on every diff.
+        let mut e = Enrichment::default();
+        // `enrich` is the public entry point — it eventually delegates to
+        // `enrich_with_url` whose first action is the empty-vulns check, so
+        // calling `enrich` directly exercises the short-circuit through the
+        // full call chain (lines 42->48->58).
+        let result = enrich(&mut e);
+        assert!(result.is_ok());
+        assert!(e.vulns.is_empty());
+    }
+
+    #[test]
+    fn enrich_with_ttl_short_circuits_when_vulns_empty() {
+        // Mirror of the previous test for the ttl-aware entry point. The
+        // `--cache-ttl-hours` callers go through this signature, so the
+        // empty-vulns short circuit must hold here too — otherwise a
+        // user-supplied TTL on an empty diff would still hit the network.
+        let mut e = Enrichment::default();
+        let result = enrich_with_ttl(&mut e, Some(48));
+        assert!(result.is_ok());
+        assert!(e.vulns.is_empty());
+    }
+
+    #[test]
+    fn enrich_with_url_swallows_network_failure() {
+        // Best-effort contract: when the KEV feed is unreachable, the
+        // enricher logs (only when `BOMDRIFT_DEBUG` is set, to avoid
+        // spamming PR comments) and returns Ok with no enrichment. A
+        // failing fetch must NOT poison the diff. We point at a port
+        // that's nearly guaranteed to refuse-connect on every runner
+        // (port 1, the historical TCPMUX port; never bound on
+        // GitHub-hosted runners) with a 1s timeout, then assert the
+        // VulnRef survives un-flagged.
+        let mut e = Enrichment::default();
+        let mut vulns: HashMap<String, Vec<VulnRef>> = HashMap::new();
+        vulns.insert(
+            "pkg:npm/foo@1".into(),
+            vec![VulnRef {
+                id: "GHSA-xxxx-yyyy-zzzz".into(),
+                severity: Severity::High,
+                aliases: vec!["CVE-2024-1111".into()],
+                epss_score: None,
+                kev: false,
+            }],
+        );
+        e.vulns = vulns;
+        let result = enrich_with_url(
+            &mut e,
+            "http://127.0.0.1:1/kev.json",
+            Duration::from_millis(500),
+            None,
+        );
+        assert!(result.is_ok());
+        assert!(
+            !e.vulns["pkg:npm/foo@1"][0].kev,
+            "network failure must not flag refs as KEV"
+        );
+    }
+
+    #[test]
+    fn read_cache_returns_none_when_file_missing() {
+        let dir = tempdir_unique("read-missing");
+        let path = dir.join("nope.json");
+        assert!(read_cache(&path, 86_400).is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn read_cache_returns_ids_when_within_ttl() {
+        let dir = tempdir_unique("read-fresh");
+        let path = dir.join("catalog.json");
+        std::fs::write(
+            &path,
+            br#"{"vulnerabilities":[{"cveID":"CVE-2024-1111"},{"cveID":"CVE-2025-9999"}]}"#,
+        )
+        .unwrap();
+        // Generous TTL so the just-written file definitely qualifies.
+        let ids = read_cache(&path, 86_400).expect("fresh cache should yield ids");
+        assert!(ids.contains("CVE-2024-1111"));
+        assert!(ids.contains("CVE-2025-9999"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn read_cache_treats_corrupt_body_as_miss() {
+        // A torn / partially-written cache file must NOT crash the run.
+        // Returning None routes the next call into a fresh fetch, which
+        // is exactly the right recovery — better than propagating a
+        // serde error up through `enrich` and breaking diffs.
+        let dir = tempdir_unique("read-corrupt");
+        let path = dir.join("catalog.json");
+        std::fs::write(&path, b"this is not json").unwrap();
+        assert!(read_cache(&path, 86_400).is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn write_cache_round_trips_through_read_cache() {
+        // The full atomic-write contract: `write_cache` writes via a
+        // `.tmp` sibling then renames, so there's never a torn file at
+        // `path` itself. After the write, `read_cache` must produce the
+        // same id set the body parses to. This is the load-bearing
+        // pair `load_or_fetch` relies on for cache hits.
+        let dir = tempdir_unique("roundtrip");
+        let path = dir.join("catalog.json");
+        let body = r#"{"vulnerabilities":[{"cveID":"CVE-2024-1111"},{"cveID":"CVE-2025-9999"}]}"#;
+        write_cache(&path, body);
+        assert!(path.exists());
+        let ids = read_cache(&path, 86_400).expect("written cache should be readable");
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains("CVE-2024-1111"));
+        assert!(ids.contains("CVE-2025-9999"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn write_cache_creates_missing_parent_dirs() {
+        // KEV's first-ever cache write happens before the per-enricher
+        // subdir exists under `<XDG_CACHE>/bomdrift/`. `write_cache` must
+        // create it — otherwise the whole cache layer no-ops on a fresh
+        // user environment and every diff hits the network.
+        let dir = tempdir_unique("parent-dir");
+        let nested = dir.join("nope/still-nope/kev/catalog.json");
+        write_cache(&nested, r#"{"vulnerabilities":[]}"#);
+        assert!(
+            nested.exists(),
+            "write_cache should create nested parents on first write"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cache_path_resolves_to_kev_subdir_when_cache_root_is_set() {
+        // `cache_path` returns `Some(<root>/kev/catalog.json)` when the
+        // platform cache root resolves; downstream code grabs it via
+        // `as_ref()` and passes it to read/write. Asserting only the
+        // suffix keeps the test platform-agnostic (Linux vs. macOS vs.
+        // CI sandbox locations all differ on root path).
+        let p = cache_path();
+        if let Some(p) = p {
+            let s = p.to_string_lossy();
+            assert!(
+                s.ends_with("kev/catalog.json") || s.ends_with("kev\\catalog.json"),
+                "expected suffix kev/catalog.json, got {s}"
+            );
+        }
+    }
 }

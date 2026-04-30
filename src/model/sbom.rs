@@ -40,3 +40,49 @@ impl Serialize for SbomFormat {
         serializer.serialize_str(self.as_str())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    #[test]
+    fn as_str_round_trips_each_variant() {
+        // The string form is load-bearing for the SBOM diff comment header
+        // (`format = CycloneDX` in the metadata footer) and the SARIF run
+        // tool description. A typo in any branch silently mislabels every
+        // diff for that format.
+        assert_eq!(SbomFormat::CycloneDx.as_str(), "CycloneDX");
+        assert_eq!(SbomFormat::Spdx.as_str(), "SPDX");
+        assert_eq!(SbomFormat::Syft.as_str(), "Syft");
+    }
+
+    #[test]
+    fn display_matches_as_str_for_each_variant() {
+        // `format!` and `to_string()` go through Display::fmt, which must
+        // be byte-identical to as_str() — the diff renderer interleaves
+        // the two and a divergence would produce mixed-case labels in the
+        // same comment.
+        for f in [SbomFormat::CycloneDx, SbomFormat::Spdx, SbomFormat::Syft] {
+            assert_eq!(f.to_string(), f.as_str());
+            assert_eq!(format!("{f}"), f.as_str());
+        }
+    }
+
+    #[test]
+    fn serialize_emits_canonical_string_form() {
+        // JSON output of `bomdrift diff --output json` includes
+        // `"format": "CycloneDX"` in the SBOM block; downstream tooling
+        // pattern-matches on that value. Serialize MUST emit the same
+        // string as_str() returns, NOT the Rust enum-variant name
+        // (`"CycloneDx"`) or any debug form.
+        for (variant, expected) in [
+            (SbomFormat::CycloneDx, "\"CycloneDX\""),
+            (SbomFormat::Spdx, "\"SPDX\""),
+            (SbomFormat::Syft, "\"Syft\""),
+        ] {
+            let s = serde_json::to_string(&variant).unwrap();
+            assert_eq!(s, expected);
+        }
+    }
+}
