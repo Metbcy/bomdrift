@@ -142,6 +142,7 @@ dependencies = [
  "time",
  "toml",
  "ureq",
+ "wait-timeout",
 ]
 
 [[package]]
