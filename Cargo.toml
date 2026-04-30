@@ -36,6 +36,10 @@ sha2 = { version = "0.10", default-features = false }
 # Exact-pinned: SPDX list updates can shift LicenseId.is_gnu() / is_osi_approved membership and silently change license-policy semantics. Bump deliberately.
 spdx = { version = "=0.10.9", default-features = false }
 base64 = { version = "0.22", default-features = false, features = ["std"] }
+# Robust child-process timeout. Tiny single-purpose crate (~50kb, no
+# transitives). Used by src/plugin.rs to replace a hand-rolled polling
+# loop with a proper Windows-aware wait_timeout call. v0.9.7+.
+wait-timeout = "0.2"
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["html_reports"] }

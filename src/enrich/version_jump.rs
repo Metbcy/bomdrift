@@ -60,6 +60,14 @@ pub struct VersionJumpFinding {
 }
 
 pub fn enrich(cs: &ChangeSet) -> Vec<VersionJumpFinding> {
+    enrich_with(cs, None)
+}
+
+/// Same as [`enrich`] but accepts an override for the minimum major-version
+/// delta. `None` falls back to [`MIN_MAJOR_DELTA`]. Used by the
+/// `--multi-major-delta` CLI flag (v0.9.7+).
+pub fn enrich_with(cs: &ChangeSet, min_major_delta: Option<u32>) -> Vec<VersionJumpFinding> {
+    let threshold = min_major_delta.unwrap_or(MIN_MAJOR_DELTA);
     let mut out = Vec::new();
     for (before, after) in &cs.version_changed {
         let Some(before_major) = extract_major(&before.version) else {
@@ -68,7 +76,7 @@ pub fn enrich(cs: &ChangeSet) -> Vec<VersionJumpFinding> {
         let Some(after_major) = extract_major(&after.version) else {
             continue;
         };
-        if after_major.saturating_sub(before_major) >= MIN_MAJOR_DELTA {
+        if after_major.saturating_sub(before_major) >= threshold {
             out.push(VersionJumpFinding {
                 before: before.clone(),
                 after: after.clone(),
@@ -232,6 +240,47 @@ mod tests {
             ..Default::default()
         };
         assert!(enrich(&cs).is_empty());
+    }
+
+    // ---- v0.9.7 multi-major-delta knob -----------------------------------
+
+    #[test]
+    fn enrich_with_default_threshold_matches_enrich() {
+        let cs = ChangeSet {
+            version_changed: vec![(comp("a", "1.0.0"), comp("a", "4.0.0"))],
+            ..Default::default()
+        };
+        // Default threshold (None) = 2; trips on 1.x → 4.x.
+        let findings = enrich_with(&cs, None);
+        assert_eq!(findings.len(), 1);
+    }
+
+    #[test]
+    fn enrich_with_threshold_one_trips_on_single_major_bump() {
+        // delta=1 makes a single major bump (1.x → 2.x) trip — useful
+        // for adopters who want every cross-major upgrade flagged.
+        let cs = ChangeSet {
+            version_changed: vec![(comp("a", "1.0.0"), comp("a", "2.0.0"))],
+            ..Default::default()
+        };
+        // Default would NOT trip:
+        assert!(enrich(&cs).is_empty());
+        // Override does trip:
+        let findings = enrich_with(&cs, Some(1));
+        assert_eq!(findings.len(), 1);
+    }
+
+    #[test]
+    fn enrich_with_high_threshold_suppresses_smaller_jumps() {
+        // delta=5 means even 1.x → 4.x doesn't trip.
+        let cs = ChangeSet {
+            version_changed: vec![(comp("a", "1.0.0"), comp("a", "4.0.0"))],
+            ..Default::default()
+        };
+        // Default trips:
+        assert_eq!(enrich(&cs).len(), 1);
+        // High threshold suppresses:
+        assert!(enrich_with(&cs, Some(5)).is_empty());
     }
 
     #[test]
