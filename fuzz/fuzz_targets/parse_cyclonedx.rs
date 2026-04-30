@@ -8,10 +8,11 @@
 //! (schema interpretation, purl handling, hash normalization) rather
 //! than re-fuzzing serde_json.
 
+use bomdrift::parse::{SbomParser, cyclonedx::CycloneDxParser};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     if let Ok(value) = serde_json::from_slice::<serde_json::Value>(data) {
-        let _ = bomdrift::parse::cyclonedx::CycloneDxParser::parse(value);
+        let _ = CycloneDxParser::parse(value);
     }
 });
