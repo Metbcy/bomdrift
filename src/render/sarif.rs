@@ -935,7 +935,7 @@ mod tests {
         assert_eq!(r1, r2, "byte-equal across runs");
         let v: Value = serde_json::from_str(&r1).unwrap();
         let fp = &v["runs"][0]["results"][0]["partialFingerprints"]["primaryHash/v1"];
-        assert!(fp.is_string(), "fingerprint missing: {}", v);
+        assert!(fp.is_string(), "fingerprint missing: {v}");
         assert_eq!(fp.as_str().unwrap().len(), 64);
     }
 
@@ -1043,5 +1043,51 @@ mod tests {
                 .len(),
             64
         );
+    }
+
+    #[test]
+    fn exception_driven_license_violation_fingerprint_differs_from_base() {
+        // v0.9.5: a violation driven by a denied SPDX `WITH` exception
+        // must have a stable partialFingerprint distinct from a
+        // base-license violation on the same component, so SARIF
+        // consumers (Code Scanning) treat them as separate alerts.
+        use crate::enrich::{LicenseViolation, LicenseViolationKind};
+        let component = comp("foo", "1.0.0", Ecosystem::Npm, Some("pkg:npm/foo@1.0.0"));
+        let e_exception = Enrichment {
+            license_violations: vec![LicenseViolation {
+                component: component.clone(),
+                license: "Apache-2.0 WITH LLVM-exception".into(),
+                matched_rule: "exception:LLVM-exception denied".into(),
+                kind: LicenseViolationKind::Deny,
+            }],
+            ..Default::default()
+        };
+        let e_base = Enrichment {
+            license_violations: vec![LicenseViolation {
+                component,
+                license: "Apache-2.0".into(),
+                matched_rule: "deny: Apache-2.0".into(),
+                kind: LicenseViolationKind::Deny,
+            }],
+            ..Default::default()
+        };
+        let r_exception = render(&ChangeSet::default(), &e_exception);
+        let r_base = render(&ChangeSet::default(), &e_base);
+        let parse = |s: &str| -> String {
+            let v: Value = serde_json::from_str(s).unwrap();
+            v["runs"][0]["results"][0]["partialFingerprints"]["primaryHash/v1"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let fp_ex = parse(&r_exception);
+        let fp_base = parse(&r_base);
+        assert_ne!(
+            fp_ex, fp_base,
+            "exception-driven violation fingerprint must differ from base-license violation"
+        );
+        // Stable across runs.
+        let r_exception_2 = render(&ChangeSet::default(), &e_exception);
+        assert_eq!(parse(&r_exception_2), fp_ex);
     }
 }

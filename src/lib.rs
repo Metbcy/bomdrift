@@ -10,6 +10,8 @@ pub mod refresh;
 pub mod render;
 pub mod vex;
 
+pub use crate::vex::{SyntheticFindingKind, parse_synthetic_id};
+
 use std::fs;
 use std::io::IsTerminal;
 use std::path::Path;
@@ -199,6 +201,8 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
         allow: args.allow_licenses.clone(),
         deny: args.deny_licenses.clone(),
         allow_ambiguous: args.allow_ambiguous_licenses,
+        allow_exceptions: args.allow_exception.clone(),
+        deny_exceptions: args.deny_exception.clone(),
     };
     enrichment.license_violations = enrich::license::enrich(&cs, &license_policy);
 
@@ -227,7 +231,7 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
                     .as_deref()
                     .map(|p| format!(" ({p})"))
                     .unwrap_or_default(),
-                expires = ent.expires,
+                expires = ent.expires.as_deref().unwrap_or(""),
                 reason = ent
                     .reason
                     .as_deref()
@@ -540,6 +544,9 @@ fn write_calibration_lines<W: std::io::Write>(
         }
     }
     for v in &e.license_violations {
+        // Threshold field carries the precise matched_rule (e.g.
+        // "deny: GPL-3.0-only" or "exception:LLVM-exception denied")
+        // so calibration consumers see the WHY, not just the kind tag.
         write_calibration_row(
             out,
             "license",
@@ -548,11 +555,7 @@ fn write_calibration_lines<W: std::io::Write>(
                 .as_deref()
                 .unwrap_or(v.component.name.as_str()),
             CalibrationScore::Text(&v.license),
-            CalibrationThreshold::Text(match v.kind {
-                crate::enrich::LicenseViolationKind::Deny => "deny",
-                crate::enrich::LicenseViolationKind::Ambiguous => "ambiguous",
-                crate::enrich::LicenseViolationKind::NotAllowed => "not-allowed",
-            }),
+            CalibrationThreshold::Text(&v.matched_rule),
             format,
         );
     }
@@ -764,7 +767,7 @@ mod tests {
 
     use crate::enrich::typosquat::TyposquatFinding;
     use crate::enrich::version_jump::VersionJumpFinding;
-    use crate::enrich::{Severity, VulnRef};
+    use crate::enrich::{LicenseViolation, Severity, VulnRef};
     use crate::model::{Component, Ecosystem, Relationship};
 
     fn comp(name: &str) -> Component {
@@ -1083,6 +1086,43 @@ mod tests {
         let s = String::from_utf8(buf).unwrap();
         assert!(s.contains("epss|"), "missing epss row: {s}");
         assert!(s.contains("kev|"), "missing kev row: {s}");
+    }
+
+    #[test]
+    fn calibration_license_row_includes_exception_detail() {
+        // v0.9.5: matched_rule on an exception-driven license violation
+        // must surface the exception identifier in the calibration tap
+        // so operators tuning policy see why a row fired.
+        let mut e = Enrichment::default();
+        let component = crate::model::Component {
+            name: "llvm-sys".into(),
+            version: "1.0.0".into(),
+            ecosystem: crate::model::Ecosystem::Cargo,
+            purl: Some("pkg:cargo/llvm-sys@1.0.0".into()),
+            licenses: vec!["Apache-2.0 WITH LLVM-exception".into()],
+            supplier: None,
+            hashes: Vec::new(),
+            relationship: crate::model::Relationship::Unknown,
+            source_url: None,
+            bom_ref: None,
+        };
+        e.license_violations.push(LicenseViolation {
+            component,
+            license: "Apache-2.0 WITH LLVM-exception".into(),
+            matched_rule: "exception:LLVM-exception denied".into(),
+            kind: crate::enrich::LicenseViolationKind::Deny,
+        });
+        let mut buf = Vec::new();
+        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Pipe);
+        let s = String::from_utf8(buf).unwrap();
+        assert!(
+            s.contains("license|"),
+            "missing license calibration row: {s}"
+        );
+        assert!(
+            s.contains("exception:LLVM-exception denied"),
+            "row must surface matched_rule with exception detail: {s}"
+        );
     }
 
     #[test]

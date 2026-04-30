@@ -7,52 +7,102 @@ pr:
     include:
       - "*"
 
+# Template parameter consumed by the comment-suppress bridge
+# (examples/azure-devops/comment-bridge/). When the bridge triggers
+# this pipeline via POST /_apis/pipelines/{id}/runs it sets
+# BOMDRIFT_NOTE_BODY; the suppress stage below is gated on that
+# parameter being non-empty. Normal PR-build runs leave it empty,
+# the suppress stage is skipped, and only the diff stage runs.
+parameters:
+  - name: BOMDRIFT_NOTE_BODY
+    type: string
+    default: ""
+
 pool:
   vmImage: ubuntu-latest
 
 variables:
   BOMDRIFT_VERSION: "0.9.0"
 
-steps:
-  - script: |
-      set -euo pipefail
-      sudo apt-get update -qq && sudo apt-get install -y -qq curl jq
-      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-      . "$HOME/.cargo/env"
-      cargo install bomdrift --locked --version "$BOMDRIFT_VERSION"
-      curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sudo sh -s -- -b /usr/local/bin
-    displayName: Install bomdrift + Syft
+stages:
+  - stage: bomdrift_diff
+    condition: eq('${{ parameters.BOMDRIFT_NOTE_BODY }}', '')
+    jobs:
+      - job: diff
+        steps:
+          - script: |
+              set -euo pipefail
+              sudo apt-get update -qq && sudo apt-get install -y -qq curl jq
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+              . "$HOME/.cargo/env"
+              cargo install bomdrift --locked --version "$BOMDRIFT_VERSION"
+              curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sudo sh -s -- -b /usr/local/bin
+            displayName: Install bomdrift + Syft
 
-  - script: |
-      set -euo pipefail
-      . "$HOME/.cargo/env"
-      git fetch origin "$(System.PullRequest.TargetBranch)"
-      git worktree add ../before "origin/$(System.PullRequest.TargetBranch)"
-      syft dir:../before -o cyclonedx-json=before.cdx.json
-      syft dir:. -o cyclonedx-json=after.cdx.json
-      bomdrift diff before.cdx.json after.cdx.json \
-        --output markdown --platform azure-devops > comment.md
-      printf '\n<!-- bomdrift:diff -->\n' >> comment.md
-    displayName: bomdrift diff
+          - script: |
+              set -euo pipefail
+              . "$HOME/.cargo/env"
+              git fetch origin "$(System.PullRequest.TargetBranch)"
+              git worktree add ../before "origin/$(System.PullRequest.TargetBranch)"
+              syft dir:../before -o cyclonedx-json=before.cdx.json
+              syft dir:. -o cyclonedx-json=after.cdx.json
+              bomdrift diff before.cdx.json after.cdx.json \
+                --output markdown --platform azure-devops > comment.md
+              printf '\n<!-- bomdrift:diff -->\n' >> comment.md
+            displayName: bomdrift diff
 
-  - script: |
-      set -euo pipefail
-      ORG_URL="$(System.TeamFoundationCollectionUri)"
-      PROJECT="$(System.TeamProject)"
-      REPO_ID="$(Build.Repository.ID)"
-      PR_ID="$(System.PullRequest.PullRequestId)"
-      API="${ORG_URL}${PROJECT}/_apis/git/repositories/${REPO_ID}/pullRequests/${PR_ID}/threads?api-version=7.1"
-      AUTH_HEADER="Authorization: Basic $(printf ":%s" "$BOMDRIFT_API_TOKEN" | base64 -w0)"
-      EXISTING=$(curl -s -H "$AUTH_HEADER" "$API" \
-        | jq -r '.value[] | select(.comments[0].content | tostring | test("<!-- bomdrift:diff -->")) | .id' | head -n1)
-      if [ -n "$EXISTING" ]; then
-        UPDATE_API="${ORG_URL}${PROJECT}/_apis/git/repositories/${REPO_ID}/pullRequests/${PR_ID}/threads/${EXISTING}/comments/1?api-version=7.1"
-        UBODY=$(jq -Rs --arg cmt "$(cat comment.md)" '{content:$cmt, commentType:1}' < /dev/null)
-        curl -s -H "$AUTH_HEADER" -H "Content-Type: application/json" -X PATCH "$UPDATE_API" -d "$UBODY" > /dev/null
-      else
-        BODY=$(jq -Rs --arg cmt "$(cat comment.md)" '{comments:[{parentCommentId:0, content:$cmt, commentType:1}], status:1}' < /dev/null)
-        curl -s -H "$AUTH_HEADER" -H "Content-Type: application/json" -X POST "$API" -d "$BODY" > /dev/null
-      fi
-    displayName: Upsert PR thread
-    env:
-      BOMDRIFT_API_TOKEN: $(BOMDRIFT_API_TOKEN)
+          - script: |
+              set -euo pipefail
+              ORG_URL="$(System.TeamFoundationCollectionUri)"
+              PROJECT="$(System.TeamProject)"
+              REPO_ID="$(Build.Repository.ID)"
+              PR_ID="$(System.PullRequest.PullRequestId)"
+              API="${ORG_URL}${PROJECT}/_apis/git/repositories/${REPO_ID}/pullRequests/${PR_ID}/threads?api-version=7.1"
+              AUTH_HEADER="Authorization: Basic $(printf ":%s" "$BOMDRIFT_API_TOKEN" | base64 -w0)"
+              EXISTING=$(curl -s -H "$AUTH_HEADER" "$API" \
+                | jq -r '.value[] | select(.comments[0].content | tostring | test("<!-- bomdrift:diff -->")) | .id' | head -n1)
+              if [ -n "$EXISTING" ]; then
+                UPDATE_API="${ORG_URL}${PROJECT}/_apis/git/repositories/${REPO_ID}/pullRequests/${PR_ID}/threads/${EXISTING}/comments/1?api-version=7.1"
+                UBODY=$(jq -Rs --arg cmt "$(cat comment.md)" '{content:$cmt, commentType:1}' < /dev/null)
+                curl -s -H "$AUTH_HEADER" -H "Content-Type: application/json" -X PATCH "$UPDATE_API" -d "$UBODY" > /dev/null
+              else
+                BODY=$(jq -Rs --arg cmt "$(cat comment.md)" '{comments:[{parentCommentId:0, content:$cmt, commentType:1}], status:1}' < /dev/null)
+                curl -s -H "$AUTH_HEADER" -H "Content-Type: application/json" -X POST "$API" -d "$BODY" > /dev/null
+              fi
+            displayName: Upsert PR thread
+            env:
+              BOMDRIFT_API_TOKEN: $(BOMDRIFT_API_TOKEN)
+
+  # Comment-driven suppress stage (advanced).
+  #
+  # Runs ONLY when triggered by the bomdrift comment-suppress bridge
+  # (examples/azure-devops/comment-bridge/), which POSTs to
+  # /_apis/pipelines/{id}/runs with `templateParameters.BOMDRIFT_NOTE_BODY`
+  # set to the raw comment body. See bridge README for the full
+  # security model.
+  - stage: bomdrift_suppress
+    condition: ne('${{ parameters.BOMDRIFT_NOTE_BODY }}', '')
+    jobs:
+      - job: suppress
+        steps:
+          - checkout: self
+            persistCredentials: true
+          - script: |
+              set -euo pipefail
+              sudo apt-get update -qq && sudo apt-get install -y -qq curl jq git
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+              . "$HOME/.cargo/env"
+              cargo install bomdrift --locked --version "$BOMDRIFT_VERSION"
+              bomdrift baseline add --from-comment "${BOMDRIFT_NOTE_BODY}"
+              git config user.name  "bomdrift-bot"
+              git config user.email "bomdrift-bot@users.noreply.dev.azure.com"
+              git add .bomdrift/baseline.json
+              if git diff --cached --quiet; then
+                echo "baseline already contains the directive; nothing to commit"
+                exit 0
+              fi
+              git commit -m "chore(bomdrift): suppress from PR comment"
+              git push origin "HEAD:$(Build.SourceBranchName)"
+            displayName: bomdrift baseline add --from-comment
+            env:
+              BOMDRIFT_NOTE_BODY: ${{ parameters.BOMDRIFT_NOTE_BODY }}

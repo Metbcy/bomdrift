@@ -641,7 +641,8 @@ mod tests {
 
     #[test]
     fn days_since_zero_for_now() {
-        // SAFETY: serialized by other clock tests.
+        let _lock = crate::clock::test_env_lock();
+        // SAFETY: serialized by the env_lock guard above.
         unsafe {
             std::env::set_var("SOURCE_DATE_EPOCH", "1777593600");
         }

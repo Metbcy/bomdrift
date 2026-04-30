@@ -7,6 +7,112 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-04-29
+
+The "polish + multi-SCM parity" milestone. v0.9.5 ships the v0.9 follow-up
+backlog that was deferred to v1.0 in the v0.9 changelog: per-exception
+SPDX allow/deny granularity, exact-pinning of license-data dependencies,
+a public synthetic-id parser for VEX consumers, and — most visibly —
+**Bitbucket Cloud and Azure DevOps comment-driven suppression bridges**,
+giving bomdrift comment-driven suppression parity across all four major
+SCMs (GitHub, GitLab, Bitbucket, Azure DevOps).
+
+### Added
+
+- **Per-exception SPDX allow/deny.** New `[license] allow_exceptions` /
+  `deny_exceptions` arrays in `.bomdrift.toml` plus matching
+  `--allow-exception` / `--deny-exception` CLI flags. License expressions
+  using the `WITH` operator (e.g. `Apache-2.0 WITH LLVM-exception`) are
+  now evaluated at the exception level too, not just the base license.
+  Fail-closed semantics carry over: if `allow_exceptions` is non-empty
+  and the exception is not in it, the package is denied; if
+  `deny_exceptions` is non-empty and the exception IS in it, denied.
+  Empty lists preserve v0.9 behavior (exception treated as informational).
+  Surfaces in `LicenseViolation::matched_rule` as
+  `"exception:<id> denied"` / `"exception:<id> not in allow list"` and
+  is fingerprinted distinctly from base-license violations in SARIF.
+- **Bitbucket Cloud comment-suppress bridge.** New
+  `examples/bitbucket-pipelines/comment-bridge/` (Cloudflare Worker
+  reference) implementing the same five guards as the GitLab bridge:
+  webhook UUID/HMAC verification, event-type filter
+  (`pullrequest:comment_created` only), repo allowlist, commenter-
+  permission check (Bitbucket Cloud REST API workspace permissions ≥
+  `write`), and PR-context guard (rejects fork-PR comment-suppress to
+  prevent untrusted forks suppressing findings on upstream).
+- **Azure DevOps comment-suppress bridge.** New
+  `examples/azure-devops/comment-bridge/` covering the
+  `ms.vss-code.git-pullrequest-comment-event` Service Hook with
+  parallel guards: header-secret verification, event-type filter,
+  project-UUID allowlist, commenter-permission check (Azure DevOps
+  identities API), and protected-target-branch guard. Triggers an
+  Azure Pipeline run with `BOMDRIFT_NOTE_BODY` template parameter.
+- **Public `bomdrift::vex::parse_synthetic_id` helper.** Round-trips
+  bomdrift's synthetic finding IDs (`bomdrift.typosquat:<purl>:<closest>`,
+  etc.) back to a structured `SyntheticFindingKind` enum. Lets external
+  VEX tooling identify which bomdrift finding a VEX statement targets
+  without string-splitting. Re-exported from `lib.rs` for downstream
+  Rust consumers.
+
+### Changed
+
+- **`spdx` crate exact-pinned to `=0.10.9`.** SPDX list updates can
+  shift `LicenseId.is_gnu()` / `is_osi_approved()` membership and
+  silently change license-policy semantics. v0.9.5 pins exactly so
+  bumps are deliberate; the v0.9 caret pin was changed to exact in
+  this release.
+- **`BaselineEntry` and `ExpiredEntry` unified.** They overlapped on
+  `id`, `purl`, `expires`, `reason`. The two are now backed by a single
+  internal type with a status enum; the public `ExpiredEntry` alias is
+  preserved for back-compat. No behavior change; warning text on
+  expired entries unchanged.
+- **CI Rust toolchain pinned to MSRV 1.88.** `dtolnay/rust-toolchain@1.88`
+  across all CI workflow jobs. Avoids surprises from newer clippy lints
+  (`cloned_ref_to_slice_refs`, `useless_vec`, `is_multiple_of` came in
+  Rust 1.94 and broke the v0.8 build until handled). Bump deliberately
+  via `Cargo.toml`'s `rust-version` field in lockstep.
+
+### Refactored
+
+- **Single source of truth for the `/bomdrift suppress <ID> [reason: ...]`
+  comment grammar.** New `scripts/parse-suppress-comment.sh` is the
+  canonical regex; `comment-suppress/entrypoint.sh` sources it,
+  `examples/gitlab-ci/comment-bridge/worker.js` mirrors it with a
+  pointer comment, and `scripts/check-suppress-regex-sync.sh` is wired
+  into CI to fail the build if the shell + JS copies drift. The Rust
+  `--from-comment` parser keeps its native regex but now carries a
+  doc-comment pointing at the canonical grammar.
+
+### Documentation
+
+- **GitLab note upsert + threading semantics** documented in
+  `docs/src/gitlab-ci.md` "How notes are upserted" section. Closes the
+  v0.7 plan's open question about whether the `PUT
+  /merge_requests/:id/notes/:note_id` upsert preserves reviewer-reply
+  threading (it does — note ID stays stable, replies survive, no
+  re-fired note hooks for unchanged content).
+- **`docs/src/license-policy.md`** extended with the SPDX `WITH`
+  exceptions section + worked examples.
+- **`docs/src/vex.md`** extended with the synthetic-id grammar and
+  `parse_synthetic_id` reference for external tooling authors.
+
+### Tests
+
+- 369 → 389 (+20) — covering exception allow/deny semantics,
+  synthetic-id round-trip, baseline-entry-unify regression guards, and
+  bridge regex sync checks.
+
+### Scope notes
+
+- The Rust `--from-comment` parser remains its own regex (Rust regex
+  syntax differs from POSIX/JS); CI guards the shell+JS copies but the
+  Rust copy is doc-linked, not auto-synced.
+- PyPI/crates.io maintainer-set-changed enrichment (a v0.9 follow-up
+  for parity with the npm enricher) stayed deferred — neither PyPI's
+  nor crates.io's REST API exposes maintainer history cleanly.
+- Bridge worker.js files stay user-deployed (Cloudflare Worker /
+  Vercel / Netlify / AWS Lambda Edge); bomdrift the binary still does
+  not run a webhook server.
+
 ## [0.9.0] - 2026-05-01
 
 The "interoperability + breadth" milestone. v0.9 adds VEX (Vulnerability

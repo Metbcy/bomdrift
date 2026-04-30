@@ -43,14 +43,44 @@ plumbing.
 
 ## Suppressions
 
-Comment-driven suppression is **not** wired up for Bitbucket in
-v0.9. The supported flow is:
+The supported, no-infrastructure-required flow is the manual baseline edit:
 
 ```sh
 bomdrift baseline add GHSA-... --reason "audit complete (PR #42)"
 git add .bomdrift/baseline.json
 git commit -m "baseline: suppress GHSA-..."
 ```
+
+### Comment-driven suppression (advanced, v0.9.5+)
+
+> **Trade-off up front.** Comment-driven suppression turns a reviewer
+> comment like `/bomdrift suppress GHSA-...` into an automatic
+> baseline edit. To wire it up safely you need to operate a small
+> public webhook handler. The manual flow above is supported and
+> lower-risk; reach for the bridge only when the zero-click UX is
+> worth running a service.
+
+`examples/bitbucket-pipelines/comment-bridge/` ships a Cloudflare
+Worker reference implementation that enforces five security guards:
+
+1. Webhook HMAC verification (`X-Hub-Signature: sha256=…` against the
+   byte-exact request body).
+2. Event-type filter (`pullrequest:comment_created` only).
+3. Repo-full-name allowlist.
+4. Commenter-permission lookup (`write` / `admin` / `owner` only).
+5. PR-context guard (rejects fork-PR comment-suppress).
+
+When the guards pass, the worker triggers the
+`bomdrift-comment-suppress` custom pipeline (defined in the example
+`bitbucket-pipelines.yml`) with `BOMDRIFT_NOTE_BODY` set to the raw
+comment body. The pipeline runs
+`bomdrift baseline add --from-comment "$BOMDRIFT_NOTE_BODY"` and
+pushes the resulting baseline edit back to the PR's source branch.
+
+The full threat model and deployment guide live in
+[`examples/bitbucket-pipelines/comment-bridge/README.md`](https://github.com/Metbcy/bomdrift/tree/main/examples/bitbucket-pipelines/comment-bridge#threat-model).
+The same logic ports to Vercel / Netlify / AWS Lambda — see
+[`vercel-equivalent.md`](https://github.com/Metbcy/bomdrift/blob/main/examples/bitbucket-pipelines/comment-bridge/vercel-equivalent.md).
 
 ## Troubleshooting
 

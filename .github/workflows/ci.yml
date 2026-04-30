@@ -1,3 +1,4 @@
+# Pinned to MSRV (1.88) intentionally; bump deliberately when updating Cargo.toml rust-version.
 name: CI
 
 on:
@@ -14,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.88
         with:
           components: rustfmt
       - run: cargo fmt --all --check
@@ -23,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.88
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
@@ -37,7 +38,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-features
 
@@ -56,3 +57,25 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
+
+  shell-bridges:
+    name: shell-bridges (parser tests + regex sync)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: comment-suppress parser unit tests
+        run: bash comment-suppress/test.sh
+      - name: suppress-regex sync (shell ↔ bridge JS)
+        run: bash scripts/check-suppress-regex-sync.sh
+      - name: bash syntax check (scripts/, comment-suppress/)
+        run: |
+          for f in scripts/*.sh comment-suppress/*.sh; do
+            [ -f "$f" ] || continue
+            bash -n "$f"
+          done
+      - name: node syntax check (bridge workers)
+        run: |
+          for f in examples/*/comment-bridge/worker.js; do
+            [ -f "$f" ] || continue
+            node --check "$f"
+          done

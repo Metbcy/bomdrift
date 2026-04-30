@@ -338,6 +338,17 @@ pub struct DiffArgs {
     /// expression evaluation). Off by default — fail-closed.
     #[arg(long)]
     pub allow_ambiguous_licenses: bool,
+    /// Comma-separated SPDX exception identifiers (e.g.
+    /// `LLVM-exception`, `Classpath-exception-2.0`) permitted as the
+    /// right-hand side of a `WITH` clause. Repeatable. When set,
+    /// `Apache-2.0 WITH <other>` violates policy even if `Apache-2.0`
+    /// is on the base allow list. v0.9.5+.
+    #[arg(long, value_delimiter = ',', action = clap::ArgAction::Append)]
+    pub allow_exception: Vec<String>,
+    /// Comma-separated SPDX exception identifiers forbidden as the
+    /// right-hand side of a `WITH` clause. Repeatable. v0.9.5+.
+    #[arg(long, value_delimiter = ',', action = clap::ArgAction::Append)]
+    pub deny_exception: Vec<String>,
     /// Path(s) to VEX (Vulnerability Exploitability eXchange) files
     /// to consume. Repeatable. Each file is auto-detected as either
     /// OpenVEX 0.2.0 or CycloneDX VEX 1.6. Statements with status

@@ -3,6 +3,28 @@
 What's planned, what's deliberately out of scope, and what the
 acceptance criteria for new contributions look like.
 
+## Shipped (v0.9.5 — polish + multi-SCM parity)
+
+- **Per-exception SPDX allow/deny** via `[license] allow_exceptions` /
+  `deny_exceptions` and `--allow-exception` / `--deny-exception` CLI
+  flags. `Apache-2.0 WITH LLVM-exception` etc. now evaluated at the
+  exception level, not just the base license.
+- **Bitbucket + Azure DevOps comment-driven suppression bridges** —
+  Cloudflare Worker references with the same five guards as the GitLab
+  bridge. bomdrift now has comment-driven suppression parity across
+  all four major SCMs.
+- **`bomdrift::vex::parse_synthetic_id` public helper** — round-trips
+  bomdrift's synthetic finding IDs back to a structured kind. Lets
+  external VEX tooling identify which finding a statement targets.
+- `spdx` crate exact-pinned (`=0.10.9`) so license-list updates can't
+  silently change policy semantics.
+- `BaselineEntry` / `ExpiredEntry` unified internally; public alias
+  preserved.
+- CI Rust toolchain pinned to MSRV 1.88; bumps are deliberate.
+- Single source of truth for the suppress-comment grammar
+  (`scripts/parse-suppress-comment.sh` + CI sync guard).
+- GitLab note upsert + threading semantics documented.
+
 ## Shipped (v0.9 — interoperability + breadth)
 
 - **VEX consume** — `--vex <path>` accepts OpenVEX 0.2.0 + CycloneDX
@@ -39,9 +61,6 @@ acceptance criteria for new contributions look like.
 
 ## Future candidates (not committed)
 
-- **Per-exception SPDX allow/deny** — currently the WITH-exception
-  identity is informational only; allow/deny narrows to base
-  license. v1.0 candidate.
 - **PyPI / crates.io maintainer-set-changed** — blocked on
   per-version maintainer data in upstream APIs.
 - **VEX vocabulary beyond OpenVEX's 8 justifications** — bomdrift
@@ -53,6 +72,8 @@ acceptance criteria for new contributions look like.
   organization-specific enrichers. Probably WASM-based.
 - **OCI artifact attestation** — verify SBOMs are signed by the
   build system before diffing.
+- **Reachability** — explicit non-goal; pair with Endor / Snyk for
+  call-graph analysis (see Non-goals below).
 
 ### Calibration backlog
 
