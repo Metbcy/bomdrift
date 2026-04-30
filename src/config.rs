@@ -24,6 +24,12 @@ pub struct LicenseConfig {
     pub deny: Vec<String>,
     #[serde(default)]
     pub allow_ambiguous: bool,
+    /// SPDX exception identifiers permitted in `WITH` clauses. v0.9.5+.
+    #[serde(default)]
+    pub allow_exceptions: Vec<String>,
+    /// SPDX exception identifiers forbidden in `WITH` clauses. v0.9.5+.
+    #[serde(default)]
+    pub deny_exceptions: Vec<String>,
 }
 
 const DEFAULT_CONFIG_PATH: &str = ".bomdrift.toml";
@@ -163,6 +169,12 @@ fn apply_loaded_diff_config(args: &mut DiffArgs, config: Config) {
             args.deny_licenses = lic.deny;
         }
         args.allow_ambiguous_licenses |= lic.allow_ambiguous;
+        if args.allow_exception.is_empty() {
+            args.allow_exception = lic.allow_exceptions;
+        }
+        if args.deny_exception.is_empty() {
+            args.deny_exception = lic.deny_exceptions;
+        }
     }
 }
 
@@ -219,6 +231,8 @@ mod tests {
             allow_licenses: Vec::new(),
             deny_licenses: Vec::new(),
             allow_ambiguous_licenses: false,
+            allow_exception: Vec::new(),
+            deny_exception: Vec::new(),
             vex: Vec::new(),
             emit_vex: None,
             vex_author: None,

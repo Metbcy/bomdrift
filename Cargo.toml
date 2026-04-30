@@ -33,7 +33,8 @@ directories = "6"
 toml = "0.8"
 time = { version = "0.3", default-features = false, features = ["serde", "parsing", "formatting", "macros", "std"] }
 sha2 = { version = "0.10", default-features = false }
-spdx = { version = "0.10", default-features = false }
+# Exact-pinned: SPDX list updates can shift LicenseId.is_gnu() / is_osi_approved membership and silently change license-policy semantics. Bump deliberately.
+spdx = { version = "=0.10.9", default-features = false }
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["html_reports"] }

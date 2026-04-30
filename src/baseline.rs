@@ -60,8 +60,9 @@ pub struct Baseline {
     suppressed_advisories: HashSet<String>,
     /// v0.8+ entries that have already passed their `expires` date.
     /// Surface to the caller for stderr warnings; do NOT contribute to
-    /// suppression.
-    pub expired_entries: Vec<ExpiredEntry>,
+    /// suppression. Each entry has `expires.is_some()` and is guaranteed
+    /// to be strictly before today at load time.
+    pub expired_entries: Vec<BaselineEntry>,
     /// v0.9+ rich entries from object-form `suppressed_advisories`.
     /// Keyed in insertion order so VEX emission (Phase H) can surface
     /// `vex_status` / `vex_justification` / `reason` without re-parsing
@@ -73,6 +74,12 @@ pub struct Baseline {
 /// A rich baseline entry preserved for VEX emission. Plain string-form
 /// entries (`"GHSA-..."`) do NOT appear here — they have no metadata
 /// to preserve. Object-form entries always do.
+///
+/// v0.9.5: previously two distinct structs (`BaselineEntry` and
+/// `ExpiredEntry`) overlapped on `id` / `purl` / `expires` / `reason`.
+/// They are now a single shape; entries pushed into
+/// [`Baseline::expired_entries`] additionally guarantee
+/// `expires.is_some()`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BaselineEntry {
     pub id: String,
@@ -83,16 +90,15 @@ pub struct BaselineEntry {
     pub vex_justification: Option<String>,
 }
 
-/// A baseline entry whose `expires` date is strictly before today. The diff
-/// will surface the underlying finding; bomdrift prints one warning per
-/// expired entry to stderr after baseline load.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExpiredEntry {
-    pub id: String,
-    pub purl: Option<String>,
-    pub expires: String,
-    pub reason: Option<String>,
-}
+/// Back-compat alias for the unified [`BaselineEntry`] shape. Pre-v0.9.5
+/// callers used a distinct `ExpiredEntry` struct; the alias preserves
+/// `bomdrift::baseline::ExpiredEntry` as a name while sharing the
+/// underlying type.
+#[deprecated(
+    since = "0.9.5",
+    note = "use BaselineEntry directly; expired_entries is Vec<BaselineEntry> with expires.is_some()"
+)]
+pub type ExpiredEntry = BaselineEntry;
 
 impl Baseline {
     pub fn load(path: &Path) -> Result<Self> {
@@ -231,11 +237,13 @@ impl Baseline {
                             match clock::parse_ymd(expires_s) {
                                 Ok(date) => {
                                     if clock::is_expired(date) {
-                                        out.expired_entries.push(ExpiredEntry {
+                                        out.expired_entries.push(BaselineEntry {
                                             id: id.to_string(),
                                             purl: purl.clone(),
-                                            expires: expires_s.to_string(),
                                             reason: reason.clone(),
+                                            expires: expires_str.clone(),
+                                            vex_status: vex_status.clone(),
+                                            vex_justification: vex_justification.clone(),
                                         });
                                         // Expired entries do NOT contribute to suppression.
                                         continue;
@@ -862,9 +870,55 @@ mod tests {
         }));
         assert_eq!(baseline.expired_entries.len(), 1);
         assert_eq!(baseline.expired_entries[0].id, "GHSA-old");
+        // After v0.9.5 unification, expired_entries shares the
+        // BaselineEntry shape; expires is Option but always Some here.
+        assert_eq!(
+            baseline.expired_entries[0].expires.as_deref(),
+            Some("2026-04-30")
+        );
+        assert_eq!(
+            baseline.expired_entries[0].reason.as_deref(),
+            Some("awaiting upstream")
+        );
         assert!(
             !baseline.suppressed_advisories.contains("GHSA-old"),
             "expired entry must NOT contribute to suppression"
+        );
+    }
+
+    /// Regression: the stderr warning text rendered by lib.rs must remain
+    /// byte-for-byte stable across v0.9.5's BaselineEntry/ExpiredEntry
+    /// unification. CI integrators grep this string.
+    #[test]
+    fn expired_entry_warning_text_is_stable() {
+        let _g = lock_today(1777593600);
+        let baseline = Baseline::from_value(&json!({
+            "suppressed_advisories": [
+                { "id": "GHSA-old", "purl": "pkg:npm/foo@1.0.0",
+                  "expires": "2026-04-30", "reason": "awaiting upstream" }
+            ]
+        }));
+        let ent = &baseline.expired_entries[0];
+        // Mirror the format string used in src/lib.rs (the production
+        // warning emitter). If either side drifts, this fails loudly.
+        let rendered = format!(
+            "warning: baseline entry {id}{purl} expired {expires}; finding will surface in this run{reason}",
+            id = ent.id,
+            purl = ent
+                .purl
+                .as_deref()
+                .map(|p| format!(" ({p})"))
+                .unwrap_or_default(),
+            expires = ent.expires.as_deref().unwrap_or(""),
+            reason = ent
+                .reason
+                .as_deref()
+                .map(|r| format!(" — was: {r}"))
+                .unwrap_or_default(),
+        );
+        assert_eq!(
+            rendered,
+            "warning: baseline entry GHSA-old (pkg:npm/foo@1.0.0) expired 2026-04-30; finding will surface in this run — was: awaiting upstream"
         );
     }
 

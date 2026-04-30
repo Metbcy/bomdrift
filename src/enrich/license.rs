@@ -15,10 +15,14 @@
 //!   expression must `evaluate` to true under a closure that
 //!   returns true for allow-listed atomic IDs. `(MIT OR Apache-2.0)`
 //!   with `allow=[MIT]` permits because the licensee can pick MIT.
-//! - **`WITH` operator** — handled by `spdx`'s parser; the base
-//!   license is checked against allow/deny. The exception identifier
-//!   is currently informational only — per-exception allow/deny is a
-//!   future ask not in v0.9 scope.
+//! - **`WITH` operator** — handled by `spdx`'s parser. The base
+//!   license is checked against allow/deny as above. The exception
+//!   identifier participates in the OR-aware `Expression::evaluate`
+//!   pass via `Policy::allow_exceptions` / `Policy::deny_exceptions`
+//!   (v0.9.5+): a denied exception causes that branch of an OR to
+//!   fail, but a sibling branch may still permit. When both
+//!   exception lists are empty, exceptions are permitted (preserves
+//!   v0.9 behavior).
 //!
 //! When SPDX parsing FAILS (non-SPDX strings like `"Custom"`,
 //! `"Proprietary"`, vendor-specific spellings) we fall back to the
@@ -46,16 +50,28 @@ use crate::model::Component;
 
 /// Policy configuration. Empty allow + empty deny means "no policy" — the
 /// enricher returns no violations. Either or both may be set.
+///
+/// `allow_exceptions` / `deny_exceptions` (v0.9.5+) target the SPDX
+/// `WITH` clause: e.g. `Apache-2.0 WITH LLVM-exception` is permitted by
+/// `allow=[Apache-2.0]` but can additionally be gated by listing the
+/// exception identifier (`LLVM-exception`) in `deny_exceptions`. When
+/// both `allow_exceptions` and `deny_exceptions` are empty, exceptions
+/// are permitted (preserves v0.9 behavior).
 #[derive(Debug, Clone, Default)]
 pub struct Policy {
     pub allow: Vec<String>,
     pub deny: Vec<String>,
     pub allow_ambiguous: bool,
+    pub allow_exceptions: Vec<String>,
+    pub deny_exceptions: Vec<String>,
 }
 
 impl Policy {
     pub fn is_active(&self) -> bool {
-        !self.allow.is_empty() || !self.deny.is_empty()
+        !self.allow.is_empty()
+            || !self.deny.is_empty()
+            || !self.allow_exceptions.is_empty()
+            || !self.deny_exceptions.is_empty()
     }
 }
 
@@ -121,7 +137,9 @@ fn evaluate_one(c: &Component, lic: &str, policy: &Policy) -> Option<LicenseViol
     }
 }
 
-/// SPDX-evaluation path. Deny wins; allow uses `Expression::evaluate`.
+/// SPDX-evaluation path. Deny on base licenses is conservative (any
+/// required atomic in deny list → violation). Allow + exception checks
+/// run through `Expression::evaluate` so OR-branches resolve correctly.
 fn evaluate_spdx(
     c: &Component,
     raw: &str,
@@ -143,17 +161,92 @@ fn evaluate_spdx(
         }
     }
 
-    if !policy.allow.is_empty() {
-        let ok = expr.evaluate(|req| {
-            canonical_names(&req.license)
+    let exception_policy_active =
+        !policy.allow_exceptions.is_empty() || !policy.deny_exceptions.is_empty();
+    let needs_eval = !policy.allow.is_empty() || exception_policy_active;
+    if !needs_eval {
+        return None;
+    }
+
+    let ok = expr.evaluate(|req| {
+        if !policy.allow.is_empty() {
+            let base_allowed = canonical_names(&req.license)
                 .iter()
-                .any(|cand| matches_any(cand, &policy.allow).is_some())
+                .any(|cand| matches_any(cand, &policy.allow).is_some());
+            if !base_allowed {
+                return false;
+            }
+        }
+        if let Some(exception) = &req.exception {
+            let ex_name = exception.name;
+            if policy.deny_exceptions.iter().any(|d| d == ex_name) {
+                return false;
+            }
+            if !policy.allow_exceptions.is_empty()
+                && !policy.allow_exceptions.iter().any(|a| a == ex_name)
+            {
+                return false;
+            }
+        }
+        true
+    });
+    if ok {
+        return None;
+    }
+
+    // Compose a useful matched_rule. Prefer exception-driven explanations
+    // when an exception policy is configured AND the only failures we
+    // can find are on exception clauses; fall back to base-license
+    // "not in allow list" otherwise. Walks `expr.requirements()` (every
+    // referenced atomic) and returns the most-specific reason.
+    if exception_policy_active && let Some(reason) = first_exception_failure(expr, policy) {
+        return Some(LicenseViolation {
+            component: c.clone(),
+            license: raw.to_string(),
+            matched_rule: reason.matched_rule,
+            kind: reason.kind,
         });
-        if !ok {
-            return Some(LicenseViolation {
-                component: c.clone(),
-                license: raw.to_string(),
-                matched_rule: format!("not in allow list: {raw}"),
+    }
+    Some(LicenseViolation {
+        component: c.clone(),
+        license: raw.to_string(),
+        matched_rule: format!("not in allow list: {raw}"),
+        kind: LicenseViolationKind::NotAllowed,
+    })
+}
+
+/// Per-requirement reason emitted when an exception policy fails. Used
+/// to populate `LicenseViolation::matched_rule` so renderers can cite
+/// the precise exception identifier.
+struct ExceptionFailure {
+    matched_rule: String,
+    kind: LicenseViolationKind,
+}
+
+/// Walk `expr.requirements()` (every atomic LicenseReq referenced in
+/// the expression — both AND/OR branches) and return the first
+/// requirement whose `WITH` exception fails the configured exception
+/// policy. The base-license allow check is intentionally NOT
+/// considered here — that's reported via the generic "not in allow
+/// list" path so the existing v0.9 matched_rule wording is preserved
+/// for non-exception cases.
+fn first_exception_failure(expr: &spdx::Expression, policy: &Policy) -> Option<ExceptionFailure> {
+    for req in expr.requirements() {
+        let Some(exception) = &req.req.exception else {
+            continue;
+        };
+        let ex_name = exception.name;
+        if policy.deny_exceptions.iter().any(|d| d == ex_name) {
+            return Some(ExceptionFailure {
+                matched_rule: format!("exception:{ex_name} denied"),
+                kind: LicenseViolationKind::Deny,
+            });
+        }
+        if !policy.allow_exceptions.is_empty()
+            && !policy.allow_exceptions.iter().any(|a| a == ex_name)
+        {
+            return Some(ExceptionFailure {
+                matched_rule: format!("exception:{ex_name} not in allow list"),
                 kind: LicenseViolationKind::NotAllowed,
             });
         }
@@ -450,5 +543,116 @@ mod tests {
         let v = enrich(&cs, &policy);
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].kind, LicenseViolationKind::NotAllowed);
+    }
+
+    // ---------- v0.9.5 SPDX exception allow/deny ----------
+
+    #[test]
+    fn spdx_with_exception_back_compat_when_no_exception_policy() {
+        // v0.9 behavior: empty exception lists → exception is permitted.
+        let cs = cs_with_added(comp("foo", vec!["Apache-2.0 WITH LLVM-exception"]));
+        let policy = Policy {
+            allow: vec!["Apache-2.0".into()],
+            ..Default::default()
+        };
+        assert!(enrich(&cs, &policy).is_empty());
+    }
+
+    #[test]
+    fn spdx_exception_in_deny_list_violates_and_cites_exception() {
+        let cs = cs_with_added(comp("foo", vec!["Apache-2.0 WITH LLVM-exception"]));
+        let policy = Policy {
+            allow: vec!["Apache-2.0".into()],
+            deny_exceptions: vec!["LLVM-exception".into()],
+            ..Default::default()
+        };
+        let v = enrich(&cs, &policy);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].kind, LicenseViolationKind::Deny);
+        assert_eq!(v[0].matched_rule, "exception:LLVM-exception denied");
+    }
+
+    #[test]
+    fn spdx_exception_not_in_allow_list_fails_closed() {
+        // allow_exceptions is non-empty but doesn't list LLVM-exception.
+        let cs = cs_with_added(comp("foo", vec!["Apache-2.0 WITH LLVM-exception"]));
+        let policy = Policy {
+            allow: vec!["Apache-2.0".into()],
+            allow_exceptions: vec!["Classpath-exception-2.0".into()],
+            ..Default::default()
+        };
+        let v = enrich(&cs, &policy);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].kind, LicenseViolationKind::NotAllowed);
+        assert_eq!(
+            v[0].matched_rule,
+            "exception:LLVM-exception not in allow list"
+        );
+    }
+
+    #[test]
+    fn spdx_exception_or_branch_permits_when_sibling_path_passes() {
+        // (Apache-2.0 WITH LLVM-exception) OR (BSD-3-Clause) with
+        // deny_exceptions=[LLVM-exception], allow=[Apache-2.0,
+        // BSD-3-Clause] → BSD-3-Clause path passes; exception denial
+        // only fails its own branch under OR semantics.
+        let cs = cs_with_added(comp(
+            "foo",
+            vec!["(Apache-2.0 WITH LLVM-exception) OR BSD-3-Clause"],
+        ));
+        let policy = Policy {
+            allow: vec!["Apache-2.0".into(), "BSD-3-Clause".into()],
+            deny_exceptions: vec!["LLVM-exception".into()],
+            ..Default::default()
+        };
+        assert!(
+            enrich(&cs, &policy).is_empty(),
+            "OR sibling without exception must permit"
+        );
+    }
+
+    #[test]
+    fn spdx_exception_in_allow_list_permits() {
+        let cs = cs_with_added(comp("foo", vec!["Apache-2.0 WITH LLVM-exception"]));
+        let policy = Policy {
+            allow: vec!["Apache-2.0".into()],
+            allow_exceptions: vec!["LLVM-exception".into()],
+            ..Default::default()
+        };
+        assert!(enrich(&cs, &policy).is_empty());
+    }
+
+    #[test]
+    fn exception_violation_synthetic_id_round_trips_distinctly() {
+        // The synthetic id encodes the full license string (including
+        // the "WITH <exception>" suffix), so an exception-driven
+        // violation produces a different VEX/SARIF identity than a
+        // base-license violation on the same component.
+        let v_exception = LicenseViolation {
+            component: comp("foo", vec!["Apache-2.0 WITH LLVM-exception"]),
+            license: "Apache-2.0 WITH LLVM-exception".into(),
+            matched_rule: "exception:LLVM-exception denied".into(),
+            kind: LicenseViolationKind::Deny,
+        };
+        let v_base = LicenseViolation {
+            component: comp("foo", vec!["Apache-2.0"]),
+            license: "Apache-2.0".into(),
+            matched_rule: "deny: Apache-2.0".into(),
+            kind: LicenseViolationKind::Deny,
+        };
+        let id_exception = crate::vex::synthetic_id::license_violation(&v_exception);
+        let id_base = crate::vex::synthetic_id::license_violation(&v_base);
+        assert_ne!(
+            id_exception, id_base,
+            "exception-driven violation must have a distinct synthetic id"
+        );
+        // Round-trip the synthetic id back to the structured form.
+        let parsed = crate::vex::parse_synthetic_id(&id_exception).expect("round-trips");
+        match parsed {
+            crate::vex::SyntheticFindingKind::LicenseViolation { license, .. } => {
+                assert_eq!(license, "Apache-2.0 WITH LLVM-exception");
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
     }
 }
