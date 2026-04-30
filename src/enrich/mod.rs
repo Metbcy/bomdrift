@@ -15,6 +15,7 @@ pub mod kev;
 pub mod license;
 pub mod maintainer;
 pub mod osv;
+pub mod registry;
 pub mod typosquat;
 pub mod version_jump;
 
@@ -23,8 +24,11 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use maintainer::MaintainerAgeFinding;
+use registry::{Deprecated, MaintainerSetChanged, RecentlyPublished};
 use typosquat::TyposquatFinding;
 use version_jump::VersionJumpFinding;
+
+use crate::vex::VexAnnotation;
 
 /// Aggregated enrichment data attached to a diff. Keyed by the component's
 /// purl-with-version (e.g. `pkg:npm/axios@1.14.1`) so renderers can look up
@@ -56,6 +60,37 @@ pub struct Enrichment {
     /// `cs.license_changed` which detects same-version license changes.
     /// Empty when no `[license]` block is configured.
     pub license_violations: Vec<LicenseViolation>,
+    /// Components newly added in the diff whose registry-recorded
+    /// publish date is younger than the configured threshold (default
+    /// 14 days). v0.9+.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recently_published: Vec<RecentlyPublished>,
+    /// Components flagged deprecated / yanked upstream. v0.9+.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deprecated: Vec<Deprecated>,
+    /// npm-only: maintainer set changed across a version bump. v0.9+.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub maintainer_set_changed: Vec<MaintainerSetChanged>,
+    /// VEX annotations attached to findings whose status is `affected`
+    /// or `under_investigation` (Phase G, v0.9). Keyed by an opaque
+    /// finding-identity string; renderers look up by the same identity.
+    /// Empty when no `--vex` files were passed or no statements matched.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub vex_annotations: HashMap<String, VexAnnotation>,
+    /// Count of findings suppressed by `--vex` statements (`not_affected`
+    /// or `fixed`). Surfaced in the markdown summary so reviewers know
+    /// the diff was filtered. v0.9+.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub vex_suppressed_count: usize,
+    /// Findings emitted by external `--plugin` processes (Phase C, v0.9.6).
+    /// One element per plugin-finding, already tagged with the plugin
+    /// that produced it. Renderers group by `plugin_name` for display.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugin_findings: Vec<crate::plugin::PluginFinding>,
+}
+
+fn is_zero_usize(n: &usize) -> bool {
+    *n == 0
 }
 
 impl Enrichment {
@@ -72,6 +107,10 @@ impl Enrichment {
             || !self.version_jumps.is_empty()
             || !self.maintainer_age.is_empty()
             || !self.license_violations.is_empty()
+            || !self.recently_published.is_empty()
+            || !self.deprecated.is_empty()
+            || !self.maintainer_set_changed.is_empty()
+            || !self.plugin_findings.is_empty()
     }
 }
 

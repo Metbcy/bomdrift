@@ -127,17 +127,17 @@ from the MR's pipeline view with a `BOMDRIFT_SUPPRESS_ID` variable.
 On trigger it runs `bomdrift baseline add` and pushes the result back
 to the MR branch using `BOMDRIFT_PUSH_TOKEN`.
 
-### What's NOT in v0.7 (deferred to v0.8)
+### Comment-driven suppression on GitLab (v0.9+)
 
-In-comment `/bomdrift suppress <ID>` flow on GitLab. GitLab's note
-webhook fires on every comment on every MR with no command-prefix
-filter, so wiring it safely (rate-limit, fork-MR safety, command
-parsing, double-trigger debouncing) is materially harder than on
-GitHub. v0.7 ships the manual-job path because it covers the same
-user need (one click per accepted finding) without standing up a
-webhook handler. v0.8 will track the comment-driven flow under a
-follow-up issue once we see real adoption data on the v0.7 manual
-path.
+In-comment `/bomdrift suppress <ID>` is supported on GitLab as of v0.9
+via the [Cloudflare Worker bridge](https://github.com/Metbcy/bomdrift/tree/main/examples/gitlab-ci/comment-bridge).
+GitLab's note webhook fires on every comment on every MR with no
+command-prefix filter, so the bridge enforces five guards (webhook
+secret, event-type filter, repo allowlist, commenter-permission check,
+PR-context guard) before invoking `bomdrift baseline add --from-comment
+"<body>"` against the underlying CI. The grammar is identical to the
+GitHub `comment-suppress` sub-action; both share the
+`scripts/parse-suppress-comment.sh` regex so behavior cannot drift.
 
 ## Self-Managed GitLab
 
@@ -176,3 +176,101 @@ permissions).
 | In-comment suppression | ✅ | v0.8 |
 | Manual suppression job | n/a | ✅ |
 | `<!-- bomdrift:diff -->` marker | ✅ | ✅ (same shape — cross-platform tooling can grep one shape) |
+
+## Comment-driven suppression (advanced)
+
+> **Trade-off up front.** Comment-driven suppression turns a
+> reviewer comment like `/bomdrift suppress GHSA-...` into an
+> automatic baseline edit. To wire it up safely you need to operate
+> a small public webhook handler. The manual suppression job
+> documented above is supported and lower-risk; reach for the
+> bridge only when the zero-click UX is worth running a service.
+
+The GitHub flow ships out-of-the-box (`comment-suppress` sub-action
+fronted by the existing webhook). GitLab requires a webhook handler
+because GitLab's `Note Hook` doesn't include a command-prefix filter.
+
+### Bridge
+
+`examples/gitlab-ci/comment-bridge/` ships a Cloudflare Worker
+reference implementation that enforces five security guards:
+
+1. Webhook secret verification (constant-time `X-Gitlab-Token`).
+2. Event-type filter (`Note Hook` only).
+3. Project-ID allowlist.
+4. Commenter access_level >= 30 (Developer+ on the project).
+5. MR-context guard (rejects fork-MR comment exfiltration).
+
+When the guards pass, the worker triggers the GitLab pipeline with
+`BOMDRIFT_NOTE_BODY` set to the raw comment body. The
+`bomdrift:suppress` job in `suppress.gitlab-ci.yml` then runs
+`bomdrift baseline add --from-comment "$BOMDRIFT_NOTE_BODY"` to
+extract the directive and update `.bomdrift/baseline.json`.
+
+The threat model is documented in
+[`examples/gitlab-ci/comment-bridge/README.md`](https://github.com/Metbcy/bomdrift/tree/main/examples/gitlab-ci/comment-bridge#threat-model).
+The same logic ports to Vercel / Netlify / AWS Lambda — see
+[`vercel-equivalent.md`](https://github.com/Metbcy/bomdrift/blob/main/examples/gitlab-ci/comment-bridge/vercel-equivalent.md).
+
+### How notes are upserted
+
+bomdrift posts the diff as a single MR **note**, not as a Discussion.
+The lifecycle is:
+
+- **First run:** `POST /projects/:id/merge_requests/:iid/notes` creates
+  the note. The response carries an integer `id` which bomdrift
+  records implicitly by re-finding the note via the
+  `<!-- bomdrift:diff -->` marker on subsequent runs.
+- **Subsequent runs:** `PUT /projects/:id/merge_requests/:iid/notes/:note_id`
+  modifies the existing note's `body` in place.
+
+Concretely the upsert:
+
+- **Modifies the note body in place.** The note ID is stable across
+  pipeline runs, so any permalink to the note (right-click → Copy
+  link on the timestamp) keeps working for the lifetime of the MR.
+- **Does not regenerate the note.** GitLab does not delete-and-recreate
+  on PUT; the comment's position in the MR timeline does not move.
+- **Does not re-fire `Note Hook` webhooks for unchanged content.**
+  GitLab fires `Note Hook` on note creation but not on body-only
+  edits, so a comment-bridge wired to `Note Hook` will not loop on
+  bomdrift's own upserts. (The bridge's event-type filter is a
+  defence-in-depth here, not the primary guard.)
+- **Does not affect threaded replies.** GitLab's data model puts
+  notes and replies under a parent **discussion**; replies attached
+  to bomdrift's note (e.g. a reviewer typing "ack — accepting this")
+  remain attached to the same discussion thread regardless of how
+  many times bomdrift edits the parent body. This matches the
+  GitHub-side behaviour where reviewer threaded replies under the
+  bot comment survive each upsert.
+
+bomdrift deliberately uses the **Notes API**, not the **Discussions
+API**, for the diff template. The Discussions API creates a thread
+root that is awkward to update (you'd be editing the first note of
+a discussion, with subtly different permission semantics), and the
+diff comment isn't trying to start a structured conversation — it's
+a single living status comment that reviewers may reply to. Other
+reviewers can still reply to the bot's note and GitLab will create
+a discussion implicitly around their reply; bomdrift just doesn't
+seed the discussion itself.
+
+#### Author and signing
+
+The note's `author` is whatever identity owns `BOMDRIFT_API_TOKEN`
+(typically a Project Access Token, which surfaces as a bot user on
+the project). On every PUT, GitLab updates the note's `updated_at`
+and `last_edited_by_id` fields to point at that same bot identity —
+**not** the original MR author. This is expected and matches the
+GitHub equivalent's behaviour with a bot token: edits show up under
+the bot's identity, while the original commit/MR authorship is
+untouched. If your review process audits comment-edit history
+(unusual but legitimate on regulated projects), give the token a
+descriptive name (e.g. `bomdrift-ci-bot`) so the audit trail reads
+clearly.
+
+### Recommended hosting
+
+Cloudflare Workers — the reference. The free tier covers most
+webhook traffic. `wrangler tail` makes live debugging easy.
+Vercel / Netlify Edge Functions are equally good if your team
+already operates on those platforms.

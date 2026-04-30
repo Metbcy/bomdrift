@@ -9,12 +9,17 @@ without that enricher's findings.
 
 ## Shipping enrichers
 
-| Enricher | Source | Network? | Default | Opt-out flag |
-|---|---|---|---|---|
-| [OSV.dev CVE lookup](./osv-cve.md) | OSV.dev `/v1/querybatch` + `/v1/vulns/{id}` | yes | on | `--no-osv` |
-| [Typosquat](./typosquat.md) | Embedded top-N lists, optional XDG cache | no | on | (none — pure compute) |
-| [Multi-major version jump](./version-jump.md) | The diff itself | no | on | (none — pure compute) |
-| [Maintainer age](./maintainer-age.md) | GitHub REST `/repos/.../contributors` + `/commits` | yes | on | `--no-maintainer-age` |
+| Enricher | Source | Network? | Default | Opt-out flag | Calibration |
+|---|---|---|---|---|---|
+| [OSV.dev CVE lookup](./osv-cve.md) | OSV.dev `/v1/querybatch` + `/v1/vulns/{id}` | yes | on | `--no-osv` | `--cache-ttl-hours` (v0.9.6) |
+| [EPSS](./epss.md) | FIRST.org `/api/v1/epss` | yes | on | `--no-epss` | `--cache-ttl-hours`; `--fail-on-epss <0.0–1.0>` |
+| [CISA KEV](./kev.md) | CISA known-exploited catalog | yes | on | `--no-kev` | `--cache-ttl-hours`; `--fail-on kev` |
+| [Typosquat](./typosquat.md) | Embedded top-N lists, optional XDG cache | no | on | (none — pure compute) | `--typosquat-similarity-threshold` (v0.9.6) |
+| [Multi-major version jump](./version-jump.md) | The diff itself | no | on | (none — pure compute) | (hard-coded `MIN_MAJOR_DELTA = 2` — see chapter for rationale) |
+| [Maintainer age](./maintainer-age.md) | GitHub REST `/repos/.../contributors` + `/commits` | yes | on | `--no-maintainer-age` | `--young-maintainer-days` (v0.9.6) |
+| [Registry metadata](./registry.md) | npm / PyPI / crates.io public APIs | yes | on (v0.9+) | `--no-registry` | `--recently-published-days`; `--cache-ttl-hours` |
+| [License policy](../license-policy.md) | SBOM `licenses` field + SPDX expression eval | no | on | (configured by allow/deny lists) | `--allow-licenses`, `--deny-licenses`, `--allow-exception`, `--deny-exception` |
+| [Plugins](../plugins.md) | External-process plugins (v0.9.6+) | varies | off (opt-in) | (don't pass `--plugin`) | (per-plugin manifest) |
 
 ## Best-effort contract
 
@@ -47,17 +52,31 @@ upsert PR comments in place: identical inputs render to byte-identical
 output, so the comment body is patched only when the diff genuinely
 changes.
 
-## Why these four signals?
+## Why these signals?
 
-The four enrichers were chosen because each maps to a real, recent,
+The enricher set was chosen because each maps to a real, recent,
 high-impact incident class:
 
-- **OSV.dev CVE lookup**: published advisories.
+- **OSV.dev CVE lookup**: published advisories, the broadest signal.
+- **EPSS**: probability of exploitation in next 30 days; dampens
+  false-urgency on Critical-CVSS-but-low-exploitation advisories.
+- **CISA KEV**: known-exploited; the highest-confidence "act now" filter.
 - **Typosquat**: malicious packages mimicking popular ones (the
   `plain-crypto-js` axios dropper, the PyPI campaigns 2024–2026).
 - **Multi-major version jump**: takeover swaps, namespace reuse.
 - **Maintainer age**: long-game social-engineering campaigns (xz / Jia
   Tan).
+- **Registry metadata**: recently-published, deprecated,
+  maintainer-set-changed — the npm Shai-Hulud-style worm precursors.
+- **License policy**: not a malicious-code signal but a policy gate that
+  the same diff-time reviewer is best positioned to enforce.
 
-Future enrichers will live alongside these in the same module structure;
-see [Roadmap](../roadmap.md) for what's planned.
+For organizations with environment-specific rules outside this list, the
+v0.9.6 [Plugins](../plugins.md) protocol lets you layer custom
+enrichers on top without forking bomdrift.
+
+## See also
+
+- [CLI reference — Enrichment toggles](../cli-reference.md#enrichment-toggles)
+- [CLI reference — Calibration](../cli-reference.md#calibration)
+- [Architecture — Best-effort enricher contract](../architecture.md#best-effort-enricher-contract)

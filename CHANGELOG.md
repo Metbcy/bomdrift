@@ -7,6 +7,469 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-04-29
+
+The "v0.9.6 follow-up backlog" milestone. Five concrete items from the
+v0.9.6 release notes' "Suggested next milestone candidates" list shipped
+in one polish release: per-exception SPDX inheritance through compound
+expressions, the last hardcoded calibration threshold lifted, proper
+Windows plugin process timeouts, full `action.yml` parity with the CLI
+flag surface, and air-gapped Sigstore documentation.
+
+### Added
+
+- **`--multi-major-delta <u32>`** CLI flag and matching
+  `[diff] multi_major_delta` config key (default `2`, validated `>= 1`).
+  Lifts the last hardcoded calibration threshold:
+  `version_jump::MIN_MAJOR_DELTA`. Raise to reduce false positives on
+  legitimate major-version-bump-heavy ecosystems; lower to flag any
+  major bump (1.x → 2.x). `--debug-calibration` rows now emit the
+  *active* delta rather than the const default.
+- **`action.yml` input parity** with the v0.7-v0.9.7 CLI surface.
+  Twenty-five new inputs now map to their corresponding CLI flags:
+  `vex`, `emit-vex`, `vex-author`, `vex-default-justification`,
+  `allow-licenses`, `deny-licenses`, `allow-exception`,
+  `deny-exception`, `allow-ambiguous-licenses`, `no-epss`, `no-kev`,
+  `no-registry`, `fail-on-epss`, `recently-published-days`,
+  `typosquat-similarity-threshold`, `young-maintainer-days`,
+  `cache-ttl-hours`, `multi-major-delta`, `before-attestation`,
+  `after-attestation`, `cosign-identity`, `cosign-issuer`,
+  `require-attestation`, `plugin`. Multi-line inputs (`vex`, `plugin`)
+  iterate one flag per non-empty line. Empty inputs contribute no
+  CLI args, so existing workflows are byte-identical without changes.
+- **Air-gapped / self-hosted Sigstore documentation** in
+  `docs/src/attestation.md`. Documents env vars cosign respects and
+  bomdrift inherits unchanged: `SIGSTORE_REKOR_URL`,
+  `COSIGN_REKOR_URL`, `SIGSTORE_FULCIO_URL`, `COSIGN_FULCIO_URL`,
+  `SIGSTORE_OIDC_ISSUER`, `COSIGN_OIDC_ISSUER`, `SIGSTORE_ROOT_FILE`,
+  `COSIGN_REPOSITORY`, `TUF_ROOT`. Includes a worked GitHub Actions
+  example with internal Sigstore endpoints, key-based attestation
+  fallback notes (for true air-gap where keyless OIDC isn't
+  reachable), and a 6-item troubleshooting checklist.
+
+### Changed
+
+- **SPDX `WITH`-chain exception inheritance through compound
+  expressions.** v0.9.5 added per-exception allow/deny via
+  `[license] allow_exceptions` / `deny_exceptions`, but the evaluator
+  only checked the immediate atom. v0.9.7 evaluates each leaf in the
+  expression tree and combines outcomes via the SPDX crate's native
+  AND/OR semantics:
+  - `(Apache-2.0 WITH LLVM-exception) AND (BSD-3-Clause)` with
+    `deny_exceptions=[LLVM-exception]` is now correctly **denied**
+    (the AND-chain inherits the exception denial).
+  - `(Apache-2.0 WITH LLVM-exception) OR
+    (Apache-2.0 WITH Classpath-exception-2.0)` with
+    `allow_exceptions=[LLVM-exception]` (Classpath not allowed) is
+    correctly **permitted** (the LLVM branch wins; OR doesn't poison).
+  - Single-WITH expressions (no compound) keep the v0.9.5 wording for
+    back-compat. Compound violations append `" (in <raw expression>)"`
+    so users can locate the offending atom.
+- **Plugin process timeout** now uses the `wait-timeout` crate
+  (~50kb, `libc`-only transitive). Replaces the v0.9.6 manual
+  `Child::try_wait()` polling loop. Behavior unchanged on Unix; on
+  Windows the kill-on-timeout path is now first-class instead of
+  best-effort. Preserves the existing best-effort failure semantics
+  (timeout drops the offending plugin's findings, logs a warning at
+  `BOMDRIFT_DEBUG=1`, rest of the report renders).
+
+### Deps
+
+- Added `wait-timeout = "0.2"` to `[dependencies]` for cross-platform
+  process timeout in `src/plugin.rs`. Single transitive (`libc`,
+  already in tree).
+
+### Tests
+
+- 420 → 432 (+12). Eight new tests cover SPDX `WITH`-chain
+  inheritance through every operator combination
+  (AND-with-denied-exception, OR-with-permitted-fallback,
+  back-compat single-WITH); two tests cover the `--multi-major-delta`
+  knob (override default + reflect in `--debug-calibration`); two
+  cover the `wait-timeout`-based plugin timeout path.
+
+### Documentation
+
+- `docs/src/cli-reference.md`: new `--multi-major-delta` entry.
+- `docs/src/license-policy.md`: new "WITH-chain exception
+  inheritance" subsection with three worked examples.
+- `docs/src/enrichers/version-jump.md`: Calibration subsection
+  rewritten to cover the new knob.
+- `docs/src/architecture.md`: `wait-timeout = "0.2"` row added to
+  the approved-deps table.
+- `docs/src/github-action.md`: action input reference regrouped
+  by purpose; "What's new in v0.9.7" subsection added.
+- `docs/src/attestation.md`: air-gapped subsection (above).
+
+### Roadmap
+
+This release closes 5 of the 6 "Suggested next milestone candidates"
+from v0.9.6's release notes:
+
+| Item | Disposition |
+|---|---|
+| Per-exception SPDX granularity through `WITH` chains | **Shipped** |
+| Multi-major version-jump calibration knob | **Shipped** |
+| Windows plugin timeout (proper, not best-effort) | **Shipped** |
+| Action.yml parity with newer CLI flags | **Shipped** |
+| Cosign air-gapped Sigstore docs | **Shipped** |
+| WASM-sandboxed plugin model | **Deferred** (multi-week scope, conflicts with single-binary tenet; v1.0+ candidate if external-process model proves insufficient) |
+
+### Scope notes
+
+- **WASM-sandboxed plugin model** stayed deferred. The external-process
+  plugin model from v0.9.6 covers the use case adopters want; WASM
+  sandboxing would add a multi-week toolchain overhaul (`wasmtime`
+  ~30MB / 80 transitive deps, or `wasmi`'s slower runtime, plus a Rust
+  plugin SDK, plus dual-runtime support to not break v0.9.6 plugins).
+  Stays a v1.0+ candidate if demand materializes.
+
+## [0.9.6] - 2026-04-29
+
+The "finish the roadmap" milestone. v0.9.6 closes out every entry in the
+prior roadmap's "Future candidates (not committed)" section — by shipping
+it, by closing it as a non-goal, or by documenting the explicit upstream
+blocker. Headline new features: **OCI attestation verification** via
+`cosign verify-attestation`, an **external-process plugin system** for
+custom rules, full **CLI calibration knobs** for the remaining hardcoded
+thresholds, and a **comprehensive documentation refresh** across every
+chapter to reflect v0.7 → v0.9.6 reality.
+
+### Added
+
+- **OCI attestation verification.** `bomdrift diff
+  --before-attestation <oci-ref> --after-attestation <oci-ref>` shells
+  out to `cosign verify-attestation --type=cyclonedx`, parses the
+  in-toto envelope, and feeds the verified SBOM payload into the
+  standard parser. New `--cosign-identity <regex>` and
+  `--cosign-issuer <url>` flags pass through to cosign's
+  `--certificate-identity-regexp` / `--certificate-oidc-issuer`. New
+  `--require-attestation` boolean refuses falling back to the
+  `--before` / `--after` file flags so production CI gates can enforce
+  attested SBOMs only. Documented in `docs/src/attestation.md`. New
+  `attestation` row in `--debug-calibration` so users can confirm
+  cosign accepted the right cert.
+- **External-process plugin system.** New `--plugin
+  <path-to-plugin.toml>` flag (repeatable). Plugin manifest in TOML
+  (`name` / `description` / `exec` / `timeout_ms` / `invoke_on`).
+  bomdrift invokes the plugin once per Added or VersionChanged
+  component with JSON on stdin (`{component, event, before}`) and
+  parses JSON from stdout (`{findings: [...]}`). Best-effort: timeout,
+  non-zero exit, or malformed JSON drops the offending plugin's
+  findings and logs a warning at `BOMDRIFT_DEBUG=1`; the rest of the
+  diff renders. New `bomdrift.plugin` SARIF rule with stable
+  `partialFingerprints` per `(plugin_name, purl, rule_id)`. Worked
+  example shipped under `examples/plugins/banned-packages/`.
+  Documented in `docs/src/plugins.md`. Protocol carries
+  `protocol_version: 1` for forward-compat.
+- **CLI calibration knobs** for the three previously-hardcoded
+  thresholds:
+  - `--typosquat-similarity-threshold <FLOAT>` (default `0.92`,
+    validated 0.0..=1.0).
+  - `--young-maintainer-days <i64>` (default `90`, validated >= 1).
+  - `--cache-ttl-hours <u64>` (default `24`, validated >= 1; applies
+    uniformly to OSV / EPSS / KEV / Registry caches).
+  - Matching `[diff]` config keys: `typosquat_similarity_threshold`,
+    `young_maintainer_days`, `cache_ttl_hours`.
+  - `--debug-calibration` rows now emit the *active* threshold rather
+    than the hardcoded default, so calibration data collection
+    reflects the real run.
+
+### Changed
+
+- **`CACHE_TTL_SECS` unified.** Previously duplicated in four
+  modules (`src/enrich/{cache,epss,kev,registry}.rs`). Now a single
+  source of truth in `src/enrich/cache.rs` with `effective_ttl_secs`
+  helper that honors per-run overrides without globals.
+- **Comprehensive documentation refresh** across every chapter.
+  Notable updates:
+  - `README.md` rewritten with capability-grouped feature list
+    (Ingest / Enrichers / Suppression / Output / Forge /
+    Extensibility / Packaging) and a 5-column comparison table
+    against Socket / Snyk / Trivy / OSV-Scanner / Grype with 11
+    feature-row dimensions sourced from the v0.7-v0.9 competitor
+    research doc.
+  - `docs/src/cli-reference.md` rewritten end-to-end. Every CLI flag
+    now documented and grouped by purpose (Output / Suppression /
+    Enrichment / Calibration / License / Failure thresholds /
+    Forge / Attestation / Plugins / Diagnostics) with each entry
+    annotated with introduced-in version.
+  - `docs/src/architecture.md` module map expanded to cover the 8
+    modules added across v0.7-v0.9.6 (`config`, `clock`,
+    `attestation`, `plugin`, `vex`, `epss`, `kev`, `registry`,
+    `license`); new "Best-effort enricher contract" and
+    "Byte-determinism contract" subsections; approved-deps table
+    including `base64 = "0.22"` (v0.9.6) and `spdx = "=0.10.9"`
+    exact pin (v0.9.5).
+  - `docs/src/baseline.md` 6-row schema-reference table for the
+    unified `BaselineEntry` (id / purl / expires / reason /
+    vex_status / vex_justification).
+  - Per-enricher chapters (`docs/src/enrichers/{typosquat,
+    maintainer-age,version-jump,kev,epss,registry}.md`) gained
+    consistent Calibration + Disabling + See-also subsections;
+    overview table grew from 4 to 9 rows.
+  - `docs/src/SUMMARY.md` reorganized into Output / Enrichers /
+    Suppressions / Advanced groups for new-reader navigation.
+  - `CONTRIBUTING.md` "Test conventions (v0.9.5+)" subsection added
+    documenting the `clock::test_env_lock()` recipe; "Adding a new
+    enricher" and "Adding a new finding kind" worked recipes.
+  - Stale content rewritten across multiple chapters
+    (`gitlab-ci.md`'s v0.7-deferred section now covers what v0.9
+    actually shipped; release-signing pins refreshed; etc.).
+
+### Roadmap
+
+- Closed out every "Future candidates" entry from the v0.9.5
+  roadmap with explicit dispositions:
+  - **Reachability** → moved to Non-goals (pair with Endor / Snyk).
+  - **GraphQL maintainer-age** → decided: REST stays
+    (cursor-pagination-cost analysis lifted into the maintainer
+    enricher's module doc).
+  - **VEX vocabulary beyond OpenVEX 8 justifications** →
+    spec-bound; documented in `docs/src/vex.md` that bomdrift
+    follows the OpenVEX 0.2.0 vocab verbatim.
+  - **PyPI / crates.io maintainer-set-changed** → moved to a new
+    "Blocked on upstream" subsection with the precise API gap
+    documented (PyPI lacks per-version maintainers; crates.io
+    lacks per-version `published_by` history).
+- Calibration backlog section removed entirely — every threshold
+  (similarity, young-maintainer-days, recently-published-days,
+  cache-ttl-hours) is now CLI/config-configurable.
+
+### Deps
+
+- Added `base64 = "0.22"` for the cosign in-toto envelope payload
+  decode in `src/attestation.rs`. Already a transitive dep via
+  `ureq`; promoted to direct so we own the pin.
+
+### Tests
+
+- 389 → 420 (+31). Plugin manifest parse, plugin success/timeout/
+  non-zero-exit/malformed-output paths, attestation envelope parse,
+  fake-cosign integration test (PATH-injection with serialized env
+  lock), calibration knobs override default + reflect in
+  `--debug-calibration`, cache-TTL override per enricher.
+
+### Scope notes
+
+What stayed deferred to v1.0 candidates (carried to roadmap "Blocked
+on upstream" or new "Future candidates"):
+
+- PyPI / crates.io maintainer-set-changed (upstream API blockers).
+- WASM / sandboxed plugin model (current external-process model
+  works; revisit if demand materializes).
+- Bitbucket / Azure DevOps action-side `vex:` / `emit-vex:` /
+  `plugin:` inputs (CLI surface is broader than action surface).
+- Multi-major version-jump `MIN_MAJOR_DELTA` calibration knob
+  (only remaining hardcoded threshold; revisit with calibration data).
+
+## [0.9.5] - 2026-04-29
+
+The "polish + multi-SCM parity" milestone. v0.9.5 ships the v0.9 follow-up
+backlog that was deferred to v1.0 in the v0.9 changelog: per-exception
+SPDX allow/deny granularity, exact-pinning of license-data dependencies,
+a public synthetic-id parser for VEX consumers, and — most visibly —
+**Bitbucket Cloud and Azure DevOps comment-driven suppression bridges**,
+giving bomdrift comment-driven suppression parity across all four major
+SCMs (GitHub, GitLab, Bitbucket, Azure DevOps).
+
+### Added
+
+- **Per-exception SPDX allow/deny.** New `[license] allow_exceptions` /
+  `deny_exceptions` arrays in `.bomdrift.toml` plus matching
+  `--allow-exception` / `--deny-exception` CLI flags. License expressions
+  using the `WITH` operator (e.g. `Apache-2.0 WITH LLVM-exception`) are
+  now evaluated at the exception level too, not just the base license.
+  Fail-closed semantics carry over: if `allow_exceptions` is non-empty
+  and the exception is not in it, the package is denied; if
+  `deny_exceptions` is non-empty and the exception IS in it, denied.
+  Empty lists preserve v0.9 behavior (exception treated as informational).
+  Surfaces in `LicenseViolation::matched_rule` as
+  `"exception:<id> denied"` / `"exception:<id> not in allow list"` and
+  is fingerprinted distinctly from base-license violations in SARIF.
+- **Bitbucket Cloud comment-suppress bridge.** New
+  `examples/bitbucket-pipelines/comment-bridge/` (Cloudflare Worker
+  reference) implementing the same five guards as the GitLab bridge:
+  webhook UUID/HMAC verification, event-type filter
+  (`pullrequest:comment_created` only), repo allowlist, commenter-
+  permission check (Bitbucket Cloud REST API workspace permissions ≥
+  `write`), and PR-context guard (rejects fork-PR comment-suppress to
+  prevent untrusted forks suppressing findings on upstream).
+- **Azure DevOps comment-suppress bridge.** New
+  `examples/azure-devops/comment-bridge/` covering the
+  `ms.vss-code.git-pullrequest-comment-event` Service Hook with
+  parallel guards: header-secret verification, event-type filter,
+  project-UUID allowlist, commenter-permission check (Azure DevOps
+  identities API), and protected-target-branch guard. Triggers an
+  Azure Pipeline run with `BOMDRIFT_NOTE_BODY` template parameter.
+- **Public `bomdrift::vex::parse_synthetic_id` helper.** Round-trips
+  bomdrift's synthetic finding IDs (`bomdrift.typosquat:<purl>:<closest>`,
+  etc.) back to a structured `SyntheticFindingKind` enum. Lets external
+  VEX tooling identify which bomdrift finding a VEX statement targets
+  without string-splitting. Re-exported from `lib.rs` for downstream
+  Rust consumers.
+
+### Changed
+
+- **`spdx` crate exact-pinned to `=0.10.9`.** SPDX list updates can
+  shift `LicenseId.is_gnu()` / `is_osi_approved()` membership and
+  silently change license-policy semantics. v0.9.5 pins exactly so
+  bumps are deliberate; the v0.9 caret pin was changed to exact in
+  this release.
+- **`BaselineEntry` and `ExpiredEntry` unified.** They overlapped on
+  `id`, `purl`, `expires`, `reason`. The two are now backed by a single
+  internal type with a status enum; the public `ExpiredEntry` alias is
+  preserved for back-compat. No behavior change; warning text on
+  expired entries unchanged.
+- **CI Rust toolchain pinned to MSRV 1.88.** `dtolnay/rust-toolchain@1.88`
+  across all CI workflow jobs. Avoids surprises from newer clippy lints
+  (`cloned_ref_to_slice_refs`, `useless_vec`, `is_multiple_of` came in
+  Rust 1.94 and broke the v0.8 build until handled). Bump deliberately
+  via `Cargo.toml`'s `rust-version` field in lockstep.
+
+### Refactored
+
+- **Single source of truth for the `/bomdrift suppress <ID> [reason: ...]`
+  comment grammar.** New `scripts/parse-suppress-comment.sh` is the
+  canonical regex; `comment-suppress/entrypoint.sh` sources it,
+  `examples/gitlab-ci/comment-bridge/worker.js` mirrors it with a
+  pointer comment, and `scripts/check-suppress-regex-sync.sh` is wired
+  into CI to fail the build if the shell + JS copies drift. The Rust
+  `--from-comment` parser keeps its native regex but now carries a
+  doc-comment pointing at the canonical grammar.
+
+### Documentation
+
+- **GitLab note upsert + threading semantics** documented in
+  `docs/src/gitlab-ci.md` "How notes are upserted" section. Closes the
+  v0.7 plan's open question about whether the `PUT
+  /merge_requests/:id/notes/:note_id` upsert preserves reviewer-reply
+  threading (it does — note ID stays stable, replies survive, no
+  re-fired note hooks for unchanged content).
+- **`docs/src/license-policy.md`** extended with the SPDX `WITH`
+  exceptions section + worked examples.
+- **`docs/src/vex.md`** extended with the synthetic-id grammar and
+  `parse_synthetic_id` reference for external tooling authors.
+
+### Tests
+
+- 369 → 389 (+20) — covering exception allow/deny semantics,
+  synthetic-id round-trip, baseline-entry-unify regression guards, and
+  bridge regex sync checks.
+
+### Scope notes
+
+- The Rust `--from-comment` parser remains its own regex (Rust regex
+  syntax differs from POSIX/JS); CI guards the shell+JS copies but the
+  Rust copy is doc-linked, not auto-synced.
+- PyPI/crates.io maintainer-set-changed enrichment (a v0.9 follow-up
+  for parity with the npm enricher) stayed deferred — neither PyPI's
+  nor crates.io's REST API exposes maintainer history cleanly.
+- Bridge worker.js files stay user-deployed (Cloudflare Worker /
+  Vercel / Netlify / AWS Lambda Edge); bomdrift the binary still does
+  not run a webhook server.
+
+## [0.9.0] - 2026-05-01
+
+The "interoperability + breadth" milestone. v0.9 adds VEX (Vulnerability
+Exploitability eXchange) consumption + emission, full SPDX expression
+evaluation, multi-SCM templates (Bitbucket Pipelines + Azure DevOps),
+registry-metadata enrichers (npm/PyPI/crates.io), and a security-reviewed
+GitLab comment-driven suppression bridge.
+
+### Added
+
+- **VEX consume (`--vex <path>`, repeatable).** Auto-detects OpenVEX
+  0.2.0 vs CycloneDX VEX 1.6 per file. Statements with status
+  `not_affected` / `fixed` suppress matching findings (counted in the
+  new "Suppressed by VEX" markdown summary row); `under_investigation`
+  annotates with a `VEX:` badge in markdown and
+  `properties.vexStatus` in SARIF; `affected` annotates as a no-op.
+  Match keys are `(VulnRef.id OR alias, purl_with_version)` with a
+  documented synthetic-id convention for non-CVE finding kinds
+  (`bomdrift.<kind>:<purl>:<discriminator>`).
+- **VEX emit (`--emit-vex <path>`).** Writes a single OpenVEX 0.2.0
+  document covering baseline-suppressed entries (status from the
+  per-entry `vex_status`, defaulting to `under_investigation` —
+  baseline ≠ "not affected", never auto-promoted) and un-suppressed
+  findings (status `affected` with `status_notes` describing the
+  finding kind). New baseline fields `vex_status` and
+  `vex_justification`. New `[diff] vex_author` and
+  `[diff] vex_default_justification` config keys.
+- **Full SPDX expression evaluator** via the `spdx = "0.10"` crate.
+  Replaces v0.8's atomic+glob matcher: `(MIT OR Apache-2.0)` with
+  `allow=[MIT]` permits; `(MIT AND GPL-3.0-only)` with
+  `deny=[GPL-3.0-only]` violates; `Apache-2.0 WITH LLVM-exception`
+  parses cleanly (base license checked, exception identity
+  informational only). Non-SPDX strings fall back to the v0.8
+  atomic+glob path. `allow_ambiguous` is deprecated with a one-time
+  stderr warning.
+- **Bitbucket Pipelines + Azure DevOps Pipelines** support.
+  `Platform::Bitbucket` and `Platform::AzureDevOps` variants on the
+  CLI; auto-detection via `BITBUCKET_BUILD_NUMBER` and `TF_BUILD`
+  envs; `BITBUCKET_GIT_HTTP_ORIGIN` and `BUILD_REPOSITORY_URI`
+  honored as `--repo-url` fallbacks. Per-platform footer URL shapes
+  (`/issues/new` for Bitbucket; `/_workitems/create` for Azure
+  DevOps). Drop-in templates with READMEs in
+  `examples/bitbucket-pipelines/` and `examples/azure-devops/`.
+- **Registry-metadata enrichers (`src/enrich/registry.rs`).** Three
+  best-effort fetchers — npm, PyPI, crates.io — with disk cache at
+  `<XDG_CACHE>/bomdrift/registry/<eco>/<pkg>.json` (24h TTL,
+  atomic temp-file + rename). Three new finding kinds:
+  `RecentlyPublished` (default <14d threshold, tunable via
+  `--recently-published-days`), `Deprecated` (npm
+  `versions[].deprecated`, PyPI `info.yanked` + Inactive
+  classifiers, crates.io `versions[].yanked`), and
+  `MaintainerSetChanged` (npm only — PyPI/crates.io don't expose
+  per-version maintainers cleanly). New `--no-registry` flag and
+  `[diff] no_registry = true` config key. New `--fail-on
+  recently-published` and `--fail-on deprecated` thresholds. New
+  SARIF rules `bomdrift.recently-published`, `bomdrift.deprecated`,
+  `bomdrift.maintainer-set-changed` with stable
+  `partialFingerprints.primaryHash/v1`.
+- **GitLab comment-driven suppress.** `bomdrift baseline add
+  --from-comment <BODY>` parses the raw note body, extracts the
+  first `/bomdrift suppress <ID>[ reason: <text>]` directive, and
+  fails non-zero with a clear stderr message when no directive is
+  found (so a misconfigured webhook bridge fails loudly).
+  `examples/gitlab-ci/comment-bridge/` ships a Cloudflare Worker
+  reference implementation enforcing five guards: webhook secret
+  (constant-time compare), event-type filter, project-ID
+  allowlist, commenter access_level >= 30, and an MR-context
+  guard that rejects fork-MR exfiltration. Vercel/Netlify/Lambda
+  port note included.
+- **Explicit non-goals + pair-with recommendations** in README,
+  STATUS, and the roadmap. Reachability, tarball static analysis,
+  auto-fix PR generation, continuous monitoring, container
+  scanning, SAST/secrets, risk-score dashboards, and closed-source
+  advisory feeds are deliberately out of scope; each is paired with
+  a recommended complementary tool.
+
+### Changed
+
+- OSV cache schema extended with `aliases: Vec<String>` so cache
+  hits no longer drop alias data. Old cache entries without the
+  field deserialize with an empty vec (graceful migration).
+- `Command::Diff` argument is now boxed (`Box<DiffArgs>`) to satisfy
+  clippy's large-enum-variant lint after the v0.9 flag growth.
+  Internal-only change; no user-facing impact.
+- `BaselineAddArgs.id` becomes optional (`Option<String>`) to allow
+  `--from-comment` invocations without a positional ID. Existing
+  positional callers are unchanged.
+
+### Scope notes (deferred)
+
+- **Per-exception SPDX allow/deny** — the WITH-exception identifier
+  is currently informational only; allow/deny narrows to the base
+  license.
+- **PyPI / crates.io maintainer-set-changed** — blocked on per-version
+  maintainer data in upstream APIs.
+- **Bitbucket / Azure DevOps comment-driven suppression** — only the
+  diff path ships in v0.9; comment-suppress is GitHub-only (and
+  GitLab via the bridge).
+- **VEX vocabulary beyond OpenVEX's 8 justifications** — bomdrift
+  uses the spec enum verbatim; no extension yet.
+
 ## [0.8.0] - 2026-04-29
 
 The "supply-chain hardening" milestone. v0.8 finishes SARIF for GitHub

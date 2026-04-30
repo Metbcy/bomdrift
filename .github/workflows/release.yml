@@ -1,3 +1,4 @@
+# Pinned to MSRV (1.88) intentionally; bump deliberately when updating Cargo.toml rust-version.
 name: release
 
 # Triggered when a SemVer tag (e.g. v0.1.0) is pushed. Builds release binaries
@@ -100,7 +101,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.88
         with:
           targets: ${{ matrix.target }}
 

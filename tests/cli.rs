@@ -1039,3 +1039,317 @@ fn diff_debug_calibration_prints_csv_lines_to_stderr() {
         "calibration output must NOT leak into stdout; got:\n{stdout}"
     );
 }
+
+#[test]
+fn diff_typosquat_similarity_threshold_rejects_out_of_range() {
+    // clap value_parser must reject < 0.0 / > 1.0 / non-numeric.
+    for bad in &["-0.1", "1.5", "two"] {
+        let out = Command::new(bin())
+            .current_dir(manifest_dir())
+            .args([
+                "diff",
+                "tests/fixtures/cdx-minimal.json",
+                "tests/fixtures/cdx-after.json",
+                "--no-osv",
+                "--typosquat-similarity-threshold",
+                bad,
+            ])
+            .output()
+            .expect("spawn bomdrift");
+        assert!(
+            !out.status.success(),
+            "expected clap to reject --typosquat-similarity-threshold {bad}, but exit was {}",
+            out.status
+        );
+    }
+}
+
+#[test]
+fn diff_young_maintainer_days_rejects_zero_and_negative() {
+    for bad in &["0", "-1", "abc"] {
+        let out = Command::new(bin())
+            .current_dir(manifest_dir())
+            .args([
+                "diff",
+                "tests/fixtures/cdx-minimal.json",
+                "tests/fixtures/cdx-after.json",
+                "--no-osv",
+                "--young-maintainer-days",
+                bad,
+            ])
+            .output()
+            .expect("spawn bomdrift");
+        assert!(
+            !out.status.success(),
+            "expected clap to reject --young-maintainer-days {bad}"
+        );
+    }
+}
+
+#[test]
+fn diff_multi_major_delta_rejects_zero_and_negative() {
+    for bad in &["0", "-1", "abc"] {
+        let out = Command::new(bin())
+            .current_dir(manifest_dir())
+            .args([
+                "diff",
+                "tests/fixtures/cdx-minimal.json",
+                "tests/fixtures/cdx-after.json",
+                "--no-osv",
+                "--multi-major-delta",
+                bad,
+            ])
+            .output()
+            .expect("spawn bomdrift");
+        assert!(
+            !out.status.success(),
+            "expected clap to reject --multi-major-delta {bad}"
+        );
+    }
+}
+
+#[test]
+fn diff_multi_major_delta_accepts_valid_value() {
+    // Smoke test that clap accepts the flag and the diff still runs.
+    // The behavioral assertion for the threshold lives in the lib-level
+    // unit tests; here we just need to verify the wiring doesn't panic.
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--multi-major-delta",
+            "3",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+    assert!(
+        out.status.success(),
+        "diff with --multi-major-delta 3 should succeed; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn diff_cache_ttl_hours_rejects_zero_and_negative() {
+    for bad in &["0", "-3", "x"] {
+        let out = Command::new(bin())
+            .current_dir(manifest_dir())
+            .args([
+                "diff",
+                "tests/fixtures/cdx-minimal.json",
+                "tests/fixtures/cdx-after.json",
+                "--no-osv",
+                "--cache-ttl-hours",
+                bad,
+            ])
+            .output()
+            .expect("spawn bomdrift");
+        assert!(
+            !out.status.success(),
+            "expected clap to reject --cache-ttl-hours {bad}"
+        );
+    }
+}
+
+#[test]
+fn diff_typosquat_similarity_threshold_changes_calibration_row() {
+    // With a near-1.0 threshold, no typosquat findings surface — so no
+    // typosquat row in calibration output. Compare against the default
+    // run which DOES produce one.
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--debug-calibration",
+            "--typosquat-similarity-threshold",
+            "0.999",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+    assert!(out.status.success());
+    let stderr = String::from_utf8(out.stderr).expect("stderr utf-8");
+    let typosquat_lines: Vec<&str> = stderr
+        .lines()
+        .filter(|l| l.starts_with("typosquat|"))
+        .collect();
+    assert!(
+        typosquat_lines.is_empty(),
+        "raising similarity threshold to 0.999 must drop the existing typosquat finding; got: {stderr}"
+    );
+}
+
+#[test]
+fn diff_typosquat_similarity_threshold_surfaces_in_calibration_threshold_field() {
+    // Pick a low threshold that the existing axios-fixture finding still
+    // clears, and assert the threshold COLUMN reflects the override (not
+    // the unconditional 0.92 default).
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--debug-calibration",
+            "--typosquat-similarity-threshold",
+            "0.5",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+    assert!(out.status.success());
+    let stderr = String::from_utf8(out.stderr).expect("stderr utf-8");
+    let line = stderr
+        .lines()
+        .find(|l| l.starts_with("typosquat|"))
+        .expect("typosquat row");
+    let fields: Vec<&str> = line.split('|').collect();
+    let threshold: f64 = fields[3].parse().expect("threshold is float");
+    assert!(
+        (threshold - 0.5).abs() < 1e-9,
+        "calibration threshold field must reflect the active override; got {threshold}"
+    );
+}
+
+#[test]
+fn diff_before_attestation_conflicts_with_positional_before() {
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--before-attestation",
+            "ghcr.io/example/img:tag",
+            "--cosign-identity",
+            "https://github.com/example/.+",
+            "--cosign-issuer",
+            "https://token.actions.githubusercontent.com",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+    assert!(
+        !out.status.success(),
+        "expected clap to reject --before-attestation alongside positional `before`"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("cannot be used with") || stderr.contains("conflicts"),
+        "expected conflicts-with diagnostic; got: {stderr}"
+    );
+}
+
+#[test]
+fn diff_require_attestation_demands_both_attestation_flags() {
+    let out = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--require-attestation",
+        ])
+        .output()
+        .expect("spawn bomdrift");
+    assert!(
+        !out.status.success(),
+        "expected clap to reject --require-attestation without both attestation flags"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn diff_plugin_end_to_end_emits_finding_in_markdown_and_sarif() {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = temp_dir("plugin-e2e");
+
+    let script = dir.join("flag.sh");
+    {
+        let mut f = fs::File::create(&script).unwrap();
+        f.write_all(
+            b"#!/bin/sh\ncat > /dev/null\necho '{\"findings\":[{\"kind\":\"banned\",\"message\":\"left-pad is banned\",\"severity\":\"warning\",\"rule_id\":\"banned/left-pad\"}]}'\n"
+        ).unwrap();
+        f.sync_all().unwrap();
+    }
+    let mut perms = fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script, perms).unwrap();
+
+    let manifest_path = dir.join("plugin.toml");
+    fs::write(
+        &manifest_path,
+        format!(
+            r#"
+[plugin]
+name = "banned"
+exec = "{}"
+invoke_on = ["added"]
+"#,
+            script.display()
+        ),
+    )
+    .unwrap();
+
+    // Markdown
+    let md = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--output",
+            "markdown",
+            "--plugin",
+            &manifest_path.display().to_string(),
+        ])
+        .output()
+        .expect("spawn bomdrift");
+    assert!(
+        md.status.success(),
+        "exit: {} stderr: {}",
+        md.status,
+        String::from_utf8_lossy(&md.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&md.stdout);
+    assert!(
+        stdout.contains("Plugin findings"),
+        "missing 'Plugin findings' header in:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("banned/left-pad"),
+        "missing rule_id in markdown:\n{stdout}"
+    );
+
+    // SARIF
+    let sarif = Command::new(bin())
+        .current_dir(manifest_dir())
+        .args([
+            "diff",
+            "tests/fixtures/cdx-minimal.json",
+            "tests/fixtures/cdx-after.json",
+            "--no-osv",
+            "--output",
+            "sarif",
+            "--plugin",
+            &manifest_path.display().to_string(),
+        ])
+        .output()
+        .expect("spawn bomdrift");
+    assert!(sarif.status.success());
+    let sarif_str = String::from_utf8_lossy(&sarif.stdout);
+    assert!(
+        sarif_str.contains("\"ruleId\": \"bomdrift.plugin\""),
+        "missing bomdrift.plugin result in SARIF"
+    );
+    assert!(sarif_str.contains("banned/left-pad"));
+
+    fs::remove_dir_all(&dir).ok();
+}

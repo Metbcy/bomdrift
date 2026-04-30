@@ -1,3 +1,4 @@
+pub mod attestation;
 pub mod baseline;
 pub mod cli;
 pub mod clock;
@@ -6,8 +7,12 @@ pub mod diff;
 pub mod enrich;
 pub mod model;
 pub mod parse;
+pub mod plugin;
 pub mod refresh;
 pub mod render;
+pub mod vex;
+
+pub use crate::vex::{SyntheticFindingKind, parse_synthetic_id};
 
 use std::fs;
 use std::io::IsTerminal;
@@ -26,7 +31,7 @@ pub const FAIL_ON_EXIT_CODE: i32 = 2;
 
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Command::Diff(args) => run_diff(args),
+        Command::Diff(args) => run_diff(*args),
         Command::RefreshTyposquat(args) => refresh::run(args),
         Command::Baseline { action } => run_baseline(action),
         Command::Init(args) => run_init(args),
@@ -74,24 +79,49 @@ fn run_baseline(action: BaselineAction) -> Result<()> {
                 clock::parse_ymd(s)
                     .with_context(|| format!("--expires must be YYYY-MM-DD, got {s:?}"))?;
             }
+
+            // --from-comment overrides positional id/reason. Used by the
+            // GitLab webhook bridge (Phase L). Non-zero exit when the
+            // body has no directive — silent no-op would let mis-configured
+            // bridges look like they worked.
+            let (id, reason_owned) = if let Some(body) = &args.from_comment {
+                match baseline::parse_comment_directive(body)? {
+                    Some((id, reason)) => (id, reason),
+                    None => {
+                        eprintln!(
+                            "bomdrift: --from-comment body contained no `/bomdrift suppress <ID>` directive"
+                        );
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                let Some(id) = args.id.clone() else {
+                    eprintln!(
+                        "bomdrift baseline add: missing required ADVISORY_ID (use a positional argument or --from-comment <BODY>)"
+                    );
+                    std::process::exit(2);
+                };
+                (id, args.reason.clone())
+            };
+
             let outcome = baseline::add_suppression_full(
                 &args.path,
-                &args.id,
+                &id,
                 args.expires.as_deref(),
-                args.reason.as_deref(),
+                reason_owned.as_deref(),
             )?;
             match outcome {
                 baseline::AddOutcome::Added => {
                     eprintln!(
                         "bomdrift: added '{id}' to {path}",
-                        id = args.id.trim(),
+                        id = id.trim(),
                         path = args.path.display(),
                     );
                 }
                 baseline::AddOutcome::AlreadyPresent => {
                     eprintln!(
                         "bomdrift: '{id}' already present in {path}; no change",
-                        id = args.id.trim(),
+                        id = id.trim(),
                         path = args.path.display(),
                     );
                 }
@@ -104,13 +134,41 @@ fn run_baseline(action: BaselineAction) -> Result<()> {
 fn run_diff(mut args: DiffArgs) -> Result<()> {
     config::apply_diff_config(&mut args)?;
 
+    if args.require_attestation
+        && (args.before_attestation.is_none() || args.after_attestation.is_none())
+    {
+        anyhow::bail!(
+            "--require-attestation needs both --before-attestation and --after-attestation"
+        );
+    }
+
     let output = args.output.unwrap_or(OutputFormat::Terminal);
     let format = args.format.unwrap_or(cli::InputFormat::Auto);
     let fail_on = args.fail_on.unwrap_or(FailOn::None);
 
     let format_hint = format.to_sbom_format();
-    let before = load_sbom(&args.before, format_hint, args.include_file_components)?;
-    let after = load_sbom(&args.after, format_hint, args.include_file_components)?;
+    let before = load_sbom_or_attestation(
+        args.before.as_deref(),
+        args.before_attestation.as_deref(),
+        args.cosign_identity.as_deref(),
+        args.cosign_issuer.as_deref(),
+        format_hint,
+        args.include_file_components,
+        "before",
+        args.debug_calibration,
+        args.debug_calibration_format,
+    )?;
+    let after = load_sbom_or_attestation(
+        args.after.as_deref(),
+        args.after_attestation.as_deref(),
+        args.cosign_identity.as_deref(),
+        args.cosign_issuer.as_deref(),
+        format_hint,
+        args.include_file_components,
+        "after",
+        args.debug_calibration,
+        args.debug_calibration_format,
+    )?;
 
     let mut cs = diff::diff(&before, &after);
 
@@ -119,7 +177,7 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
     } else {
         // OSV enrichment is best-effort. Network failures must not block the diff
         // from rendering — a PR review is still useful without CVE data.
-        match enrich::osv::enrich_cached(&cs, args.no_osv_cache) {
+        match enrich::osv::enrich_cached_with_ttl(&cs, args.no_osv_cache, args.cache_ttl_hours) {
             Ok(e) => e,
             Err(err) => {
                 eprintln!("warning: OSV enrichment failed, continuing without it: {err:#}");
@@ -133,30 +191,36 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
     // there are no vulns.
     if !args.no_epss
         && !enrichment.vulns.is_empty()
-        && let Err(err) = enrich::epss::enrich(&mut enrichment)
+        && let Err(err) = enrich::epss::enrich_with_ttl(&mut enrichment, args.cache_ttl_hours)
     {
         eprintln!("warning: EPSS enrichment failed, continuing without it: {err:#}");
     }
     if !args.no_kev
         && !enrichment.vulns.is_empty()
-        && let Err(err) = enrich::kev::enrich(&mut enrichment)
+        && let Err(err) = enrich::kev::enrich_with_ttl(&mut enrichment, args.cache_ttl_hours)
     {
         eprintln!("warning: KEV enrichment failed, continuing without it: {err:#}");
     }
 
     // Typosquat detection is pure-compute (embedded reference list) and always
     // runs, regardless of `--no-osv`. Findings are informational.
-    enrichment.typosquats = enrich::typosquat::enrich(&cs);
+    enrichment.typosquats =
+        enrich::typosquat::enrich_with_threshold(&cs, args.typosquat_similarity_threshold);
 
     // Multi-major version-jump detection is pure-compute and also always runs.
     // Findings are informational.
-    enrichment.version_jumps = enrich::version_jump::enrich(&cs);
+    enrichment.version_jumps = enrich::version_jump::enrich_with(&cs, args.multi_major_delta);
 
     // Maintainer-age enrichment hits the GitHub REST API; gated behind
     // `--no-maintainer-age` for offline runs. Best-effort: failures warn and
     // continue, mirroring the OSV enricher's contract.
     if !args.no_maintainer_age {
-        match enrich::maintainer::enrich(&cs) {
+        match enrich::maintainer::enrich_with(
+            &cs,
+            "https://api.github.com",
+            std::time::Duration::from_secs(15),
+            args.young_maintainer_days,
+        ) {
             Ok(findings) => enrichment.maintainer_age = findings,
             Err(err) => {
                 eprintln!(
@@ -173,13 +237,42 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
         allow: args.allow_licenses.clone(),
         deny: args.deny_licenses.clone(),
         allow_ambiguous: args.allow_ambiguous_licenses,
+        allow_exceptions: args.allow_exception.clone(),
+        deny_exceptions: args.deny_exception.clone(),
     };
     enrichment.license_violations = enrich::license::enrich(&cs, &license_policy);
+
+    // Registry-metadata enrichers (Phase K, v0.9). Best-effort — a
+    // registry timeout returns Ok with no findings.
+    if !args.no_registry {
+        let findings =
+            enrich::registry::enrich(&cs, args.recently_published_days, args.cache_ttl_hours);
+        enrichment.recently_published = findings.recently_published;
+        enrichment.deprecated = findings.deprecated;
+        enrichment.maintainer_set_changed = findings.maintainer_set_changed;
+    }
+
+    // Plugin findings (Phase C, v0.9.6). Run after every built-in
+    // enricher so plugins observe the same `cs` view bomdrift renders;
+    // before baseline so plugin findings can be baselined too. Plugin
+    // failures degrade gracefully — a malformed manifest aborts the
+    // run (config error), but plugin runtime failures emit only a
+    // BOMDRIFT_DEBUG-gated stderr warning and contribute no findings.
+    if !args.plugin.is_empty() {
+        let mut manifests = Vec::with_capacity(args.plugin.len());
+        for path in &args.plugin {
+            let manifest = plugin::load_manifest(path)
+                .with_context(|| format!("loading --plugin {}", path.display()))?;
+            manifests.push(manifest);
+        }
+        enrichment.plugin_findings = plugin::run_plugins(&manifests, &cs);
+    }
 
     // Apply the baseline AFTER all enrichers run — suppression operates on
     // the realized finding set, not on intermediate inputs. This keeps the
     // baseline file format stable as new enrichers are added: a new finding
     // type that the baseline doesn't know about simply isn't suppressed.
+    let mut baseline_entries: Vec<crate::baseline::BaselineEntry> = Vec::new();
     if let Some(path) = &args.baseline {
         let baseline = baseline::Baseline::load(path)?;
         for ent in &baseline.expired_entries {
@@ -191,7 +284,7 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
                     .as_deref()
                     .map(|p| format!(" ({p})"))
                     .unwrap_or_default(),
-                expires = ent.expires,
+                expires = ent.expires.as_deref().unwrap_or(""),
                 reason = ent
                     .reason
                     .as_deref()
@@ -199,7 +292,50 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
                     .unwrap_or_default(),
             );
         }
+        baseline_entries = baseline.entries.clone();
         baseline::apply(&mut cs, &mut enrichment, &baseline);
+    }
+
+    // VEX consumption (Phase G, v0.9). Applied AFTER baseline so VEX
+    // statements operate on the post-baseline view — this matches what
+    // a downstream tool would see and avoids double-counting "already
+    // suppressed" findings in the VEX-suppressed tally.
+    if !args.vex.is_empty() {
+        match vex::load(&args.vex) {
+            Ok(stmts) => {
+                let idx = vex::VexIndex::build(stmts);
+                vex::apply(&mut enrichment, &idx);
+            }
+            Err(err) => {
+                eprintln!("warning: VEX load failed, continuing without VEX filtering: {err:#}");
+            }
+        }
+    }
+
+    // VEX emission (Phase H, v0.9). Writes a single OpenVEX 0.2.0 doc
+    // to the requested path, covering baseline-suppressed entries and
+    // un-suppressed findings. Byte-deterministic when SOURCE_DATE_EPOCH
+    // is set.
+    if let Some(path) = &args.emit_vex {
+        let author = args
+            .vex_author
+            .clone()
+            .or_else(|| args.repo_url.clone())
+            .or_else(|| std::env::var("BOMDRIFT_REPO_URL").ok())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "bomdrift".to_string());
+        let default_just = args
+            .vex_default_justification
+            .clone()
+            .unwrap_or_else(|| "vulnerable_code_not_in_execute_path".to_string());
+        let opts = vex::EmitOptions {
+            author: &author,
+            default_justification: &default_just,
+            baseline_entries: &baseline_entries,
+        };
+        let body = vex::emit(&cs, &enrichment, &opts);
+        std::fs::write(path, body)
+            .with_context(|| format!("writing --emit-vex {}", path.display()))?;
     }
 
     // Calibration tap. Off by default; opt-in via `--debug-calibration`.
@@ -215,6 +351,11 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
             &enrichment,
             &mut std::io::stderr(),
             args.debug_calibration_format,
+            CalibrationOverrides {
+                similarity_threshold: args.typosquat_similarity_threshold,
+                young_maintainer_days: args.young_maintainer_days,
+                multi_major_delta: args.multi_major_delta,
+            },
         );
     }
 
@@ -230,17 +371,22 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
         .clone()
         .or_else(|| std::env::var("BOMDRIFT_REPO_URL").ok())
         .or_else(|| std::env::var("CI_PROJECT_URL").ok())
+        .or_else(|| std::env::var("BITBUCKET_GIT_HTTP_ORIGIN").ok())
+        .or_else(|| std::env::var("BUILD_REPOSITORY_URI").ok())
         .filter(|s| !s.is_empty());
 
     // Platform precedence: explicit `--platform` (or `[diff] platform`
     // in `.bomdrift.toml`, already merged into `args.platform`) wins;
-    // otherwise auto-detect from CI env. `GITLAB_CI=true` is GitLab's
-    // canonical CI marker — set unconditionally on every job in every
-    // GitLab pipeline. Fall through to `Platform::GitHub` (the default)
-    // so existing GitHub Action consumers see no behavior change.
+    // otherwise auto-detect from CI env. Detection order: GitLab
+    // (`GITLAB_CI=true`), Bitbucket (`BITBUCKET_BUILD_NUMBER`), Azure
+    // DevOps (`TF_BUILD`), then default GitHub.
     let platform = args.platform.unwrap_or_else(|| {
         if std::env::var("GITLAB_CI").is_ok_and(|v| v == "true") {
             crate::cli::Platform::GitLab
+        } else if std::env::var("BITBUCKET_BUILD_NUMBER").is_ok() {
+            crate::cli::Platform::Bitbucket
+        } else if std::env::var("TF_BUILD").is_ok() {
+            crate::cli::Platform::AzureDevOps
         } else {
             crate::cli::Platform::GitHub
         }
@@ -329,6 +475,8 @@ pub fn tripped(cs: &ChangeSet, e: &Enrichment, threshold: FailOn) -> bool {
         FailOn::LicenseChange => !cs.license_changed.is_empty(),
         FailOn::Kev => any_kev(e),
         FailOn::LicenseViolation => !e.license_violations.is_empty(),
+        FailOn::RecentlyPublished => !e.recently_published.is_empty(),
+        FailOn::Deprecated => !e.deprecated.is_empty(),
         FailOn::Any => e.has_findings() || !cs.license_changed.is_empty() || any_kev(e),
     }
 }
@@ -371,14 +519,33 @@ pub fn budget_tripped(
 /// `threshold` is the constant the score was gated against. CVE rows
 /// surface every advisory (no internal threshold) so adopters can see
 /// the score distribution before tuning `--fail-on critical-cve`.
+/// Active overrides for the configurable calibration thresholds. Threaded
+/// into [`write_calibration_lines`] so emitted rows reflect the effective
+/// threshold the enricher actually used, not the unconditional const default.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct CalibrationOverrides {
+    pub similarity_threshold: Option<f64>,
+    pub young_maintainer_days: Option<i64>,
+    pub multi_major_delta: Option<u32>,
+}
+
 fn write_calibration_lines<W: std::io::Write>(
     e: &Enrichment,
     out: &mut W,
     format: crate::cli::DebugFormat,
+    overrides: CalibrationOverrides,
 ) {
     use crate::enrich::maintainer::YOUNG_MAINTAINER_DAYS;
     use crate::enrich::typosquat::SIMILARITY_THRESHOLD;
     use crate::enrich::version_jump::MIN_MAJOR_DELTA;
+
+    let active_similarity = overrides
+        .similarity_threshold
+        .unwrap_or(SIMILARITY_THRESHOLD);
+    let active_young = overrides
+        .young_maintainer_days
+        .unwrap_or(YOUNG_MAINTAINER_DAYS);
+    let active_major_delta = overrides.multi_major_delta.unwrap_or(MIN_MAJOR_DELTA);
 
     for f in &e.typosquats {
         write_calibration_row(
@@ -389,7 +556,7 @@ fn write_calibration_lines<W: std::io::Write>(
                 .as_deref()
                 .unwrap_or(f.component.name.as_str()),
             CalibrationScore::Float(f.score),
-            CalibrationThreshold::Float(SIMILARITY_THRESHOLD),
+            CalibrationThreshold::Float(active_similarity),
             format,
         );
     }
@@ -399,7 +566,7 @@ fn write_calibration_lines<W: std::io::Write>(
             "version-jump",
             f.after.purl.as_deref().unwrap_or(f.after.name.as_str()),
             CalibrationScore::Int(f.after_major.saturating_sub(f.before_major) as i64),
-            CalibrationThreshold::Int(MIN_MAJOR_DELTA as i64),
+            CalibrationThreshold::Int(active_major_delta as i64),
             format,
         );
     }
@@ -412,7 +579,7 @@ fn write_calibration_lines<W: std::io::Write>(
                 .as_deref()
                 .unwrap_or(f.component.name.as_str()),
             CalibrationScore::Int(f.days_old),
-            CalibrationThreshold::Int(YOUNG_MAINTAINER_DAYS),
+            CalibrationThreshold::Int(active_young),
             format,
         );
     }
@@ -454,6 +621,9 @@ fn write_calibration_lines<W: std::io::Write>(
         }
     }
     for v in &e.license_violations {
+        // Threshold field carries the precise matched_rule (e.g.
+        // "deny: GPL-3.0-only" or "exception:LLVM-exception denied")
+        // so calibration consumers see the WHY, not just the kind tag.
         write_calibration_row(
             out,
             "license",
@@ -462,11 +632,43 @@ fn write_calibration_lines<W: std::io::Write>(
                 .as_deref()
                 .unwrap_or(v.component.name.as_str()),
             CalibrationScore::Text(&v.license),
-            CalibrationThreshold::Text(match v.kind {
-                crate::enrich::LicenseViolationKind::Deny => "deny",
-                crate::enrich::LicenseViolationKind::Ambiguous => "ambiguous",
-                crate::enrich::LicenseViolationKind::NotAllowed => "not-allowed",
-            }),
+            CalibrationThreshold::Text(&v.matched_rule),
+            format,
+        );
+    }
+    for f in &e.recently_published {
+        write_calibration_row(
+            out,
+            "recently-published",
+            f.component
+                .purl
+                .as_deref()
+                .unwrap_or(f.component.name.as_str()),
+            CalibrationScore::Int(f.days_old),
+            CalibrationThreshold::Int(crate::enrich::registry::MIN_PUBLISHED_AGE_DAYS),
+            format,
+        );
+    }
+    for f in &e.deprecated {
+        write_calibration_row(
+            out,
+            "deprecated",
+            f.component
+                .purl
+                .as_deref()
+                .unwrap_or(f.component.name.as_str()),
+            CalibrationScore::Text(f.message.as_deref().unwrap_or("(deprecated)")),
+            CalibrationThreshold::Text("any"),
+            format,
+        );
+    }
+    for f in &e.maintainer_set_changed {
+        write_calibration_row(
+            out,
+            "maintainer-set-changed",
+            f.after.purl.as_deref().unwrap_or(f.after.name.as_str()),
+            CalibrationScore::Int((f.added.len() + f.removed.len()) as i64),
+            CalibrationThreshold::Int(1),
             format,
         );
     }
@@ -625,14 +827,96 @@ fn load_sbom(
 ) -> Result<model::Sbom> {
     let raw = fs::read_to_string(path)
         .with_context(|| format!("reading SBOM file: {}", path.display()))?;
-    let value: serde_json::Value = serde_json::from_str(&raw)
-        .with_context(|| format!("parsing JSON in: {}", path.display()))?;
+    parse_sbom_bytes(
+        &raw,
+        &path.display().to_string(),
+        format_hint,
+        include_file_components,
+    )
+}
+
+fn parse_sbom_bytes(
+    raw: &str,
+    source_label: &str,
+    format_hint: Option<model::SbomFormat>,
+    include_file_components: bool,
+) -> Result<model::Sbom> {
+    let value: serde_json::Value =
+        serde_json::from_str(raw).with_context(|| format!("parsing JSON in: {source_label}"))?;
     let mut sbom = parse::parse_with_format(value, format_hint)
-        .with_context(|| format!("normalizing SBOM from: {}", path.display()))?;
+        .with_context(|| format!("normalizing SBOM from: {source_label}"))?;
     if !include_file_components {
         parse::filter_file_components(&mut sbom);
     }
     Ok(sbom)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn load_sbom_or_attestation(
+    path: Option<&Path>,
+    oci_ref: Option<&str>,
+    cosign_identity: Option<&str>,
+    cosign_issuer: Option<&str>,
+    format_hint: Option<model::SbomFormat>,
+    include_file_components: bool,
+    side: &str,
+    debug_calibration: bool,
+    debug_format: crate::cli::DebugFormat,
+) -> Result<model::Sbom> {
+    if let Some(oci) = oci_ref {
+        let identity = cosign_identity.ok_or_else(|| {
+            anyhow::anyhow!(
+                "--{side}-attestation requires --cosign-identity (regex passed to cosign --certificate-identity-regexp)"
+            )
+        })?;
+        let issuer = cosign_issuer.ok_or_else(|| {
+            anyhow::anyhow!(
+                "--{side}-attestation requires --cosign-issuer (URL passed to cosign --certificate-oidc-issuer)"
+            )
+        })?;
+        let body = attestation::fetch_verified_sbom(oci, identity, issuer)
+            .with_context(|| format!("fetching --{side}-attestation {oci}"))?;
+        if debug_calibration {
+            // One row per verified attestation; surfaces the cert
+            // regex cosign accepted so adopters can confirm policy.
+            let _ =
+                write_attestation_calibration(&mut std::io::stderr(), oci, identity, debug_format);
+        }
+        return parse_sbom_bytes(
+            &body,
+            &format!("attestation:{oci}"),
+            format_hint,
+            include_file_components,
+        );
+    }
+    let path = path.ok_or_else(|| {
+        anyhow::anyhow!(
+            "internal: {side} requires either a positional path or --{side}-attestation"
+        )
+    })?;
+    load_sbom(path, format_hint, include_file_components)
+}
+
+fn write_attestation_calibration<W: std::io::Write>(
+    out: &mut W,
+    oci_ref: &str,
+    identity: &str,
+    format: crate::cli::DebugFormat,
+) -> std::io::Result<()> {
+    match format {
+        crate::cli::DebugFormat::Pipe => {
+            writeln!(out, "attestation|{oci_ref}|verified|{identity}")
+        }
+        crate::cli::DebugFormat::Jsonl => {
+            let row = serde_json::json!({
+                "kind": "attestation",
+                "key": oci_ref,
+                "score": "verified",
+                "threshold": identity,
+            });
+            writeln!(out, "{row}")
+        }
+    }
 }
 
 #[cfg(test)]
@@ -642,7 +926,7 @@ mod tests {
 
     use crate::enrich::typosquat::TyposquatFinding;
     use crate::enrich::version_jump::VersionJumpFinding;
-    use crate::enrich::{Severity, VulnRef};
+    use crate::enrich::{LicenseViolation, Severity, VulnRef};
     use crate::model::{Component, Ecosystem, Relationship};
 
     fn comp(name: &str) -> Component {
@@ -886,7 +1170,12 @@ mod tests {
     fn calibration_pipe_format_matches_v0_7_layout() {
         let e = enrichment_with_typosquat();
         let mut buf = Vec::new();
-        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Pipe);
+        write_calibration_lines(
+            &e,
+            &mut buf,
+            crate::cli::DebugFormat::Pipe,
+            CalibrationOverrides::default(),
+        );
         let s = String::from_utf8(buf).unwrap();
         assert!(s.starts_with("typosquat|"), "got: {s}");
         assert_eq!(
@@ -900,7 +1189,12 @@ mod tests {
     fn calibration_jsonl_format_emits_one_object_per_line() {
         let e = enrichment_with_typosquat();
         let mut buf = Vec::new();
-        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Jsonl);
+        write_calibration_lines(
+            &e,
+            &mut buf,
+            crate::cli::DebugFormat::Jsonl,
+            CalibrationOverrides::default(),
+        );
         let s = String::from_utf8(buf).unwrap();
         let lines: Vec<&str> = s.lines().collect();
         assert_eq!(lines.len(), 1);
@@ -915,7 +1209,12 @@ mod tests {
     fn calibration_jsonl_keeps_severity_label_as_string() {
         let e = enrichment_with_cve_at(Severity::High);
         let mut buf = Vec::new();
-        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Jsonl);
+        write_calibration_lines(
+            &e,
+            &mut buf,
+            crate::cli::DebugFormat::Jsonl,
+            CalibrationOverrides::default(),
+        );
         let s = String::from_utf8(buf).unwrap();
         let v: serde_json::Value = serde_json::from_str(s.trim()).unwrap();
         assert_eq!(v["kind"], "cve");
@@ -957,10 +1256,57 @@ mod tests {
             refs[0].kev = true;
         }
         let mut buf = Vec::new();
-        write_calibration_lines(&e, &mut buf, crate::cli::DebugFormat::Pipe);
+        write_calibration_lines(
+            &e,
+            &mut buf,
+            crate::cli::DebugFormat::Pipe,
+            CalibrationOverrides::default(),
+        );
         let s = String::from_utf8(buf).unwrap();
         assert!(s.contains("epss|"), "missing epss row: {s}");
         assert!(s.contains("kev|"), "missing kev row: {s}");
+    }
+
+    #[test]
+    fn calibration_license_row_includes_exception_detail() {
+        // v0.9.5: matched_rule on an exception-driven license violation
+        // must surface the exception identifier in the calibration tap
+        // so operators tuning policy see why a row fired.
+        let mut e = Enrichment::default();
+        let component = crate::model::Component {
+            name: "llvm-sys".into(),
+            version: "1.0.0".into(),
+            ecosystem: crate::model::Ecosystem::Cargo,
+            purl: Some("pkg:cargo/llvm-sys@1.0.0".into()),
+            licenses: vec!["Apache-2.0 WITH LLVM-exception".into()],
+            supplier: None,
+            hashes: Vec::new(),
+            relationship: crate::model::Relationship::Unknown,
+            source_url: None,
+            bom_ref: None,
+        };
+        e.license_violations.push(LicenseViolation {
+            component,
+            license: "Apache-2.0 WITH LLVM-exception".into(),
+            matched_rule: "exception:LLVM-exception denied".into(),
+            kind: crate::enrich::LicenseViolationKind::Deny,
+        });
+        let mut buf = Vec::new();
+        write_calibration_lines(
+            &e,
+            &mut buf,
+            crate::cli::DebugFormat::Pipe,
+            CalibrationOverrides::default(),
+        );
+        let s = String::from_utf8(buf).unwrap();
+        assert!(
+            s.contains("license|"),
+            "missing license calibration row: {s}"
+        );
+        assert!(
+            s.contains("exception:LLVM-exception denied"),
+            "row must surface matched_rule with exception detail: {s}"
+        );
     }
 
     #[test]

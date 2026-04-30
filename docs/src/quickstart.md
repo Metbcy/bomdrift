@@ -25,7 +25,7 @@ jobs:
 ```
 
 The `@v1` mutable tag tracks the latest v0.x release. Pin to a specific
-version (`@v0.8.0`) if you prefer reproducible builds. See
+version (`@v0.9.7`) if you prefer reproducible builds. See
 [GitHub Action](./github-action.md) for every input.
 
 If you prefer a checked-in policy file, install the binary and run
@@ -39,7 +39,7 @@ Pre-built binaries cover Linux x86_64 + aarch64, macOS aarch64, and
 Windows x86_64. Each archive is cosign-signed via Sigstore + GitHub OIDC.
 
 ```bash
-VERSION=v0.8.0
+VERSION=v0.9.7
 TARGET=x86_64-unknown-linux-gnu
 curl -sSL -o bomdrift.tar.gz \
   "https://github.com/Metbcy/bomdrift/releases/download/${VERSION}/bomdrift-${VERSION}-${TARGET}.tar.gz"
@@ -48,6 +48,10 @@ tar -xzf bomdrift.tar.gz
 
 # Diff two SBOMs
 ./bomdrift-${VERSION}-${TARGET}/bomdrift diff before.json after.json
+
+# Emit SARIF to a file (no fragile YAML > redirection)
+./bomdrift-${VERSION}-${TARGET}/bomdrift diff before.json after.json \
+    --output sarif --output-file bomdrift.sarif
 ```
 
 To verify the archive's signature before you trust the binary, see
@@ -56,7 +60,7 @@ To verify the archive's signature before you trust the binary, see
 ## From source
 
 ```bash
-cargo install --locked --git https://github.com/Metbcy/bomdrift --tag v0.8.0 bomdrift
+cargo install --locked --git https://github.com/Metbcy/bomdrift --tag v0.9.7 bomdrift
 ```
 
 Requires Rust 1.85+ (the project uses edition 2024).
@@ -75,10 +79,22 @@ After cloning + `cargo build --release`:
 
 The output is GitHub-Flavored Markdown ready for PR-comment posting.
 
-## Next steps
+## What's next?
 
-- [GitHub Action](./github-action.md) — every input, common patterns.
-- [CLI reference](./cli-reference.md) — every flag.
-- [Output formats](./output-formats.md) — markdown / terminal / JSON / SARIF.
-- [Baseline & suppression](./baseline.md) — adopt bomdrift on a project
-  with pre-existing findings without drowning the first PR.
+- **Wire it up:** [GitHub Action](./github-action.md) ·
+  [GitLab CI](./gitlab-ci.md) · [Bitbucket](./bitbucket.md) ·
+  [Azure DevOps](./azure-devops.md).
+- **Reference:** [CLI reference](./cli-reference.md) · every flag with
+  introduced-in annotations · [Output formats](./output-formats.md) ·
+  [SARIF + Code Scanning](./sarif.md).
+- **Suppress noise:** [Baseline & suppression](./baseline.md) lets a
+  team adopt bomdrift on a project with pre-existing findings without
+  drowning the first PR.
+- **License gating:** [License policy](./license-policy.md) — SPDX
+  expression evaluation with allow/deny + per-exception granularity.
+- **VEX:** [VEX](./vex.md) — record exploitability decisions in
+  OpenVEX 0.2.0 / CycloneDX VEX 1.6, suppress on subsequent diffs.
+- **Advanced (v0.9.6+):** [OCI attestation](./attestation.md) ·
+  [Plugins](./plugins.md) for custom rules.
+- **Internals:** [Architecture](./architecture.md) ·
+  [Contributing](./contributing.md).

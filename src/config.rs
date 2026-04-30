@@ -24,6 +24,12 @@ pub struct LicenseConfig {
     pub deny: Vec<String>,
     #[serde(default)]
     pub allow_ambiguous: bool,
+    /// SPDX exception identifiers permitted in `WITH` clauses. v0.9.5+.
+    #[serde(default)]
+    pub allow_exceptions: Vec<String>,
+    /// SPDX exception identifiers forbidden in `WITH` clauses. v0.9.5+.
+    #[serde(default)]
+    pub deny_exceptions: Vec<String>,
 }
 
 const DEFAULT_CONFIG_PATH: &str = ".bomdrift.toml";
@@ -57,6 +63,25 @@ pub struct DiffConfig {
     pub debug_calibration: Option<bool>,
     pub debug_calibration_format: Option<DebugFormat>,
     pub output_file: Option<PathBuf>,
+    /// VEX `author` field for `--emit-vex`. Falls back to `repo_url`,
+    /// then to the literal `"bomdrift"`.
+    pub vex_author: Option<String>,
+    /// Default OpenVEX justification when an entry doesn't supply one.
+    /// Defaults to `"vulnerable_code_not_in_execute_path"`.
+    pub vex_default_justification: Option<String>,
+    /// Skip registry-metadata enrichers (npm/PyPI/crates.io). v0.9+.
+    pub no_registry: Option<bool>,
+    /// Override the default 14-day recently-published threshold. v0.9+.
+    pub recently_published_days: Option<i64>,
+    /// Override the typosquat similarity threshold (default 0.92). v0.9.6+.
+    pub typosquat_similarity_threshold: Option<f64>,
+    /// Override the young-maintainer-days threshold (default 90). v0.9.6+.
+    pub young_maintainer_days: Option<i64>,
+    /// Override the on-disk cache TTL in hours (default 24). v0.9.6+.
+    pub cache_ttl_hours: Option<u64>,
+    /// Override the version-jump multi-major-delta threshold (default 2).
+    /// v0.9.7+.
+    pub multi_major_delta: Option<u32>,
 }
 
 pub fn apply_diff_config(args: &mut DiffArgs) -> Result<()> {
@@ -131,6 +156,28 @@ fn apply_loaded_diff_config(args: &mut DiffArgs, config: Config) {
     if args.output_file.is_none() {
         args.output_file = diff.output_file;
     }
+    if args.vex_author.is_none() {
+        args.vex_author = diff.vex_author.filter(|s| !s.is_empty());
+    }
+    if args.vex_default_justification.is_none() {
+        args.vex_default_justification = diff.vex_default_justification.filter(|s| !s.is_empty());
+    }
+    args.no_registry |= diff.no_registry.unwrap_or(false);
+    if args.recently_published_days.is_none() {
+        args.recently_published_days = diff.recently_published_days;
+    }
+    if args.typosquat_similarity_threshold.is_none() {
+        args.typosquat_similarity_threshold = diff.typosquat_similarity_threshold;
+    }
+    if args.young_maintainer_days.is_none() {
+        args.young_maintainer_days = diff.young_maintainer_days;
+    }
+    if args.cache_ttl_hours.is_none() {
+        args.cache_ttl_hours = diff.cache_ttl_hours;
+    }
+    if args.multi_major_delta.is_none() {
+        args.multi_major_delta = diff.multi_major_delta;
+    }
 
     // [license] block: CLI flags override (not merge) when set. Mirrors
     // Dependency Review Action semantics so users moving between bomdrift
@@ -143,6 +190,12 @@ fn apply_loaded_diff_config(args: &mut DiffArgs, config: Config) {
             args.deny_licenses = lic.deny;
         }
         args.allow_ambiguous_licenses |= lic.allow_ambiguous;
+        if args.allow_exception.is_empty() {
+            args.allow_exception = lic.allow_exceptions;
+        }
+        if args.deny_exception.is_empty() {
+            args.deny_exception = lic.deny_exceptions;
+        }
     }
 }
 
@@ -172,8 +225,8 @@ mod tests {
 
     fn args() -> DiffArgs {
         DiffArgs {
-            before: "before.json".into(),
-            after: "after.json".into(),
+            before: Some("before.json".into()),
+            after: Some("after.json".into()),
             config: None,
             output: None,
             format: None,
@@ -199,6 +252,24 @@ mod tests {
             allow_licenses: Vec::new(),
             deny_licenses: Vec::new(),
             allow_ambiguous_licenses: false,
+            allow_exception: Vec::new(),
+            deny_exception: Vec::new(),
+            vex: Vec::new(),
+            emit_vex: None,
+            vex_author: None,
+            vex_default_justification: None,
+            no_registry: false,
+            recently_published_days: None,
+            typosquat_similarity_threshold: None,
+            young_maintainer_days: None,
+            cache_ttl_hours: None,
+            multi_major_delta: None,
+            before_attestation: None,
+            after_attestation: None,
+            cosign_identity: None,
+            cosign_issuer: None,
+            require_attestation: false,
+            plugin: Vec::new(),
         }
     }
 

@@ -43,18 +43,35 @@ and pulling the dep would add transitive weight for no functional gain.
 - leading-zero numbers (`01.2.3`) — ambiguous and almost always a sign
   of a non-SemVer scheme; safer to skip than misinterpret.
 
-## Threshold
+## Calibration
 
-`MIN_MAJOR_DELTA = 2` is the minimum delta to flag. Hardcoded; not
-exposed as a CLI flag for two reasons:
+The multi-major delta threshold is exposed as
+[`--multi-major-delta <N>`](../cli-reference.md#--multi-major-delta-n)
+(introduced in v0.9.7) with the matching `[diff] multi_major_delta`
+config key. Default `2`; minimum `1`.
 
-1. The signal's whole point is "the standard SemVer signal of a
-   single-major bump is already well understood." Letting users
-   configure it down to 1 just duplicates the SemVer-bump signal
-   reviewers already see.
-2. Letting users configure it up (3, 4, ...) would silence legitimate
-   xz-pattern signals. The 90-day maintainer-age threshold already
-   serves the "tune for false-positive rate" knob.
+**Raising** the threshold to `3` or higher quiets noisy ecosystems that
+release majors aggressively (some npm web frameworks ship a major every
+few months). The signal still fires for genuinely unusual jumps but
+stops competing with everyday upgrades for reviewer attention.
+
+**Lowering** to `1` is supported but discouraged: it duplicates the
+standard SemVer-bump signal reviewers already see on every PR, and
+drowns the multi-major signal's actual purpose (catching the xz pattern
+and namespace-reuse swaps). bomdrift validates `>= 1` so `0` is
+rejected at the clap layer rather than silently disabling the enricher.
+
+For per-component carve-outs use a baseline entry instead of dropping
+the global threshold; see
+[Baseline — When the bump is the false positive](../baseline.md#when-the-bump-is-the-false-positive).
+
+## Disabling
+
+There is no `--no-version-jump` flag — pure compute, zero cost. If you
+need to gate exit code only on version-jump findings, use `--fail-on
+any`. To suppress a specific bump as a known-acceptable, write a
+per-component baseline entry — see
+[Baseline — When the bump is the false positive](../baseline.md#when-the-bump-is-the-false-positive).
 
 ## Examples
 

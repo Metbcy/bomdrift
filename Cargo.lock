@@ -123,9 +123,10 @@ dependencies = [
 
 [[package]]
 name = "bomdrift"
-version = "0.8.0"
+version = "0.9.7"
 dependencies = [
  "anyhow",
+ "base64",
  "clap",
  "criterion",
  "directories",
@@ -134,12 +135,14 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "spdx",
  "strsim",
  "supports-color 3.0.2",
  "thiserror",
  "time",
  "toml",
  "ureq",
+ "wait-timeout",
 ]
 
 [[package]]
@@ -1110,6 +1113,15 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+
+[[package]]
+name = "spdx"
+version = "0.10.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3e17e880bafaeb362a7b751ec46bdc5b61445a188f80e0606e68167cd540fa3"
+dependencies = [
+ "smallvec",
+]
 
 [[package]]
 name = "stable_deref_trait"

@@ -25,6 +25,15 @@ bomdrift diff before.json after.json --fail-on kev
 Exits 2 when any advisory has its KEV flag set. `--fail-on any` also
 includes KEV.
 
+## Calibration
+
+### `--cache-ttl-hours <N>` (v0.9.6+)
+
+The 24h TTL for the catalog file is now configurable via the unified
+cache-TTL knob. Lower for faster CISA-update propagation in
+long-running self-hosted runners; raise when running offline or against
+archived SBOMs.
+
 ## Disabling
 
 ```bash

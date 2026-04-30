@@ -71,21 +71,33 @@ pub fn is_expired(expires: Date) -> bool {
 /// Convenience: parse a `YYYY-MM-DD` string and return whether it has
 /// expired relative to `today()`. Surface parse errors to caller.
 pub fn is_expired_str(s: &str) -> Result<bool> {
-    parse_ymd(s).map(is_expired).map_err(|e| anyhow!("{}", e))
+    parse_ymd(s).map(is_expired).map_err(|e| anyhow!("{e}"))
+}
+
+/// Test-only helper: process-wide mutex serializing `SOURCE_DATE_EPOCH`
+/// mutations across `cargo test`'s default thread pool. Hold the
+/// returned guard for the duration of the test.
+///
+/// Used by every test that touches `SOURCE_DATE_EPOCH` — `clock`,
+/// `baseline`, `vex`, `enrich::registry`. Without this, parallel tests
+/// race on the env var and the consumer reads system-clock garbage,
+/// causing intermittent failures (PR #22 ubuntu-latest, v0.9.5).
+#[cfg(test)]
+pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    use std::sync::{Mutex, OnceLock};
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Guard env mutations behind a process-wide mutex so concurrent
-    /// `cargo test` threads don't trample each other.
+    /// Re-export at module level for the existing tests below.
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        use std::sync::{Mutex, OnceLock};
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+        test_env_lock()
     }
 
     #[test]

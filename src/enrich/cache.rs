@@ -52,6 +52,18 @@ use crate::enrich::Severity;
 /// propagate within a day.
 pub const CACHE_TTL_SECS: u64 = 24 * 60 * 60;
 
+/// Resolve the effective TTL in seconds. When `override_hours` is `Some`
+/// (driven by `--cache-ttl-hours` / `[diff] cache_ttl_hours`), uses that
+/// uniformly across OSV / EPSS / KEV / Registry caches; otherwise falls
+/// back to the [`CACHE_TTL_SECS`] default. Single source of truth so the
+/// override semantics stay identical across enrichers.
+pub fn effective_ttl_secs(override_hours: Option<u64>) -> u64 {
+    match override_hours {
+        Some(h) if h > 0 => h.saturating_mul(3600),
+        _ => CACHE_TTL_SECS,
+    }
+}
+
 /// Subdirectory under the cache root where per-advisory entries live.
 const OSV_SUBDIR: &str = "osv";
 
@@ -59,6 +71,12 @@ const OSV_SUBDIR: &str = "osv";
 struct CacheEntry {
     fetched_at: u64,
     severity: Severity,
+    /// Cross-database aliases captured at fetch time. Newly added in
+    /// v0.9. Old cache entries without this field deserialize with an
+    /// empty vec; downstream consumers tolerate the empty case by
+    /// falling back to the primary advisory ID.
+    #[serde(default)]
+    aliases: Vec<String>,
 }
 
 /// Filesystem-backed severity cache. Construct via [`Cache::open`] (production)
@@ -66,6 +84,7 @@ struct CacheEntry {
 pub struct Cache {
     root: PathBuf,
     now_secs: fn() -> u64,
+    ttl_secs: u64,
 }
 
 impl Cache {
@@ -73,10 +92,17 @@ impl Cache {
     /// `None` when the platform doesn't expose one (extremely rare; degraded
     /// to "always miss" so callers don't have to special-case).
     pub fn open() -> Option<Self> {
+        Self::open_with_ttl(None)
+    }
+
+    /// Like [`Cache::open`] but lets the caller override the on-disk TTL
+    /// (driven by `--cache-ttl-hours`). `None` means use the default.
+    pub fn open_with_ttl(ttl_hours: Option<u64>) -> Option<Self> {
         let root = crate::refresh::default_cache_root().ok()?.join(OSV_SUBDIR);
         Some(Self {
             root,
             now_secs: default_now_secs,
+            ttl_secs: effective_ttl_secs(ttl_hours),
         })
     }
 
@@ -84,41 +110,55 @@ impl Cache {
     /// directory and pin the clock for deterministic TTL assertions.
     #[cfg(test)]
     pub fn with_root(root: PathBuf, now_secs: fn() -> u64) -> Self {
-        Self { root, now_secs }
+        Self {
+            root,
+            now_secs,
+            ttl_secs: CACHE_TTL_SECS,
+        }
     }
 
-    /// Look up cached severity for `advisory_id`. Returns `None` on cache
-    /// miss, missing file, parse error, or expired entry — every failure
-    /// mode collapses to "go fetch fresh".
+    /// Look up cached severity + aliases for `advisory_id`. Returns
+    /// `None` on cache miss, missing file, parse error, or expired
+    /// entry — every failure mode collapses to "go fetch fresh".
     pub fn get(&self, advisory_id: &str) -> Option<Severity> {
+        self.get_full(advisory_id).map(|(s, _)| s)
+    }
+
+    /// Like [`Cache::get`] but also returns the aliases stored in the
+    /// cache entry. Empty when the entry was written by a pre-v0.9
+    /// build.
+    pub fn get_full(&self, advisory_id: &str) -> Option<(Severity, Vec<String>)> {
         let path = self.path_for(advisory_id);
         let body = std::fs::read(&path).ok()?;
         let entry: CacheEntry = serde_json::from_slice(&body).ok()?;
         let now = (self.now_secs)();
-        if now.saturating_sub(entry.fetched_at) > CACHE_TTL_SECS {
+        if now.saturating_sub(entry.fetched_at) > self.ttl_secs {
             return None;
         }
-        Some(entry.severity)
+        Some((entry.severity, entry.aliases))
     }
 
     /// Persist `severity` for `advisory_id`. Best-effort: filesystem errors
     /// are silently dropped because the caller has the live response in hand
     /// and we never want a write failure to corrupt the in-memory data path.
     pub fn put(&self, advisory_id: &str, severity: Severity) {
+        self.put_full(advisory_id, severity, &[]);
+    }
+
+    /// Like [`Cache::put`] but stores aliases alongside the severity.
+    pub fn put_full(&self, advisory_id: &str, severity: Severity, aliases: &[String]) {
         if std::fs::create_dir_all(&self.root).is_err() {
             return;
         }
         let entry = CacheEntry {
             fetched_at: (self.now_secs)(),
             severity,
+            aliases: aliases.to_vec(),
         };
         let Ok(body) = serde_json::to_vec(&entry) else {
             return;
         };
         let target = self.path_for(advisory_id);
-        // Temp-file + rename pattern, mirroring src/refresh.rs's atomicity
-        // contract: a concurrent reader either sees the previous entry or
-        // the new one, never a torn write.
         let mut tmp = target.as_os_str().to_owned();
         tmp.push(".tmp");
         let tmp = PathBuf::from(tmp);
@@ -159,7 +199,17 @@ fn sanitize(id: &str) -> String {
 /// `--no-osv-cache`: when `disabled` is true, return `None` so callers
 /// uniformly skip both reads and writes.
 pub fn open_unless_disabled(disabled: bool) -> Option<Cache> {
-    if disabled { None } else { Cache::open() }
+    open_unless_disabled_with_ttl(disabled, None)
+}
+
+/// Like [`open_unless_disabled`] but threads the `--cache-ttl-hours`
+/// override through to [`Cache::open_with_ttl`].
+pub fn open_unless_disabled_with_ttl(disabled: bool, ttl_hours: Option<u64>) -> Option<Cache> {
+    if disabled {
+        None
+    } else {
+        Cache::open_with_ttl(ttl_hours)
+    }
 }
 
 #[cfg(test)]
@@ -193,6 +243,24 @@ mod tests {
         cache.put("GHSA-xxxx-yyyy-zzzz", Severity::Critical);
         let got = cache.get("GHSA-xxxx-yyyy-zzzz");
         assert_eq!(got, Some(Severity::Critical));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn put_full_roundtrips_aliases() {
+        let dir = tempdir_unique("aliases");
+        let cache = Cache::with_root(dir.clone(), fixed_clock);
+        cache.put_full(
+            "GHSA-aliases-1",
+            Severity::High,
+            &["CVE-2024-1".to_string(), "CVE-2024-2".to_string()],
+        );
+        let (sev, aliases) = cache.get_full("GHSA-aliases-1").unwrap();
+        assert_eq!(sev, Severity::High);
+        assert_eq!(
+            aliases,
+            vec!["CVE-2024-1".to_string(), "CVE-2024-2".to_string()]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -279,5 +347,37 @@ mod tests {
         // Enabled path may or may not return Some depending on the host's
         // ProjectDirs availability; just assert the function doesn't panic.
         let _ = open_unless_disabled(false);
+    }
+
+    #[test]
+    fn effective_ttl_secs_falls_back_to_default_when_none() {
+        assert_eq!(effective_ttl_secs(None), CACHE_TTL_SECS);
+        // 0 is a degenerate override; treat it as "use default" rather
+        // than "never cache" so a misread config doesn't disable the cache.
+        assert_eq!(effective_ttl_secs(Some(0)), CACHE_TTL_SECS);
+    }
+
+    #[test]
+    fn effective_ttl_secs_converts_hours_to_seconds() {
+        assert_eq!(effective_ttl_secs(Some(1)), 3600);
+        assert_eq!(effective_ttl_secs(Some(48)), 48 * 3600);
+    }
+
+    #[test]
+    fn cache_with_overridden_ttl_expires_independently_of_const() {
+        // Build a Cache whose TTL is 1 hour, then read past that window.
+        // Validates that the per-instance ttl_secs (not CACHE_TTL_SECS)
+        // gates expiration.
+        let dir = tempdir_unique("override-ttl");
+        let writer = Cache::with_root(dir.clone(), fixed_clock);
+        writer.put("GHSA-override", Severity::Low);
+        let mut reader = Cache::with_root(dir.clone(), || 1_700_000_000 + 3600 + 1);
+        reader.ttl_secs = effective_ttl_secs(Some(1));
+        assert_eq!(
+            reader.get("GHSA-override"),
+            None,
+            "1h-TTL cache must miss after 1h+1s"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

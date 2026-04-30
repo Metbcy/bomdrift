@@ -1,0 +1,76 @@
+# Bitbucket Pipelines template for bomdrift.
+#
+# Required variables:
+#   - BOMDRIFT_API_TOKEN: App Password with `pullrequest:write` scope.
+
+image: rust:1.88
+
+definitions:
+  steps:
+    - step: &bomdrift-diff
+        name: bomdrift diff
+        caches:
+          - cargo
+        script:
+          - export BOMDRIFT_VERSION="0.9.0"
+          - apt-get update -qq && apt-get install -y -qq curl jq
+          - curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          - cargo install bomdrift --locked --version "$BOMDRIFT_VERSION"
+          - git fetch origin "$BITBUCKET_PR_DESTINATION_BRANCH"
+          - git worktree add ../before "origin/$BITBUCKET_PR_DESTINATION_BRANCH"
+          - syft dir:../before -o cyclonedx-json=before.cdx.json
+          - syft dir:. -o cyclonedx-json=after.cdx.json
+          - bomdrift diff before.cdx.json after.cdx.json --output markdown --platform bitbucket > comment.md
+          - echo "" >> comment.md
+          - echo "<!-- bomdrift:diff -->" >> comment.md
+          - REPO="$BITBUCKET_REPO_FULL_NAME"
+          - PR_ID="$BITBUCKET_PR_ID"
+          - API="https://api.bitbucket.org/2.0/repositories/$REPO/pullrequests/$PR_ID/comments"
+          - |
+            EXISTING=$(curl -s -u "x-token-auth:$BOMDRIFT_API_TOKEN" "$API?pagelen=100" \
+              | jq -r '.values[] | select(.content.raw | test("<!-- bomdrift:diff -->")) | .id' | head -n1)
+          - |
+            BODY=$(jq -Rs '{content:{raw: .}}' < comment.md)
+          - |
+            if [ -n "$EXISTING" ]; then
+              curl -s -u "x-token-auth:$BOMDRIFT_API_TOKEN" -X PUT -H "Content-Type: application/json" \
+                "$API/$EXISTING" -d "$BODY" >/dev/null
+            else
+              curl -s -u "x-token-auth:$BOMDRIFT_API_TOKEN" -X POST -H "Content-Type: application/json" \
+                "$API" -d "$BODY" >/dev/null
+            fi
+
+pipelines:
+  pull-requests:
+    "**":
+      - step: *bomdrift-diff
+
+  # Custom (manual / API-triggered) pipelines. The comment-suppress bridge
+  # (examples/bitbucket-pipelines/comment-bridge/) triggers this one by
+  # name with a BOMDRIFT_NOTE_BODY variable carrying the raw comment body.
+  # See bridge README for the full security model. If you don't deploy
+  # the bridge, this step never runs.
+  custom:
+    bomdrift-comment-suppress:
+      - step:
+          name: bomdrift comment-driven suppress
+          script:
+            - |
+              if [ -z "${BOMDRIFT_NOTE_BODY:-}" ]; then
+                echo "BOMDRIFT_NOTE_BODY unset; refusing to run." >&2
+                exit 1
+              fi
+            - export BOMDRIFT_VERSION="0.9.0"
+            - apt-get update -qq && apt-get install -y -qq curl jq git
+            - cargo install bomdrift --locked --version "$BOMDRIFT_VERSION"
+            - bomdrift baseline add --from-comment "$BOMDRIFT_NOTE_BODY"
+            - git config user.name  "bomdrift-bot"
+            - git config user.email "bomdrift-bot@users.noreply.bitbucket.org"
+            - git add .bomdrift/baseline.json
+            - |
+              if git diff --cached --quiet; then
+                echo "baseline already contains the directive; nothing to commit"
+                exit 0
+              fi
+            - git commit -m "chore(bomdrift): suppress from PR comment"
+            - git push origin "HEAD:$BITBUCKET_BRANCH"

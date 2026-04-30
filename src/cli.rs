@@ -21,7 +21,7 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Diff two SBOMs and surface supply-chain risk signals on changed components.
-    Diff(DiffArgs),
+    Diff(Box<DiffArgs>),
     /// Refresh the bundled typosquat top-package lists from upstream sources.
     ///
     /// Writes a fresh per-ecosystem list to the user's XDG cache directory
@@ -69,7 +69,10 @@ pub struct BaselineAddArgs {
     /// match by ID. Use the diff-output baseline format (the JSON shape
     /// emitted by `bomdrift diff --output json`) for finer per-purl
     /// suppression instead.
-    pub id: String,
+    ///
+    /// Optional when `--from-comment` is supplied — the directive in
+    /// the comment body provides the ID instead.
+    pub id: Option<String>,
 
     /// Path to the baseline file. Created if missing; parent directory is
     /// created if missing.
@@ -88,6 +91,23 @@ pub struct BaselineAddArgs {
     /// the entry expires. Free-form text.
     #[arg(long)]
     pub reason: Option<String>,
+
+    /// Parse the body of a forge-issued PR/MR comment and extract the
+    /// suppress directive. Accepts the raw note body as a single
+    /// string. The directive grammar (matched case-sensitively at the
+    /// start of any line, after optional leading whitespace):
+    ///
+    /// ```text
+    /// /bomdrift suppress <ID>[ reason: <text>]
+    /// ```
+    ///
+    /// `<ID>` must match `(?:GHSA|CVE|MAL|OSV)-[A-Z0-9-]+`. When no
+    /// matching line is found, the command exits with a non-zero code
+    /// and prints a clear stderr message — so a webhook bridge that
+    /// invokes this flag doesn't silently no-op on a non-suppress
+    /// comment. v0.9+.
+    #[arg(long)]
+    pub from_comment: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -158,6 +178,17 @@ pub enum Platform {
     /// comments).
     #[value(name = "gitlab")]
     GitLab,
+    /// Bitbucket Cloud or Bitbucket Data Center. Footer points
+    /// reviewers at the `/issues/new` form and uses `bomdrift baseline
+    /// add <ID>` for suppression — Bitbucket has no in-comment
+    /// suppression flow in v0.9.
+    #[value(name = "bitbucket")]
+    Bitbucket,
+    /// Azure DevOps Repos (Azure Pipelines). Footer points reviewers at
+    /// the work-item create form and uses `bomdrift baseline add <ID>`
+    /// for suppression.
+    #[value(name = "azure-devops")]
+    AzureDevOps,
 }
 
 impl From<Platform> for markdown::Platform {
@@ -170,6 +201,8 @@ impl From<Platform> for markdown::Platform {
         match value {
             Platform::GitHub => markdown::Platform::GitHub,
             Platform::GitLab => markdown::Platform::GitLab,
+            Platform::Bitbucket => markdown::Platform::Bitbucket,
+            Platform::AzureDevOps => markdown::Platform::AzureDevOps,
         }
     }
 }
@@ -177,9 +210,14 @@ impl From<Platform> for markdown::Platform {
 #[derive(Args, Debug)]
 pub struct DiffArgs {
     /// Path to the "before" SBOM (CycloneDX, SPDX, or Syft JSON).
-    pub before: PathBuf,
+    /// Optional when `--before-attestation` is used to fetch the SBOM
+    /// from an OCI registry instead.
+    #[arg(required_unless_present = "before_attestation")]
+    pub before: Option<PathBuf>,
     /// Path to the "after" SBOM (CycloneDX, SPDX, or Syft JSON).
-    pub after: PathBuf,
+    /// Optional when `--after-attestation` is used.
+    #[arg(required_unless_present = "after_attestation")]
+    pub after: Option<PathBuf>,
     /// Path to a repo policy config file. When omitted, `.bomdrift.toml` is
     /// loaded if it exists in the current working directory.
     #[arg(long)]
@@ -305,6 +343,113 @@ pub struct DiffArgs {
     /// expression evaluation). Off by default — fail-closed.
     #[arg(long)]
     pub allow_ambiguous_licenses: bool,
+    /// Comma-separated SPDX exception identifiers (e.g.
+    /// `LLVM-exception`, `Classpath-exception-2.0`) permitted as the
+    /// right-hand side of a `WITH` clause. Repeatable. When set,
+    /// `Apache-2.0 WITH <other>` violates policy even if `Apache-2.0`
+    /// is on the base allow list. v0.9.5+.
+    #[arg(long, value_delimiter = ',', action = clap::ArgAction::Append)]
+    pub allow_exception: Vec<String>,
+    /// Comma-separated SPDX exception identifiers forbidden as the
+    /// right-hand side of a `WITH` clause. Repeatable. v0.9.5+.
+    #[arg(long, value_delimiter = ',', action = clap::ArgAction::Append)]
+    pub deny_exception: Vec<String>,
+    /// Path(s) to VEX (Vulnerability Exploitability eXchange) files
+    /// to consume. Repeatable. Each file is auto-detected as either
+    /// OpenVEX 0.2.0 or CycloneDX VEX 1.6. Statements with status
+    /// `not_affected` / `fixed` suppress matching findings; statements
+    /// with `under_investigation` annotate without suppressing;
+    /// statements with `affected` annotate as a no-op badge. See
+    /// <https://metbcy.github.io/bomdrift/vex.html> for the
+    /// finding-id matching rules including the synthetic-id convention
+    /// for non-CVE findings.
+    #[arg(long, action = clap::ArgAction::Append)]
+    pub vex: Vec<PathBuf>,
+    /// Emit a single OpenVEX 0.2.0 doc covering every finding in the
+    /// post-baseline diff. Baseline-suppressed entries inherit their
+    /// `vex_status` from the baseline entry (defaulting to
+    /// `under_investigation` to avoid publishing false `not_affected`
+    /// claims); un-suppressed findings emit as `affected`. v0.9+.
+    #[arg(long)]
+    pub emit_vex: Option<PathBuf>,
+    /// Skip registry-metadata enrichers (npm/PyPI/crates.io) entirely.
+    /// Use for offline runs or when you don't want bomdrift to fan out
+    /// HTTP requests to package registries.
+    #[arg(long)]
+    pub no_registry: bool,
+    /// Recently-published threshold in days. Components published
+    /// within this window trip a `RecentlyPublished` finding. Default
+    /// 14 days; set to 0 to disable the kind without disabling the
+    /// other registry checks.
+    #[arg(long)]
+    pub recently_published_days: Option<i64>,
+    /// VEX `author` for `--emit-vex`. Falls back to repo_url, then
+    /// to `"bomdrift"`. v0.9+.
+    #[arg(long)]
+    pub vex_author: Option<String>,
+    /// Default OpenVEX `justification` written into emitted statements
+    /// when the source baseline entry doesn't supply one. Defaults to
+    /// `"vulnerable_code_not_in_execute_path"` — the safe fallback per
+    /// the OpenVEX spec.
+    #[arg(long)]
+    pub vex_default_justification: Option<String>,
+    /// Override the typosquat similarity threshold (default 0.92).
+    /// Range 0.0 - 1.0 inclusive. Lower values surface more findings
+    /// (and more false positives); higher values cut down to only
+    /// near-perfect matches. v0.9.6+.
+    #[arg(long, value_parser = parse_similarity_threshold)]
+    pub typosquat_similarity_threshold: Option<f64>,
+    /// Override the maintainer-age young-maintainer-days threshold
+    /// (default 90 days). Components whose top contributor's first
+    /// commit is younger than this trip a `YoungMaintainer` finding.
+    /// Must be >= 1. v0.9.6+.
+    #[arg(long, value_parser = clap::value_parser!(i64).range(1..))]
+    pub young_maintainer_days: Option<i64>,
+    /// Override the on-disk cache TTL in hours (default 24). Applies
+    /// uniformly to OSV / EPSS / KEV / Registry caches. Must be >= 1.
+    /// v0.9.6+.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    pub cache_ttl_hours: Option<u64>,
+    /// Override the version-jump minimum major-delta threshold (default
+    /// 2). A delta of 1 flags every cross-major upgrade; higher values
+    /// only flag larger jumps. Must be >= 1. v0.9.7+.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    pub multi_major_delta: Option<u32>,
+    /// Fetch the "before" SBOM as a cosign-verified attestation
+    /// attached to an OCI artifact instead of reading a local file.
+    /// Mutually exclusive with the positional `before` argument.
+    /// Requires `--cosign-identity` and `--cosign-issuer`. v0.9.6+.
+    #[arg(long, conflicts_with = "before")]
+    pub before_attestation: Option<String>,
+    /// Fetch the "after" SBOM as a cosign-verified attestation
+    /// attached to an OCI artifact. v0.9.6+.
+    #[arg(long, conflicts_with = "after")]
+    pub after_attestation: Option<String>,
+    /// Regex passed to `cosign verify-attestation
+    /// --certificate-identity-regexp`. Required when either
+    /// `--before-attestation` or `--after-attestation` is set.
+    /// Example: `https://github.com/owner/.+`. v0.9.6+.
+    #[arg(long)]
+    pub cosign_identity: Option<String>,
+    /// URL passed to `cosign verify-attestation
+    /// --certificate-oidc-issuer`. Required alongside
+    /// `--cosign-identity`. Example:
+    /// `https://token.actions.githubusercontent.com`. v0.9.6+.
+    #[arg(long)]
+    pub cosign_issuer: Option<String>,
+    /// Refuse to fall back to local-file SBOMs: both sides MUST come
+    /// from a verified OCI attestation. Implies that
+    /// `--before-attestation` and `--after-attestation` are both set.
+    /// v0.9.6+.
+    #[arg(long)]
+    pub require_attestation: bool,
+    /// Path to a plugin manifest TOML. Repeatable. Each plugin is an
+    /// external executable invoked once per added / version-changed
+    /// component with JSON over stdin/stdout. Plugin failures (timeout,
+    /// non-zero exit, malformed JSON) drop their findings without
+    /// failing the diff. v0.9.6+.
+    #[arg(long, action = clap::ArgAction::Append)]
+    pub plugin: Vec<PathBuf>,
     #[arg(long)]
     pub debug_calibration: bool,
     /// Format for `--debug-calibration` rows. `pipe` (default, back-compat
@@ -360,6 +505,13 @@ pub enum FailOn {
     Kev,
     /// Trip on a license-policy violation (Phase D, v0.8+).
     LicenseViolation,
+    /// Trip when a registry-metadata enricher (npm/PyPI/crates.io) flags
+    /// any added component as published within the
+    /// recently-published threshold (default 14 days). v0.9+.
+    RecentlyPublished,
+    /// Trip when a registry-metadata enricher flags any component as
+    /// deprecated or yanked upstream. v0.9+.
+    Deprecated,
     /// Trip on ANY finding (CVE, typosquat, version-jump, young-maintainer)
     /// OR any license-changed-without-version-bump pair (the suspicious case).
     Any,
@@ -395,4 +547,17 @@ impl InputFormat {
             InputFormat::Syft => Some(SbomFormat::Syft),
         }
     }
+}
+
+/// Clap value parser for `--typosquat-similarity-threshold`. Rejects
+/// values outside the inclusive 0.0..=1.0 range with a clear message
+/// (clap's built-in numeric range parser doesn't support `f64`).
+fn parse_similarity_threshold(s: &str) -> Result<f64, String> {
+    let v: f64 = s
+        .parse()
+        .map_err(|_| format!("expected a float in 0.0..=1.0, got {s:?}"))?;
+    if !v.is_finite() || !(0.0..=1.0).contains(&v) {
+        return Err(format!("expected a float in 0.0..=1.0, got {v}"));
+    }
+    Ok(v)
 }

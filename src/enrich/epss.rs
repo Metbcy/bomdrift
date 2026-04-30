@@ -28,7 +28,6 @@ const MAX_BATCH: usize = 100;
 const SUBDIR: &str = "epss";
 /// 24 hours — same TTL as the OSV cache so successive PR pushes within a
 /// work session hit cache.
-const CACHE_TTL_SECS: u64 = 24 * 60 * 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CacheEntry {
@@ -39,20 +38,32 @@ struct CacheEntry {
 /// Apply EPSS scores to every [`VulnRef`] in `e.vulns`. Updates in place;
 /// `--no-epss` callers should skip calling this entirely. Best-effort.
 pub fn enrich(e: &mut Enrichment) -> Result<()> {
-    enrich_with_url(e, EPSS_API_URL, DEFAULT_TIMEOUT)
+    enrich_with_ttl(e, None)
 }
 
-fn enrich_with_url(e: &mut Enrichment, base_url: &str, timeout: Duration) -> Result<()> {
+/// Like [`enrich`] but lets the caller override the on-disk cache TTL
+/// (driven by `--cache-ttl-hours`). `None` means use the default.
+pub fn enrich_with_ttl(e: &mut Enrichment, ttl_hours: Option<u64>) -> Result<()> {
+    enrich_with_url(e, EPSS_API_URL, DEFAULT_TIMEOUT, ttl_hours)
+}
+
+fn enrich_with_url(
+    e: &mut Enrichment,
+    base_url: &str,
+    timeout: Duration,
+    ttl_hours: Option<u64>,
+) -> Result<()> {
     let cves = collect_cves(e);
     if cves.is_empty() {
         return Ok(());
     }
+    let ttl = crate::enrich::cache::effective_ttl_secs(ttl_hours);
     let mut scores: HashMap<String, f32> = HashMap::new();
     let mut to_fetch: Vec<String> = Vec::new();
     let cache_root = cache_root();
     for cve in &cves {
         if let Some(root) = &cache_root
-            && let Some(cached) = read_cache(root, cve)
+            && let Some(cached) = read_cache(root, cve, ttl)
         {
             if let Some(s) = cached {
                 scores.insert(cve.clone(), s);
@@ -166,12 +177,12 @@ fn cache_root() -> Option<PathBuf> {
         .map(|p| p.join(SUBDIR))
 }
 
-fn read_cache(root: &std::path::Path, cve: &str) -> Option<Option<f32>> {
+fn read_cache(root: &std::path::Path, cve: &str, ttl_secs: u64) -> Option<Option<f32>> {
     let path = root.join(format!("{}.json", sanitize(cve)));
     let body = std::fs::read(&path).ok()?;
     let entry: CacheEntry = serde_json::from_slice(&body).ok()?;
     let now = now_secs();
-    if now.saturating_sub(entry.fetched_at) > CACHE_TTL_SECS {
+    if now.saturating_sub(entry.fetched_at) > ttl_secs {
         return None;
     }
     Some(entry.score)
@@ -291,11 +302,11 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         write_cache(&dir, "CVE-2025-1", Some(0.5));
-        let got = read_cache(&dir, "CVE-2025-1").unwrap();
+        let got = read_cache(&dir, "CVE-2025-1", crate::enrich::cache::CACHE_TTL_SECS).unwrap();
         assert_eq!(got, Some(0.5));
         // Negative caching: no-score-found CVE.
         write_cache(&dir, "CVE-2025-2", None);
-        let got = read_cache(&dir, "CVE-2025-2").unwrap();
+        let got = read_cache(&dir, "CVE-2025-2", crate::enrich::cache::CACHE_TTL_SECS).unwrap();
         assert_eq!(got, None);
         let _ = std::fs::remove_dir_all(&dir);
     }

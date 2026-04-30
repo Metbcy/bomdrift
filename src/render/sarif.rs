@@ -151,6 +151,52 @@ fn rules() -> Value {
              advisory heuristic).",
             "https://metbcy.github.io/bomdrift/license-policy.html",
         ),
+        rule(
+            "bomdrift.recently-published",
+            "recently-published",
+            "Newly added component was published to its registry recently",
+            "The component's most recent registry publish timestamp is \
+             younger than the configured threshold (default 14 days). \
+             Recent publishes correlate with takeover swaps and \
+             namespace-reuse attacks. Always informational severity \
+             (`warning`).",
+            "https://metbcy.github.io/bomdrift/enrichers/registry.html",
+        ),
+        rule(
+            "bomdrift.deprecated",
+            "deprecated",
+            "Component is deprecated or yanked upstream",
+            "The component's package registry (npm / PyPI / crates.io) \
+             marks this version (or the package) as deprecated, yanked, \
+             or inactive. Severity `error` because the upstream signal \
+             is unambiguous.",
+            "https://metbcy.github.io/bomdrift/enrichers/registry.html",
+        ),
+        rule(
+            "bomdrift.maintainer-set-changed",
+            "maintainer-set-changed",
+            "npm package's maintainer set changed across the version bump",
+            "The set of npm maintainers listed for the new version \
+             differs from the maintainer set listed for the old \
+             version. New maintainers gaining publish rights is a \
+             classic takeover-attack precursor (cf. xz / Jia Tan). \
+             Severity `warning`.",
+            "https://metbcy.github.io/bomdrift/enrichers/registry.html",
+        ),
+        rule(
+            "bomdrift.plugin",
+            "plugin",
+            "External plugin reported a finding",
+            "An external plugin (loaded via --plugin manifest.toml) \
+             reported a finding against an added or version-changed \
+             component. The plugin name and finding kind are recorded \
+             on the result's `properties` for filtering. Severity is \
+             plugin-controlled (info → note, warning → warning, error \
+             → error). Plugin findings are best-effort — runtime \
+             failures (timeout, malformed JSON, non-zero exit) drop \
+             findings without failing the diff.",
+            "https://metbcy.github.io/bomdrift/plugins.html",
+        ),
     ])
 }
 
@@ -223,6 +269,13 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
             }
             if advisory.kev {
                 props.insert("kev".into(), Value::Bool(true));
+            }
+            let vex_key = format!("cve:{purl_str}:{}", advisory.id);
+            if let Some(ann) = e.vex_annotations.get(&vex_key) {
+                props.insert("vexStatus".into(), Value::String(ann.status.clone()));
+                if let Some(j) = &ann.justification {
+                    props.insert("vexJustification".into(), Value::String(j.clone()));
+                }
             }
             out.push(json!({
                 "ruleId": "bomdrift.cve",
@@ -412,7 +465,128 @@ fn results(cs: &ChangeSet, e: &Enrichment) -> Value {
         }));
     }
 
+    // ---- bomdrift.recently-published ----
+    for f in &e.recently_published {
+        let name = &f.component.name;
+        let purl_or_name = f.component.purl.as_deref().unwrap_or(name);
+        let fp = fingerprint(&["bomdrift.recently-published", purl_or_name, &f.published_at]);
+        out.push(json!({
+            "ruleId": "bomdrift.recently-published",
+            "level": "warning",
+            "message": {
+                "text": format!(
+                    "`{name}` was published {} day(s) ago ({}). Recent publishes correlate with takeover swaps.",
+                    f.days_old, f.published_at,
+                ),
+            },
+            "locations": [synthetic_location()],
+            "partialFingerprints": { "primaryHash/v1": fp },
+            "properties": {
+                "purl":         f.component.purl,
+                "name":         name,
+                "version":      f.component.version,
+                "publishedAt":  f.published_at,
+                "daysOld":      f.days_old,
+            },
+        }));
+    }
+
+    // ---- bomdrift.deprecated ----
+    for f in &e.deprecated {
+        let name = &f.component.name;
+        let purl_or_name = f.component.purl.as_deref().unwrap_or(name);
+        let msg = f.message.as_deref().unwrap_or("(deprecated upstream)");
+        let fp = fingerprint(&["bomdrift.deprecated", purl_or_name, msg]);
+        out.push(json!({
+            "ruleId": "bomdrift.deprecated",
+            "level": "error",
+            "message": {
+                "text": format!("`{name}` is deprecated upstream: {msg}"),
+            },
+            "locations": [synthetic_location()],
+            "partialFingerprints": { "primaryHash/v1": fp },
+            "properties": {
+                "purl":    f.component.purl,
+                "name":    name,
+                "version": f.component.version,
+                "message": msg,
+            },
+        }));
+    }
+
+    // ---- bomdrift.maintainer-set-changed ----
+    for f in &e.maintainer_set_changed {
+        let name = &f.after.name;
+        let purl_or_name = f.after.purl.as_deref().unwrap_or(name);
+        let added = f.added.join(",");
+        let removed = f.removed.join(",");
+        let fp = fingerprint(&[
+            "bomdrift.maintainer-set-changed",
+            purl_or_name,
+            &added,
+            &removed,
+        ]);
+        out.push(json!({
+            "ruleId": "bomdrift.maintainer-set-changed",
+            "level": "warning",
+            "message": {
+                "text": format!(
+                    "`{name}` maintainer set changed: +{} / -{}.",
+                    if added.is_empty() { "(none)".into() } else { added.clone() },
+                    if removed.is_empty() { "(none)".into() } else { removed.clone() },
+                ),
+            },
+            "locations": [synthetic_location()],
+            "partialFingerprints": { "primaryHash/v1": fp },
+            "properties": {
+                "purl":    f.after.purl,
+                "name":    name,
+                "before":  f.before.version,
+                "after":   f.after.version,
+                "added":   f.added,
+                "removed": f.removed,
+            },
+        }));
+    }
+
+    // ---- bomdrift.plugin ----
+    // Plugin findings are pre-ordered by run_plugins() (manifest order
+    // outer, cs.added/version_changed inner — both already deterministic
+    // since cs.added is BTreeMap-derived and the manifest list is the
+    // user's CLI order). Emit verbatim.
+    for f in &e.plugin_findings {
+        let fp = f.fingerprint();
+        out.push(json!({
+            "ruleId": "bomdrift.plugin",
+            "level": plugin_sarif_level(f.severity),
+            "message": {
+                "text": format!(
+                    "{} ({}): {}",
+                    f.plugin_name, f.kind, f.message,
+                ),
+            },
+            "locations": [synthetic_location()],
+            "partialFingerprints": { "primaryHash/v1": fp },
+            "properties": {
+                "pluginName":  f.plugin_name,
+                "findingKind": f.kind,
+                "ruleId":      f.rule_id,
+                "purl":        f.component_purl,
+                "severity":    f.severity.as_str(),
+            },
+        }));
+    }
+
     Value::Array(out)
+}
+
+fn plugin_sarif_level(severity: crate::plugin::PluginSeverity) -> &'static str {
+    use crate::plugin::PluginSeverity;
+    match severity {
+        PluginSeverity::Info => "note",
+        PluginSeverity::Warning => "warning",
+        PluginSeverity::Error => "error",
+    }
 }
 
 fn synthetic_location() -> Value {
@@ -484,6 +658,10 @@ mod tests {
                 "bomdrift.young-maintainer",
                 "bomdrift.license-change",
                 "bomdrift.license-violation",
+                "bomdrift.recently-published",
+                "bomdrift.deprecated",
+                "bomdrift.maintainer-set-changed",
+                "bomdrift.plugin",
             ],
             "rule IDs are stable public API — order also stable for byte-determinism",
         );
@@ -809,7 +987,7 @@ mod tests {
         assert_eq!(r1, r2, "byte-equal across runs");
         let v: Value = serde_json::from_str(&r1).unwrap();
         let fp = &v["runs"][0]["results"][0]["partialFingerprints"]["primaryHash/v1"];
-        assert!(fp.is_string(), "fingerprint missing: {}", v);
+        assert!(fp.is_string(), "fingerprint missing: {v}");
         assert_eq!(fp.as_str().unwrap().len(), 64);
     }
 
@@ -917,5 +1095,99 @@ mod tests {
                 .len(),
             64
         );
+    }
+
+    #[test]
+    fn exception_driven_license_violation_fingerprint_differs_from_base() {
+        // v0.9.5: a violation driven by a denied SPDX `WITH` exception
+        // must have a stable partialFingerprint distinct from a
+        // base-license violation on the same component, so SARIF
+        // consumers (Code Scanning) treat them as separate alerts.
+        use crate::enrich::{LicenseViolation, LicenseViolationKind};
+        let component = comp("foo", "1.0.0", Ecosystem::Npm, Some("pkg:npm/foo@1.0.0"));
+        let e_exception = Enrichment {
+            license_violations: vec![LicenseViolation {
+                component: component.clone(),
+                license: "Apache-2.0 WITH LLVM-exception".into(),
+                matched_rule: "exception:LLVM-exception denied".into(),
+                kind: LicenseViolationKind::Deny,
+            }],
+            ..Default::default()
+        };
+        let e_base = Enrichment {
+            license_violations: vec![LicenseViolation {
+                component,
+                license: "Apache-2.0".into(),
+                matched_rule: "deny: Apache-2.0".into(),
+                kind: LicenseViolationKind::Deny,
+            }],
+            ..Default::default()
+        };
+        let r_exception = render(&ChangeSet::default(), &e_exception);
+        let r_base = render(&ChangeSet::default(), &e_base);
+        let parse = |s: &str| -> String {
+            let v: Value = serde_json::from_str(s).unwrap();
+            v["runs"][0]["results"][0]["partialFingerprints"]["primaryHash/v1"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let fp_ex = parse(&r_exception);
+        let fp_base = parse(&r_base);
+        assert_ne!(
+            fp_ex, fp_base,
+            "exception-driven violation fingerprint must differ from base-license violation"
+        );
+        // Stable across runs.
+        let r_exception_2 = render(&ChangeSet::default(), &e_exception);
+        assert_eq!(parse(&r_exception_2), fp_ex);
+    }
+
+    #[test]
+    fn plugin_findings_emit_sarif_results_with_distinct_fingerprints() {
+        use crate::plugin::{PluginFinding, PluginSeverity};
+        let mut e = Enrichment::default();
+        e.plugin_findings.push(PluginFinding {
+            plugin_name: "banned".into(),
+            component_purl: "pkg:npm/left-pad@1.0.0".into(),
+            kind: "banned-package".into(),
+            message: "left-pad is banned".into(),
+            severity: PluginSeverity::Warning,
+            rule_id: "banned/left-pad".into(),
+        });
+        e.plugin_findings.push(PluginFinding {
+            plugin_name: "banned".into(),
+            component_purl: "pkg:npm/right-pad@2.0.0".into(),
+            kind: "banned-package".into(),
+            message: "right-pad is banned".into(),
+            severity: PluginSeverity::Error,
+            rule_id: "banned/right-pad".into(),
+        });
+        let s = render(&ChangeSet::default(), &e);
+        let v: Value = serde_json::from_str(&s).unwrap();
+        let results = v["runs"][0]["results"].as_array().unwrap();
+        let plugin_results: Vec<&Value> = results
+            .iter()
+            .filter(|r| r["ruleId"] == "bomdrift.plugin")
+            .collect();
+        assert_eq!(plugin_results.len(), 2);
+
+        let fp1 = plugin_results[0]["partialFingerprints"]["primaryHash/v1"]
+            .as_str()
+            .unwrap();
+        let fp2 = plugin_results[1]["partialFingerprints"]["primaryHash/v1"]
+            .as_str()
+            .unwrap();
+        assert_ne!(fp1, fp2, "distinct fingerprints per (purl, rule_id)");
+        assert_eq!(plugin_results[0]["properties"]["pluginName"], "banned");
+        assert_eq!(
+            plugin_results[0]["properties"]["findingKind"],
+            "banned-package"
+        );
+        assert_eq!(plugin_results[1]["level"], "error");
+
+        // Render twice must produce byte-equal output.
+        let s2 = render(&ChangeSet::default(), &e);
+        assert_eq!(s, s2);
     }
 }

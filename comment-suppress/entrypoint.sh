@@ -13,6 +13,13 @@
 
 set -euo pipefail
 
+# Suppress-directive grammar lives in scripts/parse-suppress-comment.sh
+# (single source of truth shared with the GitLab/Bitbucket/Azure DevOps
+# Cloudflare Worker bridges). CI guard: scripts/check-suppress-regex-sync.sh.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../scripts/parse-suppress-comment.sh
+source "$SCRIPT_DIR/../scripts/parse-suppress-comment.sh"
+
 REPO="Metbcy/bomdrift"
 GH_DL="https://github.com/${REPO}/releases/download"
 # REPO above is the bomdrift project (where the release archives live).
@@ -56,32 +63,27 @@ if [ "$is_pr_comment" != "true" ]; then
 fi
 
 comment_body="$(jq -r '.comment.body' "$event_path")"
-if [[ ! "$comment_body" =~ ^/bomdrift[[:space:]]+suppress[[:space:]]+ ]]; then
-  notice "skipping: comment body does not start with '/bomdrift suppress'"
+if ! grep -qE '^[[:space:]]*/bomdrift[[:space:]]+suppress[[:space:]]+' <<< "$comment_body"; then
+  notice "skipping: comment body does not contain '/bomdrift suppress'"
   exit 0
 fi
 
-# Parse out the advisory ID. Allow an optional trailing newline / extra args.
-advisory_id="$(printf '%s\n' "$comment_body" | awk 'NR==1 { print $3 }')"
+# Single source of truth: scripts/parse-suppress-comment.sh.
+# rc=0 → matched, rc=1 → no directive, rc=2 → matched but malformed ID.
+set +e
+parse_bomdrift_suppress "$comment_body"
+parse_rc=$?
+set -e
+case "$parse_rc" in
+  0) advisory_id="$BOMDRIFT_PARSED_ID"; reason="$BOMDRIFT_PARSED_REASON" ;;
+  1) notice "skipping: comment body does not contain a /bomdrift suppress directive"
+     exit 0 ;;
+  2) fail "advisory id does not match (GHSA|CVE|MAL|OSV)-... shape: ${BOMDRIFT_PARSED_ID}" ;;
+  *) fail "internal error: parse_bomdrift_suppress returned $parse_rc" ;;
+esac
+
 if [ -z "$advisory_id" ]; then
   fail "could not parse advisory id from comment body: $comment_body"
-fi
-
-# Optional `reason: <free text>` line in the comment body. v0.8+: when
-# present, the entry is recorded in the v0.8 object form so the reason
-# is preserved alongside the advisory id. Pattern matches the start of
-# any line (case-insensitive) so reviewers can write
-# `reason: awaiting upstream patch (issue #42)` on a continuation line.
-reason="$(printf '%s\n' "$comment_body" \
-  | grep -iE '^\s*reason:\s*' \
-  | head -n1 \
-  | sed -E 's/^\s*[Rr]eason:\s*//')"
-
-# Validate it looks like an advisory id we'd expect from OSV.dev. Reject
-# anything else early so a typo doesn't turn into a no-op suppress with no
-# user-visible feedback.
-if [[ ! "$advisory_id" =~ ^(GHSA-[a-z0-9-]+|CVE-[0-9]{4}-[0-9]+|MAL-[0-9]{4}-[0-9]+)$ ]]; then
-  fail "advisory id does not match GHSA-/CVE-/MAL- shape: $advisory_id"
 fi
 
 pr_number="$(jq -r '.issue.number' "$event_path")"

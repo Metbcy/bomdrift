@@ -42,11 +42,21 @@ pub fn enrich(cs: &ChangeSet) -> Result<Enrichment> {
 /// Like [`enrich`] but lets the caller opt out of the on-disk severity cache
 /// (`bomdrift diff --no-osv-cache`).
 pub fn enrich_cached(cs: &ChangeSet, no_cache: bool) -> Result<Enrichment> {
+    enrich_cached_with_ttl(cs, no_cache, None)
+}
+
+/// Like [`enrich_cached`] but lets the caller override the cache TTL
+/// (driven by `--cache-ttl-hours`). `None` means use the default.
+pub fn enrich_cached_with_ttl(
+    cs: &ChangeSet,
+    no_cache: bool,
+    cache_ttl_hours: Option<u64>,
+) -> Result<Enrichment> {
     let purls = candidate_purls(cs);
     if purls.is_empty() {
         return Ok(Enrichment::default());
     }
-    let cache = crate::enrich::cache::open_unless_disabled(no_cache);
+    let cache = crate::enrich::cache::open_unless_disabled_with_ttl(no_cache, cache_ttl_hours);
     enrich_with(
         &purls,
         OSV_BATCH_URL,
@@ -99,20 +109,18 @@ fn enrich_with(
     let mut cache_hits = 0usize;
     for id in &unique_ids {
         if let Some(c) = cache
-            && let Some(cached) = c.get(id)
+            && let Some((sev, aliases)) = c.get_full(id)
         {
-            // v0.7 cache only stored severity; aliases stay empty on a
-            // cache hit. EPSS/KEV (Phase B) tolerates empty aliases.
-            details.insert(id.clone(), (cached, Vec::new()));
+            details.insert(id.clone(), (sev, aliases));
             cache_hits += 1;
             continue;
         }
         match fetch_detail(&agent, vuln_url_base, id) {
             Ok((sev, aliases)) => {
-                details.insert(id.clone(), (sev, aliases));
                 if let Some(c) = cache {
-                    c.put(id, sev);
+                    c.put_full(id, sev, &aliases);
                 }
+                details.insert(id.clone(), (sev, aliases));
             }
             Err(_) => {
                 lookup_failures += 1;
@@ -166,6 +174,12 @@ fn enrich_with(
         version_jumps: Vec::new(),
         maintainer_age: Vec::new(),
         license_violations: Vec::new(),
+        recently_published: Vec::new(),
+        deprecated: Vec::new(),
+        maintainer_set_changed: Vec::new(),
+        vex_annotations: std::collections::HashMap::new(),
+        vex_suppressed_count: 0,
+        plugin_findings: Vec::new(),
     })
 }
 

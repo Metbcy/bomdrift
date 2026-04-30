@@ -3,87 +3,138 @@
 What's planned, what's deliberately out of scope, and what the
 acceptance criteria for new contributions look like.
 
-## Shipped (v0.8 — supply-chain hardening)
+## Shipped (v0.9.7 — milestone follow-ups)
 
-- **SARIF + GitHub Code Scanning** with stable per-result fingerprints
-  and one-line action opt-in (`upload-to-code-scanning: true`).
-- **EPSS scoring** on every CVE-aliased advisory; `--fail-on-epss`
-  threshold gating.
-- **CISA KEV flagging** of known-exploited advisories;
-  `--fail-on kev`.
-- **License allow/deny policy** with `*`-suffix glob matching and
-  fail-closed compound-expression handling. New
-  `bomdrift.license-violation` SARIF rule.
-- **Baseline `expires` + `reason`** for time-boxed risk acceptance,
-  with stderr warnings on expired entries.
-- **`time` crate adoption + `clock` module** — single source of truth
-  for date/time, honors `SOURCE_DATE_EPOCH`.
-- **OSV CVE aliases** threaded through `VulnRef` (prerequisite for
-  EPSS / KEV / VEX).
-- **`--debug-calibration-format jsonl`** alternative to the v0.7
-  pipe-delimited format.
-- **`--output-file <PATH>`** CLI flag (avoids `>` redirection in YAML).
+- **SPDX `WITH`-chain exception inheritance** — `(X WITH ex) AND (Y)` /
+  `(X WITH ex_a) OR (X WITH ex_b)` now evaluate per-leaf with proper
+  AND/OR semantics. AND inherits a denied exception; OR doesn't poison
+  if another branch is permitted.
+- **`--multi-major-delta <N>`** — last hardcoded calibration threshold
+  lifted. Default 2; tunable via flag or `[diff] multi_major_delta`
+  config key.
+- **Windows plugin timeout (first-class)** — replaced manual
+  `Child::try_wait()` polling with the `wait-timeout` crate. Behavior
+  unchanged on Unix; first-class on Windows.
+- **`action.yml` input parity** — twenty-five new inputs map every
+  v0.7-v0.9.7 CLI flag to an action input.
+- **Air-gapped / self-hosted Sigstore docs** — documents env-var
+  passthrough (`SIGSTORE_REKOR_URL`, `COSIGN_FULCIO_URL`, etc.) and
+  key-based attestation fallback.
 
-## Planned (v0.9 — interoperability + breadth)
+## Shipped (v0.9.6 — finish the roadmap)
+
+- **OCI artifact attestation verification** — `--before-attestation`,
+  `--after-attestation`, `--cosign-identity`, `--cosign-issuer`, and
+  `--require-attestation`. bomdrift shells out to
+  `cosign verify-attestation --type=cyclonedx` and consumes the
+  verified CycloneDX SBOM payload. See
+  [Attestation](./attestation.md).
+- **Custom rules / plugin system** — external-process plugins via
+  repeatable `--plugin <manifest.toml>`. JSON over stdin/stdout,
+  best-effort failures, new `bomdrift.plugin` SARIF rule. See
+  [Plugins](./plugins.md).
+- **Calibration knobs** — `--typosquat-similarity-threshold`,
+  `--young-maintainer-days`, `--cache-ttl-hours` flags plus matching
+  `[diff]` config keys. Every previously hardcoded threshold is now
+  configurable.
+- **Cache-TTL unification** — internal refactor consolidating the
+  four duplicated `CACHE_TTL_SECS` constants behind a single
+  `cache::ttl()` helper. No user-visible change.
+
+## Shipped (v0.9.5 — polish + multi-SCM parity)
+
+- **Per-exception SPDX allow/deny** via `[license] allow_exceptions` /
+  `deny_exceptions` and `--allow-exception` / `--deny-exception` CLI
+  flags. `Apache-2.0 WITH LLVM-exception` etc. now evaluated at the
+  exception level, not just the base license.
+- **Bitbucket + Azure DevOps comment-driven suppression bridges** —
+  Cloudflare Worker references with the same five guards as the GitLab
+  bridge. bomdrift now has comment-driven suppression parity across
+  all four major SCMs.
+- **`bomdrift::vex::parse_synthetic_id` public helper** — round-trips
+  bomdrift's synthetic finding IDs back to a structured kind. Lets
+  external VEX tooling identify which finding a statement targets.
+- `spdx` crate exact-pinned (`=0.10.9`) so license-list updates can't
+  silently change policy semantics.
+- `BaselineEntry` / `ExpiredEntry` unified internally; public alias
+  preserved.
+- CI Rust toolchain pinned to MSRV 1.88; bumps are deliberate.
+- Single source of truth for the suppress-comment grammar
+  (`scripts/parse-suppress-comment.sh` + CI sync guard).
+- GitLab note upsert + threading semantics documented.
+
+## Shipped (v0.9 — interoperability + breadth)
 
 - **VEX consume** — `--vex <path>` accepts OpenVEX 0.2.0 + CycloneDX
   VEX 1.6 statements; `not_affected` / `fixed` suppress findings,
   `under_investigation` annotates.
-- **VEX emit** — `--emit-vex <path>` emits an OpenVEX document from
-  baseline-suppressed findings. Defaults to
-  `under_investigation` (the safe truth-claim); per-entry
-  `vex_status` override required for `not_affected`.
-- **SPDX expression evaluator** — replaces v0.8's atomic+glob matcher
-  with full `(MIT OR Apache-2.0)` evaluation via the `spdx` crate.
-  Deprecates `allow_ambiguous`.
-- **Multi-SCM templates** — Bitbucket Pipelines + Azure DevOps with
-  per-platform footer shapes and PR-comment upsert recipes.
-- **Registry-metadata enrichers** — npm `time.modified`, PyPI
-  `info.yanked`, crates.io `versions[].yanked`. New finding kinds:
-  `RecentlyPublished`, `Deprecated`, `MaintainerSetChanged`.
-- **GitLab in-comment suppression** with explicit security guards
-  (token verification, event filter, project allowlist, commenter
-  permissions, fork-MR safety). Reference Cloudflare Worker bridge.
-- **Explicit non-goals doc** — reachability, tarball static analysis,
-  auto-fix PR generation, container image scanning, SAST/secrets,
-  risk-score dashboards. Pair with Endor/Snyk for reachability,
-  Renovate/Dependabot for auto-fix.
+- **VEX emit** — `--emit-vex <path>` emits an OpenVEX 0.2.0 document
+  with explicit per-entry `vex_status` (default
+  `under_investigation`, never auto-promoted).
+- **Full SPDX expression evaluator** via the `spdx` crate. Deprecates
+  `allow_ambiguous`.
+- **Bitbucket Pipelines + Azure DevOps Pipelines** templates with
+  auto-detection (`BITBUCKET_BUILD_NUMBER`, `TF_BUILD`) and
+  per-platform footer shapes.
+- **Registry-metadata enrichers** — npm/PyPI/crates.io. New kinds:
+  recently-published, deprecated, maintainer-set-changed (npm only).
+- **GitLab comment-driven suppression** via a security-reviewed
+  Cloudflare Worker reference bridge (five guards).
+- **Explicit non-goals + pair-with recommendations** in README and
+  STATUS.
+
+## Shipped (v0.8 — supply-chain hardening)
+
+- SARIF + GitHub Code Scanning with stable per-result fingerprints
+  and one-line action opt-in (`upload-to-code-scanning: true`).
+- EPSS scoring on every CVE-aliased advisory; `--fail-on-epss`.
+- CISA KEV flagging of known-exploited advisories; `--fail-on kev`.
+- License allow/deny policy with `*`-suffix glob matching and
+  fail-closed compound-expression handling. New
+  `bomdrift.license-violation` SARIF rule.
+- Baseline `expires` + `reason` with stderr warnings on expiry.
+- `time` crate + `clock` module honoring `SOURCE_DATE_EPOCH`.
+- OSV CVE aliases threaded through `VulnRef`.
+- `--debug-calibration-format jsonl` and `--output-file <PATH>`.
+
+## Investigated and decided
+
+- **GraphQL maintainer-age** — investigated again for v0.9.6 and
+  rejected. GitHub's GraphQL `history()` connection doesn't expose
+  ascending-date ordering, so finding the oldest contributor commit
+  still requires walking the cursor backward from the most recent
+  commit. REST's
+  `GET /repos/{o}/{r}/commits?author=X&per_page=1` plus `Link`-header
+  parsing for the last page lets bomdrift fetch a single author's
+  oldest commit in two requests. **Decided: REST stays.** Closing
+  this one off the roadmap permanently — re-open only if GitHub adds
+  ASC ordering to the GraphQL history connection.
+
+## Calibration
+
+All calibration thresholds are configurable via `.bomdrift.toml` and
+CLI flags. Tune `[diff] typosquat_similarity_threshold`,
+`young_maintainer_days`, `recently_published_days`, `cache_ttl_hours`.
+See [CLI reference](./cli-reference.md) for flag forms.
+
+## Blocked on upstream
+
+- **PyPI / crates.io maintainer-set-changed.** The npm enricher
+  (shipped v0.9) compares maintainer sets for VersionChanged
+  components by reading `registry.npmjs.org`'s per-version
+  `maintainers[]` array. PyPI's
+  `https://pypi.org/pypi/<pkg>/json` returns repository-level
+  maintainers but no per-version history. Crates.io's
+  `https://crates.io/api/v1/crates/<name>` returns repository-level
+  `crate.owners` but no per-version `published_by` history. If
+  either ecosystem ships a per-version maintainer endpoint, bomdrift
+  adds the enricher in a future minor release.
 
 ## Future candidates (not committed)
 
-- **GraphQL maintainer-age** — was investigated for v0.4 and deferred.
-  The current REST implementation already uses `?per_page=1` + Link-header
-  parsing for top contributor and contributor count. The remaining
-  round-trip cost is the per-author commit-history pagination, and
-  GitHub's GraphQL `history()` connection doesn't expose ASC ordering —
-  finding the oldest commit still requires cursor pagination. v0.5 may
-  approach this via `User.contributionsCollection` or accept that REST
-  is the right tool here.
-- **Custom rules / plugin system** — let consumers add
-  organization-specific enrichers (e.g. "flag any dep from
-  internal-mirror.example.com without a SHA-256 attestation").
-  Probably WASM-based for sandboxing.
-- **GitLab in-comment suppression** — v0.7 ships the GitLab CI
-  template + `--platform gitlab` (the diff path); v0.9 will add the
-  comment-driven `/bomdrift suppress <ID>` flow with explicit
-  security guards.
-- **Calibration tuning from `--debug-calibration` data** — v0.7
-  added the diagnostic flag; v0.8 may revise
-  `SIMILARITY_THRESHOLD`, `YOUNG_MAINTAINER_DAYS`, and OSV cache
-  TTL defaults based on adopter-collected samples shared on
-  issue #5.
-- **OCI artifact attestation** — verify SBOMs are themselves signed
-  by the build system before diffing. Pairs with cosign attest.
-
-### Calibration backlog
-
-These are tunable thresholds where the v0.3 default may not be the
-right answer at scale. Adjusting requires real-world signal data, so
-they're tracked as "watch the false-positive rate":
-
-- Typosquat `SIMILARITY_THRESHOLD` (currently 0.92).
-- Maintainer-age `YOUNG_MAINTAINER_DAYS` (currently 90).
-- OSV severity cache TTL (currently 24h).
+_Empty as of v0.9.6._ The previously listed candidates have all been
+shipped, marked non-goal, decided against, or moved to "Blocked on
+upstream" above. New post-v0.9.6 ideas land here as they emerge.
 
 ## Non-goals
 
@@ -104,6 +155,20 @@ change-focused**: only on what's *new* in this diff. If you want
 "what's in my SBOM right now?", run an SCA scanner. If you want "what
 changed in this PR's deps that I should worry about?", that's
 bomdrift's question.
+
+### Reachability / call-graph analysis
+
+Determining whether the vulnerable function in a flagged advisory is
+actually invoked from your application's entry points is a
+fundamentally different analysis than diff-level supply-chain risk.
+It requires whole-program call-graph construction, language-specific
+runtime modeling (dynamic dispatch, reflection, eval), and an
+ever-growing per-CVE vulnerable-symbol database. The vendors who do
+this well — Endor Labs, Snyk Reachability — invest at a scale OSS
+bomdrift can't match, and the per-CVE symbol curation is the moat,
+not the call-graph engine itself. **Pair bomdrift with Endor or Snyk
+for reachability**; bomdrift answers "what changed", they answer
+"does the change reach prod code".
 
 ### Dependency-tree visualization
 

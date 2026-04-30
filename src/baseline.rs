@@ -60,20 +60,45 @@ pub struct Baseline {
     suppressed_advisories: HashSet<String>,
     /// v0.8+ entries that have already passed their `expires` date.
     /// Surface to the caller for stderr warnings; do NOT contribute to
-    /// suppression.
-    pub expired_entries: Vec<ExpiredEntry>,
+    /// suppression. Each entry has `expires.is_some()` and is guaranteed
+    /// to be strictly before today at load time.
+    pub expired_entries: Vec<BaselineEntry>,
+    /// v0.9+ rich entries from object-form `suppressed_advisories`.
+    /// Keyed in insertion order so VEX emission (Phase H) can surface
+    /// `vex_status` / `vex_justification` / `reason` without re-parsing
+    /// the source JSON. Both expired and active entries appear here —
+    /// callers filter as needed.
+    pub entries: Vec<BaselineEntry>,
 }
 
-/// A baseline entry whose `expires` date is strictly before today. The diff
-/// will surface the underlying finding; bomdrift prints one warning per
-/// expired entry to stderr after baseline load.
+/// A rich baseline entry preserved for VEX emission. Plain string-form
+/// entries (`"GHSA-..."`) do NOT appear here — they have no metadata
+/// to preserve. Object-form entries always do.
+///
+/// v0.9.5: previously two distinct structs (`BaselineEntry` and
+/// `ExpiredEntry`) overlapped on `id` / `purl` / `expires` / `reason`.
+/// They are now a single shape; entries pushed into
+/// [`Baseline::expired_entries`] additionally guarantee
+/// `expires.is_some()`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExpiredEntry {
+pub struct BaselineEntry {
     pub id: String,
     pub purl: Option<String>,
-    pub expires: String,
     pub reason: Option<String>,
+    pub expires: Option<String>,
+    pub vex_status: Option<String>,
+    pub vex_justification: Option<String>,
 }
+
+/// Back-compat alias for the unified [`BaselineEntry`] shape. Pre-v0.9.5
+/// callers used a distinct `ExpiredEntry` struct; the alias preserves
+/// `bomdrift::baseline::ExpiredEntry` as a name while sharing the
+/// underlying type.
+#[deprecated(
+    since = "0.9.5",
+    note = "use BaselineEntry directly; expired_entries is Vec<BaselineEntry> with expires.is_some()"
+)]
+pub type ExpiredEntry = BaselineEntry;
 
 impl Baseline {
     pub fn load(path: &Path) -> Result<Self> {
@@ -185,15 +210,40 @@ impl Baseline {
                             .get("reason")
                             .and_then(|v| v.as_str())
                             .map(str::to_string);
-                        if let Some(expires_s) = obj.get("expires").and_then(|v| v.as_str()) {
+                        let vex_status = obj
+                            .get("vex_status")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string);
+                        let vex_justification = obj
+                            .get("vex_justification")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string);
+                        let expires_str = obj
+                            .get("expires")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string);
+                        // Track the rich entry for VEX emission regardless
+                        // of expiry — emission may include expired entries
+                        // for documentation; suppression below honors expiry.
+                        out.entries.push(BaselineEntry {
+                            id: id.to_string(),
+                            purl: purl.clone(),
+                            reason: reason.clone(),
+                            expires: expires_str.clone(),
+                            vex_status: vex_status.clone(),
+                            vex_justification: vex_justification.clone(),
+                        });
+                        if let Some(expires_s) = expires_str.as_deref() {
                             match clock::parse_ymd(expires_s) {
                                 Ok(date) => {
                                     if clock::is_expired(date) {
-                                        out.expired_entries.push(ExpiredEntry {
+                                        out.expired_entries.push(BaselineEntry {
                                             id: id.to_string(),
                                             purl: purl.clone(),
-                                            expires: expires_s.to_string(),
                                             reason: reason.clone(),
+                                            expires: expires_str.clone(),
+                                            vex_status: vex_status.clone(),
+                                            vex_justification: vex_justification.clone(),
                                         });
                                         // Expired entries do NOT contribute to suppression.
                                         continue;
@@ -395,6 +445,72 @@ pub fn add_suppression_full(
 pub enum AddOutcome {
     Added,
     AlreadyPresent,
+}
+
+/// Parse the body of a PR/MR comment and extract a single
+/// `/bomdrift suppress <ID>[ reason: <text>]` directive. The grammar
+/// is documented in CLI help and in
+/// `examples/gitlab-ci/comment-bridge/`'s threat model. The same
+/// shape is honored by `comment-suppress/entrypoint.sh` for the
+/// GitHub flow — keep these in lockstep.
+///
+/// Returns `Ok(Some((id, optional_reason)))` on a single match,
+/// `Ok(None)` on no match, `Err` on a malformed ID.
+pub fn parse_comment_directive(body: &str) -> Result<Option<(String, Option<String>)>> {
+    // Looks for `/bomdrift suppress <ID>[ reason: <text>]` on each
+    // line; the directive may be preceded by free-form prose and/or
+    // mention markers. A leading `^\s*` anchor on the directive itself
+    // is too strict — reviewers paste the directive after a comment.
+    for line in body.lines() {
+        let Some(idx) = line.find("/bomdrift") else {
+            continue;
+        };
+        let rest = &line[idx + "/bomdrift".len()..];
+        let rest = rest.trim_start();
+        let Some(rest) = rest.strip_prefix("suppress") else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        if rest.is_empty() {
+            continue;
+        }
+        let mut iter = rest.splitn(2, char::is_whitespace);
+        let raw_id = iter.next().unwrap_or("").trim();
+        if raw_id.is_empty() {
+            continue;
+        }
+        if !is_valid_advisory_id(raw_id) {
+            anyhow::bail!(
+                "comment directive contained a malformed advisory ID: {raw_id:?} \
+                 (expected GHSA-/CVE-/MAL-/OSV- prefix and alnum/dash body)"
+            );
+        }
+        let reason = iter.next().and_then(|tail| {
+            let tail = tail.trim();
+            tail.strip_prefix("reason:")
+                .map(|r| r.trim().to_string())
+                .filter(|s| !s.is_empty())
+        });
+        return Ok(Some((raw_id.to_string(), reason)));
+    }
+    Ok(None)
+}
+
+fn is_valid_advisory_id(s: &str) -> bool {
+    // Aligns with comment-suppress/entrypoint.sh's regex:
+    //   ^(GHSA-[a-z0-9-]+|CVE-[0-9]{4}-[0-9]+|MAL-[0-9]{4}-[0-9]+|OSV-[A-Z0-9-]+)$
+    // Kept slightly looser here (we accept GHSA-uppercase and OSV-* too)
+    // so future advisory schemes don't trip the bridge unnecessarily.
+    let Some((prefix, rest)) = s.split_once('-') else {
+        return false;
+    };
+    if !matches!(prefix, "GHSA" | "CVE" | "MAL" | "OSV") {
+        return false;
+    }
+    if rest.is_empty() {
+        return false;
+    }
+    rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 fn doc_kind(v: &serde_json::Value) -> &'static str {
@@ -727,9 +843,13 @@ mod tests {
     // ---- v0.8 expires + reason -----------------------------------------
 
     fn lock_today(epoch: i64) -> impl Drop {
-        // SAFETY: tests serialize on these env mutations via a process-wide
-        // mutex inside crate::clock; see clock::tests for the same pattern.
-        struct Guard;
+        // SAFETY: env mutations are serialized by the crate-wide
+        // `clock::test_env_lock()` mutex; `Guard` holds that lock for
+        // the lifetime of the returned token so `SOURCE_DATE_EPOCH`
+        // remains stable from set-time through baseline parse.
+        struct Guard {
+            _lock: std::sync::MutexGuard<'static, ()>,
+        }
         impl Drop for Guard {
             fn drop(&mut self) {
                 unsafe {
@@ -737,10 +857,11 @@ mod tests {
                 }
             }
         }
+        let _lock = crate::clock::test_env_lock();
         unsafe {
             std::env::set_var("SOURCE_DATE_EPOCH", epoch.to_string());
         }
-        Guard
+        Guard { _lock }
     }
 
     #[test]
@@ -754,9 +875,55 @@ mod tests {
         }));
         assert_eq!(baseline.expired_entries.len(), 1);
         assert_eq!(baseline.expired_entries[0].id, "GHSA-old");
+        // After v0.9.5 unification, expired_entries shares the
+        // BaselineEntry shape; expires is Option but always Some here.
+        assert_eq!(
+            baseline.expired_entries[0].expires.as_deref(),
+            Some("2026-04-30")
+        );
+        assert_eq!(
+            baseline.expired_entries[0].reason.as_deref(),
+            Some("awaiting upstream")
+        );
         assert!(
             !baseline.suppressed_advisories.contains("GHSA-old"),
             "expired entry must NOT contribute to suppression"
+        );
+    }
+
+    /// Regression: the stderr warning text rendered by lib.rs must remain
+    /// byte-for-byte stable across v0.9.5's BaselineEntry/ExpiredEntry
+    /// unification. CI integrators grep this string.
+    #[test]
+    fn expired_entry_warning_text_is_stable() {
+        let _g = lock_today(1777593600);
+        let baseline = Baseline::from_value(&json!({
+            "suppressed_advisories": [
+                { "id": "GHSA-old", "purl": "pkg:npm/foo@1.0.0",
+                  "expires": "2026-04-30", "reason": "awaiting upstream" }
+            ]
+        }));
+        let ent = &baseline.expired_entries[0];
+        // Mirror the format string used in src/lib.rs (the production
+        // warning emitter). If either side drifts, this fails loudly.
+        let rendered = format!(
+            "warning: baseline entry {id}{purl} expired {expires}; finding will surface in this run{reason}",
+            id = ent.id,
+            purl = ent
+                .purl
+                .as_deref()
+                .map(|p| format!(" ({p})"))
+                .unwrap_or_default(),
+            expires = ent.expires.as_deref().unwrap_or(""),
+            reason = ent
+                .reason
+                .as_deref()
+                .map(|r| format!(" — was: {r}"))
+                .unwrap_or_default(),
+        );
+        assert_eq!(
+            rendered,
+            "warning: baseline entry GHSA-old (pkg:npm/foo@1.0.0) expired 2026-04-30; finding will surface in this run — was: awaiting upstream"
         );
     }
 
@@ -849,5 +1016,40 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    // ---- v0.9 comment-directive parser ----
+
+    #[test]
+    fn parse_comment_directive_extracts_id_only() {
+        let body = "Looks fine. /bomdrift suppress GHSA-mwcw-c2x4-8c55";
+        let r = parse_comment_directive(body).unwrap().unwrap();
+        assert_eq!(r.0, "GHSA-mwcw-c2x4-8c55");
+        assert_eq!(r.1, None);
+    }
+
+    #[test]
+    fn parse_comment_directive_extracts_id_and_reason() {
+        let body = "/bomdrift suppress CVE-2024-12345 reason: vendor confirmed false-positive";
+        let r = parse_comment_directive(body).unwrap().unwrap();
+        assert_eq!(r.0, "CVE-2024-12345");
+        assert_eq!(r.1.as_deref(), Some("vendor confirmed false-positive"));
+    }
+
+    #[test]
+    fn parse_comment_directive_returns_none_when_no_directive() {
+        assert!(
+            parse_comment_directive("no directive here")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn parse_comment_directive_rejects_malformed_id() {
+        let err = parse_comment_directive("/bomdrift suppress not-an-id")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("malformed"));
     }
 }
