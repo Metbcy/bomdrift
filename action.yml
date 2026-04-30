@@ -135,6 +135,154 @@ inputs:
       https://metbcy.github.io/bomdrift/sarif.html for wiring details.
     default: 'false'
 
+  # ---- VEX (v0.9.7+ action surface; CLI shipped in v0.9) --------------------
+
+  vex:
+    description: |
+      Path(s) to OpenVEX documents to consume when rendering the diff.
+      One path per line; each is passed as a repeated `--vex <path>` flag
+      to the CLI. See https://metbcy.github.io/bomdrift/vex.html.
+    default: ''
+  emit-vex:
+    description: |
+      Path to write a fresh OpenVEX document derived from the diff
+      findings. Maps to `--emit-vex <path>`.
+    default: ''
+  vex-author:
+    description: |
+      Author identity recorded in the emitted OpenVEX document. Maps to
+      `--vex-author <author>`.
+    default: ''
+  vex-default-justification:
+    description: |
+      OpenVEX `not_affected` justification ID to apply by default. Maps
+      to `--vex-default-justification <id>`.
+    default: ''
+
+  # ---- License policy (v0.9.7+ action surface; CLI shipped in v0.7-v0.9) ----
+
+  allow-licenses:
+    description: |
+      Comma-separated SPDX expressions to allow. Maps to
+      `--allow-licenses <SPDX,...>`. See
+      https://metbcy.github.io/bomdrift/license-policy.html.
+    default: ''
+  deny-licenses:
+    description: |
+      Comma-separated SPDX expressions to deny. Maps to
+      `--deny-licenses <SPDX,...>`.
+    default: ''
+  allow-exception:
+    description: |
+      Comma-separated SPDX exception identifiers to allow inside
+      `WITH` clauses. Maps to `--allow-exception <SPDX,...>`. v0.9.7
+      refines inheritance through compound expressions; see
+      https://metbcy.github.io/bomdrift/license-policy.html.
+    default: ''
+  deny-exception:
+    description: |
+      Comma-separated SPDX exception identifiers to deny. Maps to
+      `--deny-exception <SPDX,...>`.
+    default: ''
+  allow-ambiguous-licenses:
+    description: |
+      Treat license expressions that bomdrift cannot resolve as allowed
+      (default: deny). Maps to `--allow-ambiguous-licenses`.
+    default: 'false'
+
+  # ---- Enrichment toggles (v0.9.7+ action surface) --------------------------
+
+  no-epss:
+    description: |
+      Disable EPSS exploit-likelihood enrichment. Maps to `--no-epss`.
+    default: 'false'
+  no-kev:
+    description: |
+      Disable CISA KEV (Known Exploited Vulnerabilities) enrichment.
+      Maps to `--no-kev`.
+    default: 'false'
+  no-registry:
+    description: |
+      Disable registry / maintainer-age enrichment (no network calls to
+      the package registries). Maps to `--no-registry`.
+    default: 'false'
+
+  # ---- Failure thresholds (v0.9.7+ action surface) --------------------------
+
+  fail-on-epss:
+    description: |
+      Exit 2 when any new advisory has an EPSS score at or above this
+      threshold (0.0–1.0). Maps to `--fail-on-epss <FLOAT>`.
+    default: ''
+
+  # ---- Calibration knobs (v0.9.6 CLI; v0.9.7 action surface) ----------------
+
+  recently-published-days:
+    description: |
+      Window (days) for the "recently published" maintainer-age signal.
+      Maps to `--recently-published-days <N>`.
+    default: ''
+  typosquat-similarity-threshold:
+    description: |
+      Damerau-Levenshtein similarity threshold (0.0–1.0) for typosquat
+      detection. Higher = stricter. Maps to
+      `--typosquat-similarity-threshold <FLOAT>`.
+    default: ''
+  young-maintainer-days:
+    description: |
+      Age threshold (days) below which a maintainer account is flagged
+      as "young". Maps to `--young-maintainer-days <N>`.
+    default: ''
+  cache-ttl-hours:
+    description: |
+      TTL (hours) for the on-disk enrichment cache. Maps to
+      `--cache-ttl-hours <N>`.
+    default: ''
+  multi-major-delta:
+    description: |
+      Major-version delta at or above which the version-jump enricher
+      flags an upgrade as multi-major (default 2; minimum 1). Maps to
+      `--multi-major-delta <N>`. Introduced in v0.9.7.
+    default: ''
+
+  # ---- OCI attestation (v0.9.6 CLI; v0.9.7 action surface) ------------------
+
+  before-attestation:
+    description: |
+      OCI reference for the cosign attestation covering the "before"
+      SBOM. Maps to `--before-attestation <oci-ref>`. See
+      https://metbcy.github.io/bomdrift/attestation.html.
+    default: ''
+  after-attestation:
+    description: |
+      OCI reference for the cosign attestation covering the "after"
+      SBOM. Maps to `--after-attestation <oci-ref>`.
+    default: ''
+  cosign-identity:
+    description: |
+      Regex matched against the cosign certificate identity
+      (`--certificate-identity-regexp`). Maps to `--cosign-identity <regex>`.
+    default: ''
+  cosign-issuer:
+    description: |
+      OIDC issuer URL used for keyless cosign verification
+      (`--certificate-oidc-issuer`). Maps to `--cosign-issuer <url>`.
+    default: ''
+  require-attestation:
+    description: |
+      Fail the diff when either side is missing a verified attestation.
+      Maps to `--require-attestation`.
+    default: 'false'
+
+  # ---- Plugins (v0.9.6 CLI; v0.9.7 action surface) --------------------------
+
+  plugin:
+    description: |
+      Path(s) to bomdrift plugin manifests (`plugin.toml`). One path per
+      line; each is passed as a repeated `--plugin <path>` flag. See
+      https://metbcy.github.io/bomdrift/plugins.html.
+    default: ''
+
 runs:
   using: composite
   steps:
@@ -202,6 +350,30 @@ runs:
         INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
         BOMDRIFT_REPO_URL: 'https://github.com/${{ github.repository }}'
         UPLOAD_TO_CODE_SCANNING: ${{ inputs.upload-to-code-scanning }}
+        INPUT_VEX: ${{ inputs.vex }}
+        INPUT_EMIT_VEX: ${{ inputs.emit-vex }}
+        INPUT_VEX_AUTHOR: ${{ inputs.vex-author }}
+        INPUT_VEX_DEFAULT_JUSTIFICATION: ${{ inputs.vex-default-justification }}
+        INPUT_ALLOW_LICENSES: ${{ inputs.allow-licenses }}
+        INPUT_DENY_LICENSES: ${{ inputs.deny-licenses }}
+        INPUT_ALLOW_EXCEPTION: ${{ inputs.allow-exception }}
+        INPUT_DENY_EXCEPTION: ${{ inputs.deny-exception }}
+        INPUT_ALLOW_AMBIGUOUS_LICENSES: ${{ inputs.allow-ambiguous-licenses }}
+        INPUT_NO_EPSS: ${{ inputs.no-epss }}
+        INPUT_NO_KEV: ${{ inputs.no-kev }}
+        INPUT_NO_REGISTRY: ${{ inputs.no-registry }}
+        INPUT_FAIL_ON_EPSS: ${{ inputs.fail-on-epss }}
+        INPUT_RECENTLY_PUBLISHED_DAYS: ${{ inputs.recently-published-days }}
+        INPUT_TYPOSQUAT_SIMILARITY_THRESHOLD: ${{ inputs.typosquat-similarity-threshold }}
+        INPUT_YOUNG_MAINTAINER_DAYS: ${{ inputs.young-maintainer-days }}
+        INPUT_CACHE_TTL_HOURS: ${{ inputs.cache-ttl-hours }}
+        INPUT_MULTI_MAJOR_DELTA: ${{ inputs.multi-major-delta }}
+        INPUT_BEFORE_ATTESTATION: ${{ inputs.before-attestation }}
+        INPUT_AFTER_ATTESTATION: ${{ inputs.after-attestation }}
+        INPUT_COSIGN_IDENTITY: ${{ inputs.cosign-identity }}
+        INPUT_COSIGN_ISSUER: ${{ inputs.cosign-issuer }}
+        INPUT_REQUIRE_ATTESTATION: ${{ inputs.require-attestation }}
+        INPUT_PLUGIN: ${{ inputs.plugin }}
 
     # Code Scanning upload is opt-in. Requires the calling workflow to grant
     # `permissions.security-events: write`. We only run when the user

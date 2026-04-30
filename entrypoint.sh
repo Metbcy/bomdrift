@@ -393,10 +393,60 @@ main() {
     sarif_args=(--output-file "$sarif_path")
   fi
 
+  # ---- v0.9.7 action surface: map exposed CLI flags --------------------------
+  #
+  # Each block is independent so an empty input contributes nothing to the
+  # ARGS array and bomdrift sees the same invocation as before. Multi-line
+  # inputs (vex, plugin) iterate; comma-list inputs (allow-licenses, …) are
+  # passed through as a single flag value because the CLI accepts the
+  # comma-joined form natively.
+
+  local extra_args=()
+
+  # Multi-line: --vex (repeatable)
+  if [ -n "${INPUT_VEX:-}" ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] && extra_args+=(--vex "$line")
+    done <<< "$INPUT_VEX"
+  fi
+  # Multi-line: --plugin (repeatable)
+  if [ -n "${INPUT_PLUGIN:-}" ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] && extra_args+=(--plugin "$line")
+    done <<< "$INPUT_PLUGIN"
+  fi
+
+  # Single-value string flags
+  [ -n "${INPUT_EMIT_VEX:-}" ]                && extra_args+=(--emit-vex "$INPUT_EMIT_VEX")
+  [ -n "${INPUT_VEX_AUTHOR:-}" ]              && extra_args+=(--vex-author "$INPUT_VEX_AUTHOR")
+  [ -n "${INPUT_VEX_DEFAULT_JUSTIFICATION:-}" ] && extra_args+=(--vex-default-justification "$INPUT_VEX_DEFAULT_JUSTIFICATION")
+  [ -n "${INPUT_ALLOW_LICENSES:-}" ]          && extra_args+=(--allow-licenses "$INPUT_ALLOW_LICENSES")
+  [ -n "${INPUT_DENY_LICENSES:-}" ]           && extra_args+=(--deny-licenses "$INPUT_DENY_LICENSES")
+  [ -n "${INPUT_ALLOW_EXCEPTION:-}" ]         && extra_args+=(--allow-exception "$INPUT_ALLOW_EXCEPTION")
+  [ -n "${INPUT_DENY_EXCEPTION:-}" ]          && extra_args+=(--deny-exception "$INPUT_DENY_EXCEPTION")
+  [ -n "${INPUT_FAIL_ON_EPSS:-}" ]            && extra_args+=(--fail-on-epss "$INPUT_FAIL_ON_EPSS")
+  [ -n "${INPUT_RECENTLY_PUBLISHED_DAYS:-}" ] && extra_args+=(--recently-published-days "$INPUT_RECENTLY_PUBLISHED_DAYS")
+  [ -n "${INPUT_TYPOSQUAT_SIMILARITY_THRESHOLD:-}" ] && extra_args+=(--typosquat-similarity-threshold "$INPUT_TYPOSQUAT_SIMILARITY_THRESHOLD")
+  [ -n "${INPUT_YOUNG_MAINTAINER_DAYS:-}" ]   && extra_args+=(--young-maintainer-days "$INPUT_YOUNG_MAINTAINER_DAYS")
+  [ -n "${INPUT_CACHE_TTL_HOURS:-}" ]         && extra_args+=(--cache-ttl-hours "$INPUT_CACHE_TTL_HOURS")
+  [ -n "${INPUT_MULTI_MAJOR_DELTA:-}" ]       && extra_args+=(--multi-major-delta "$INPUT_MULTI_MAJOR_DELTA")
+  [ -n "${INPUT_BEFORE_ATTESTATION:-}" ]      && extra_args+=(--before-attestation "$INPUT_BEFORE_ATTESTATION")
+  [ -n "${INPUT_AFTER_ATTESTATION:-}" ]       && extra_args+=(--after-attestation "$INPUT_AFTER_ATTESTATION")
+  [ -n "${INPUT_COSIGN_IDENTITY:-}" ]         && extra_args+=(--cosign-identity "$INPUT_COSIGN_IDENTITY")
+  [ -n "${INPUT_COSIGN_ISSUER:-}" ]           && extra_args+=(--cosign-issuer "$INPUT_COSIGN_ISSUER")
+
+  # Boolean flags
+  [ "${INPUT_ALLOW_AMBIGUOUS_LICENSES:-false}" = "true" ] && extra_args+=(--allow-ambiguous-licenses)
+  [ "${INPUT_NO_EPSS:-false}" = "true" ]                  && extra_args+=(--no-epss)
+  [ "${INPUT_NO_KEV:-false}" = "true" ]                   && extra_args+=(--no-kev)
+  [ "${INPUT_NO_REGISTRY:-false}" = "true" ]              && extra_args+=(--no-registry)
+  [ "${INPUT_REQUIRE_ATTESTATION:-false}" = "true" ]      && extra_args+=(--require-attestation)
+
   set +e
   run_diff "$bin" "$before" "$after" "$output_format" "$input_format" \
     "${config_args[@]}" "${fail_on_args[@]}" "${baseline_args[@]}" \
     "${focus_args[@]}" "${budget_args[@]}" "${sarif_args[@]}" \
+    "${extra_args[@]}" \
     | tee "$out_file"
   rc="${PIPESTATUS[0]}"
   set -e
@@ -435,7 +485,8 @@ main() {
       set +e
       run_diff "$bin" "$before" "$after" "$output_format" "$input_format" \
         "${config_args[@]}" "${fail_on_args[@]}" "${baseline_args[@]}" \
-        "${focus_args[@]}" "${budget_args[@]}" --summary-only > "$summary_file"
+        "${focus_args[@]}" "${budget_args[@]}" \
+        "${extra_args[@]}" --summary-only > "$summary_file"
       set -e
       body="$(cat "$summary_file")"
       rm -f "$summary_file"
