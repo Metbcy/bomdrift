@@ -52,6 +52,36 @@ Commit bodies should explain *why*, not *what* — `git diff` shows the
 *what*. Multi-line commit messages are fine; use the heredoc
 `git commit -m "$(cat <<'EOF' ... EOF)"` pattern for readability.
 
+### Commit signing on `main`
+
+`main` enforces `required_signatures` via the repository ruleset.
+**This does NOT mean PR contributors need GPG/SSH signing keys
+configured.** Here's how it actually shakes out:
+
+| You're a... | Do you need to sign? |
+|---|---|
+| Contributor opening a PR from a fork or feature branch | **No.** Push commits as-is. The maintainer chooses the merge method. |
+| Maintainer merging via `gh pr merge --merge` | **No.** GitHub's web-UI key signs the merge commit; it counts as verified. |
+| Maintainer merging via `gh pr merge --squash` | **No.** Same — GitHub signs the squash commit. |
+| Maintainer merging via `gh pr merge --rebase` | **Yes.** Rebase replays your PR commits verbatim onto `main`, so they must already be signed. |
+| Anyone pushing directly to `main` | **Yes** (and the ruleset blocks it via `pull_request` anyway, so this only matters for emergency bypass). |
+
+Practical rule of thumb for contributors: **don't worry about it**.
+The maintainer will pick the right merge method.
+
+If you'd like your commits to land verbatim on `main` for git-blame
+attribution (and want to use rebase-merge), set up local signing once:
+
+```bash
+# SSH-key signing (simplest, no GPG headache)
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519.pub
+git config --global commit.gpgsign true
+```
+
+Then add the same SSH public key to your GitHub account under
+[SSH and GPG keys → Signing keys](https://github.com/settings/keys).
+
 ### Branch model
 
 Single-purpose feature branches off `main`, merged via merge-commits
