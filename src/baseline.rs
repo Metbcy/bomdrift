@@ -852,12 +852,16 @@ mod tests {
         }
         impl Drop for Guard {
             fn drop(&mut self) {
+                // SAFETY: env mutation guarded by the `_lock` field below
+                // which holds the crate-wide `clock::test_env_lock()`
+                // mutex for the lifetime of this Guard.
                 unsafe {
                     std::env::remove_var("SOURCE_DATE_EPOCH");
                 }
             }
         }
         let _lock = crate::clock::test_env_lock();
+        // SAFETY: env mutation serialized by the `_lock` mutex guard above.
         unsafe {
             std::env::set_var("SOURCE_DATE_EPOCH", epoch.to_string());
         }

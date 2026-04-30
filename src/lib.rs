@@ -1,3 +1,5 @@
+#![warn(clippy::undocumented_unsafe_blocks)]
+
 pub mod attestation;
 pub mod baseline;
 pub mod cli;

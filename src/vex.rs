@@ -1120,6 +1120,8 @@ mod tests {
         lock
     }
     fn unpin_clock() {
+        // SAFETY: caller must hold the `pin_clock` mutex guard for the
+        // duration of this call so env mutation stays serialized.
         unsafe {
             std::env::remove_var("SOURCE_DATE_EPOCH");
         }

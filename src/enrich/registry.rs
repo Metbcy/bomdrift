@@ -671,6 +671,7 @@ mod tests {
         }
         let d = days_since("2026-05-01T00:00:00Z").unwrap();
         assert_eq!(d, 0);
+        // SAFETY: serialized by the env_lock guard above.
         unsafe {
             std::env::remove_var("SOURCE_DATE_EPOCH");
         }

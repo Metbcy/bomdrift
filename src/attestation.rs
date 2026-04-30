@@ -302,8 +302,14 @@ mod tests {
         // Restore PATH BEFORE asserting so a panic doesn't leave the
         // test environment in a weird state for parallel tests.
         match prev_path {
-            Some(p) => unsafe { std::env::set_var("PATH", p) },
-            None => unsafe { std::env::remove_var("PATH") },
+            Some(p) => {
+                // SAFETY: still serialized via the test_env_lock guard held above.
+                unsafe { std::env::set_var("PATH", p) }
+            }
+            None => {
+                // SAFETY: still serialized via the test_env_lock guard held above.
+                unsafe { std::env::remove_var("PATH") }
+            }
         }
         let _ = std::fs::remove_dir_all(&dir);
 
@@ -327,9 +333,16 @@ mod tests {
             "https://example.com",
         );
 
+        // SAFETY: still serialized via the test_env_lock guard held above.
         match prev_path {
-            Some(p) => unsafe { std::env::set_var("PATH", p) },
-            None => unsafe { std::env::remove_var("PATH") },
+            Some(p) => {
+                // SAFETY: still serialized via the test_env_lock guard held above.
+                unsafe { std::env::set_var("PATH", p) }
+            }
+            None => {
+                // SAFETY: still serialized via the test_env_lock guard held above.
+                unsafe { std::env::remove_var("PATH") }
+            }
         }
 
         let err = result.expect_err("must surface clear error when cosign is missing");
