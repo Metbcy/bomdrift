@@ -142,6 +142,13 @@ pub fn extract_sbom_from_envelope(stdout: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )]
     use super::*;
     use base64::engine::general_purpose::STANDARD as B64;
 

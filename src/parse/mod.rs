@@ -135,6 +135,13 @@ pub(crate) fn hash_alg(s: &str) -> HashAlg {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )]
     use super::*;
     use serde_json::json;
 

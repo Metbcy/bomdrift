@@ -929,11 +929,23 @@ pub fn emit(
         "version": 1,
         "statements": statements_json,
     });
-    serde_json::to_string_pretty(&doc).expect("serialize OpenVEX doc")
+    #[allow(
+        clippy::expect_used,
+        reason = "invariant: serde_json::to_string_pretty cannot fail on a Value built from owned data with string keys"
+    )]
+    serde_json::to_string_pretty(&doc)
+        .expect("invariant: serde_json::to_string_pretty cannot fail on a Value built from owned data with string keys")
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )]
     use super::*;
     use std::io::Write as _;
 

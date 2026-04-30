@@ -275,6 +275,13 @@ fn style_for(tone: Tone) -> Style {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )]
     use super::*;
     use crate::model::{Component, Ecosystem, Relationship};
 

@@ -93,6 +93,13 @@ pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )]
     use super::*;
 
     /// Re-export at module level for the existing tests below.

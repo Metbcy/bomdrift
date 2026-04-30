@@ -394,6 +394,13 @@ fn default_fetcher(url: &str) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )]
     use super::*;
 
     const SAMPLE_MARKDOWN: &str = "\

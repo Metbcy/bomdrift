@@ -1,4 +1,6 @@
 #![warn(clippy::undocumented_unsafe_blocks)]
+#![warn(clippy::unwrap_used, clippy::expect_used)]
+#![warn(clippy::panic, clippy::todo, clippy::unimplemented)]
 
 pub mod attestation;
 pub mod baseline;
@@ -923,6 +925,13 @@ fn write_attestation_calibration<W: std::io::Write>(
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )]
     use super::*;
     use std::collections::HashMap;
 
