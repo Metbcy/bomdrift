@@ -935,7 +935,7 @@ mod tests {
         assert_eq!(r1, r2, "byte-equal across runs");
         let v: Value = serde_json::from_str(&r1).unwrap();
         let fp = &v["runs"][0]["results"][0]["partialFingerprints"]["primaryHash/v1"];
-        assert!(fp.is_string(), "fingerprint missing: {}", v);
+        assert!(fp.is_string(), "fingerprint missing: {v}");
         assert_eq!(fp.as_str().unwrap().len(), 64);
     }
 

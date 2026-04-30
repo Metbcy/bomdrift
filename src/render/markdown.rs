@@ -464,10 +464,10 @@ pub fn render_with_options(cs: &ChangeSet, enrichment: &Enrichment, opts: Option
 /// the most-actionable item in the section (e.g. `top severity: CRITICAL`)
 /// so the reviewer knows whether expanding is worth their time.
 fn section_open(out: &mut String, label: &str, count: usize, teaser: Option<&str>) {
-    let _ = writeln!(out, "### {} ({})\n", label, count);
+    let _ = writeln!(out, "### {label} ({count})\n");
     out.push_str("<details><summary>Show details");
     if let Some(t) = teaser {
-        let _ = write!(out, " · {}", t);
+        let _ = write!(out, " · {t}");
     }
     // Blank line after `</summary>` is required by GitHub-Flavored Markdown
     // for the markdown body inside `<details>` to render as markdown rather

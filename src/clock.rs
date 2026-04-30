@@ -71,7 +71,7 @@ pub fn is_expired(expires: Date) -> bool {
 /// Convenience: parse a `YYYY-MM-DD` string and return whether it has
 /// expired relative to `today()`. Surface parse errors to caller.
 pub fn is_expired_str(s: &str) -> Result<bool> {
-    parse_ymd(s).map(is_expired).map_err(|e| anyhow!("{}", e))
+    parse_ymd(s).map(is_expired).map_err(|e| anyhow!("{e}"))
 }
 
 #[cfg(test)]
