@@ -7,6 +7,145 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-04-29
+
+The "finish the roadmap" milestone. v0.9.6 closes out every entry in the
+prior roadmap's "Future candidates (not committed)" section — by shipping
+it, by closing it as a non-goal, or by documenting the explicit upstream
+blocker. Headline new features: **OCI attestation verification** via
+`cosign verify-attestation`, an **external-process plugin system** for
+custom rules, full **CLI calibration knobs** for the remaining hardcoded
+thresholds, and a **comprehensive documentation refresh** across every
+chapter to reflect v0.7 → v0.9.6 reality.
+
+### Added
+
+- **OCI attestation verification.** `bomdrift diff
+  --before-attestation <oci-ref> --after-attestation <oci-ref>` shells
+  out to `cosign verify-attestation --type=cyclonedx`, parses the
+  in-toto envelope, and feeds the verified SBOM payload into the
+  standard parser. New `--cosign-identity <regex>` and
+  `--cosign-issuer <url>` flags pass through to cosign's
+  `--certificate-identity-regexp` / `--certificate-oidc-issuer`. New
+  `--require-attestation` boolean refuses falling back to the
+  `--before` / `--after` file flags so production CI gates can enforce
+  attested SBOMs only. Documented in `docs/src/attestation.md`. New
+  `attestation` row in `--debug-calibration` so users can confirm
+  cosign accepted the right cert.
+- **External-process plugin system.** New `--plugin
+  <path-to-plugin.toml>` flag (repeatable). Plugin manifest in TOML
+  (`name` / `description` / `exec` / `timeout_ms` / `invoke_on`).
+  bomdrift invokes the plugin once per Added or VersionChanged
+  component with JSON on stdin (`{component, event, before}`) and
+  parses JSON from stdout (`{findings: [...]}`). Best-effort: timeout,
+  non-zero exit, or malformed JSON drops the offending plugin's
+  findings and logs a warning at `BOMDRIFT_DEBUG=1`; the rest of the
+  diff renders. New `bomdrift.plugin` SARIF rule with stable
+  `partialFingerprints` per `(plugin_name, purl, rule_id)`. Worked
+  example shipped under `examples/plugins/banned-packages/`.
+  Documented in `docs/src/plugins.md`. Protocol carries
+  `protocol_version: 1` for forward-compat.
+- **CLI calibration knobs** for the three previously-hardcoded
+  thresholds:
+  - `--typosquat-similarity-threshold <FLOAT>` (default `0.92`,
+    validated 0.0..=1.0).
+  - `--young-maintainer-days <i64>` (default `90`, validated >= 1).
+  - `--cache-ttl-hours <u64>` (default `24`, validated >= 1; applies
+    uniformly to OSV / EPSS / KEV / Registry caches).
+  - Matching `[diff]` config keys: `typosquat_similarity_threshold`,
+    `young_maintainer_days`, `cache_ttl_hours`.
+  - `--debug-calibration` rows now emit the *active* threshold rather
+    than the hardcoded default, so calibration data collection
+    reflects the real run.
+
+### Changed
+
+- **`CACHE_TTL_SECS` unified.** Previously duplicated in four
+  modules (`src/enrich/{cache,epss,kev,registry}.rs`). Now a single
+  source of truth in `src/enrich/cache.rs` with `effective_ttl_secs`
+  helper that honors per-run overrides without globals.
+- **Comprehensive documentation refresh** across every chapter.
+  Notable updates:
+  - `README.md` rewritten with capability-grouped feature list
+    (Ingest / Enrichers / Suppression / Output / Forge /
+    Extensibility / Packaging) and a 5-column comparison table
+    against Socket / Snyk / Trivy / OSV-Scanner / Grype with 11
+    feature-row dimensions sourced from the v0.7-v0.9 competitor
+    research doc.
+  - `docs/src/cli-reference.md` rewritten end-to-end. Every CLI flag
+    now documented and grouped by purpose (Output / Suppression /
+    Enrichment / Calibration / License / Failure thresholds /
+    Forge / Attestation / Plugins / Diagnostics) with each entry
+    annotated with introduced-in version.
+  - `docs/src/architecture.md` module map expanded to cover the 8
+    modules added across v0.7-v0.9.6 (`config`, `clock`,
+    `attestation`, `plugin`, `vex`, `epss`, `kev`, `registry`,
+    `license`); new "Best-effort enricher contract" and
+    "Byte-determinism contract" subsections; approved-deps table
+    including `base64 = "0.22"` (v0.9.6) and `spdx = "=0.10.9"`
+    exact pin (v0.9.5).
+  - `docs/src/baseline.md` 6-row schema-reference table for the
+    unified `BaselineEntry` (id / purl / expires / reason /
+    vex_status / vex_justification).
+  - Per-enricher chapters (`docs/src/enrichers/{typosquat,
+    maintainer-age,version-jump,kev,epss,registry}.md`) gained
+    consistent Calibration + Disabling + See-also subsections;
+    overview table grew from 4 to 9 rows.
+  - `docs/src/SUMMARY.md` reorganized into Output / Enrichers /
+    Suppressions / Advanced groups for new-reader navigation.
+  - `CONTRIBUTING.md` "Test conventions (v0.9.5+)" subsection added
+    documenting the `clock::test_env_lock()` recipe; "Adding a new
+    enricher" and "Adding a new finding kind" worked recipes.
+  - Stale content rewritten across multiple chapters
+    (`gitlab-ci.md`'s v0.7-deferred section now covers what v0.9
+    actually shipped; release-signing pins refreshed; etc.).
+
+### Roadmap
+
+- Closed out every "Future candidates" entry from the v0.9.5
+  roadmap with explicit dispositions:
+  - **Reachability** → moved to Non-goals (pair with Endor / Snyk).
+  - **GraphQL maintainer-age** → decided: REST stays
+    (cursor-pagination-cost analysis lifted into the maintainer
+    enricher's module doc).
+  - **VEX vocabulary beyond OpenVEX 8 justifications** →
+    spec-bound; documented in `docs/src/vex.md` that bomdrift
+    follows the OpenVEX 0.2.0 vocab verbatim.
+  - **PyPI / crates.io maintainer-set-changed** → moved to a new
+    "Blocked on upstream" subsection with the precise API gap
+    documented (PyPI lacks per-version maintainers; crates.io
+    lacks per-version `published_by` history).
+- Calibration backlog section removed entirely — every threshold
+  (similarity, young-maintainer-days, recently-published-days,
+  cache-ttl-hours) is now CLI/config-configurable.
+
+### Deps
+
+- Added `base64 = "0.22"` for the cosign in-toto envelope payload
+  decode in `src/attestation.rs`. Already a transitive dep via
+  `ureq`; promoted to direct so we own the pin.
+
+### Tests
+
+- 389 → 420 (+31). Plugin manifest parse, plugin success/timeout/
+  non-zero-exit/malformed-output paths, attestation envelope parse,
+  fake-cosign integration test (PATH-injection with serialized env
+  lock), calibration knobs override default + reflect in
+  `--debug-calibration`, cache-TTL override per enricher.
+
+### Scope notes
+
+What stayed deferred to v1.0 candidates (carried to roadmap "Blocked
+on upstream" or new "Future candidates"):
+
+- PyPI / crates.io maintainer-set-changed (upstream API blockers).
+- WASM / sandboxed plugin model (current external-process model
+  works; revisit if demand materializes).
+- Bitbucket / Azure DevOps action-side `vex:` / `emit-vex:` /
+  `plugin:` inputs (CLI surface is broader than action surface).
+- Multi-major version-jump `MIN_MAJOR_DELTA` calibration knob
+  (only remaining hardcoded threshold; revisit with calibration data).
+
 ## [0.9.5] - 2026-04-29
 
 The "polish + multi-SCM parity" milestone. v0.9.5 ships the v0.9 follow-up
