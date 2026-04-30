@@ -18,6 +18,7 @@ use anyhow::Result;
 use serde::Deserialize;
 
 use crate::enrich::Enrichment;
+use crate::enrich::cache::CACHE_TTL_SECS;
 
 const KEV_FEED_URL: &str =
     "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
@@ -25,7 +26,6 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const SUBDIR: &str = "kev";
 const CACHE_FILE: &str = "catalog.json";
 /// 24h — KEV publishes daily.
-const CACHE_TTL_SECS: u64 = 24 * 60 * 60;
 
 #[derive(Deserialize, Debug)]
 struct KevFeed {

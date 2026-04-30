@@ -18,10 +18,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::diff::ChangeSet;
+use crate::enrich::cache::CACHE_TTL_SECS;
 use crate::model::{Component, Ecosystem};
 
 const SUBDIR: &str = "registry";
-const CACHE_TTL_SECS: u64 = 24 * 60 * 60;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Default "recently published" age threshold (days). Components with

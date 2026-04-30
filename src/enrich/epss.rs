@@ -20,6 +20,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::enrich::Enrichment;
+use crate::enrich::cache::CACHE_TTL_SECS;
 
 const EPSS_API_URL: &str = "https://api.first.org/data/v1/epss";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -28,7 +29,6 @@ const MAX_BATCH: usize = 100;
 const SUBDIR: &str = "epss";
 /// 24 hours — same TTL as the OSV cache so successive PR pushes within a
 /// work session hit cache.
-const CACHE_TTL_SECS: u64 = 24 * 60 * 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CacheEntry {
