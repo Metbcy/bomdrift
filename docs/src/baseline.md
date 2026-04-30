@@ -328,8 +328,8 @@ entries continue to parse as the back-compat case):
 | `vex_justification` | string | no | v0.9 | OpenVEX justification when `vex_status = not_affected`. E.g., `vulnerable_code_not_in_execute_path`, `component_not_present`. |
 
 Cross-link: `vex_status` and `vex_justification` are passthrough to the
-[VEX emit format](./vex.md#emitting-vex---emit-vex). The
-[License policy](./license-policy.md#suppressing-license-violations)
+[VEX emit format](./vex.md#emitting-vex). The
+[License policy](./license-policy.md#suppression)
 chapter covers using baseline entries to suppress `LicenseViolation`
 findings (the same `id` / `purl` / `reason` schema applies; license
 violations key by a synthetic ID `bomdrift.license-violation:<purl>`).

@@ -13,7 +13,7 @@ via Sigstore + GitHub OIDC. This means:
 ## Verifying a release manually
 
 ```bash
-VERSION=v0.3.0
+VERSION=v0.9.6
 TARGET=x86_64-unknown-linux-gnu
 ARCHIVE=bomdrift-${VERSION}-${TARGET}.tar.gz
 
