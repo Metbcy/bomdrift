@@ -45,7 +45,7 @@ Recent incidents bomdrift would have surfaced:
 
 The dimensions adopters actually filter on. Sourced from
 [`files/competitor-research-v0.7-v0.9.md`](./files/competitor-research-v0.7-v0.9.md);
-correct as of v0.9.7.
+correct as of v0.9.8.
 
 |                                          | bomdrift | Socket | Snyk | Trivy | OSV-Scanner | Grype |
 |------------------------------------------|:---:|:---:|:---:|:---:|:---:|:---:|
@@ -94,7 +94,7 @@ jobs:
         #   verify-signatures: true   (set false on trusted mirrors)
 ```
 
-Pin to `@v1` for the latest v0.x; pin to `@v0.9.7` for reproducible builds. Run `bomdrift init` if you want a checked-in `.bomdrift.toml` policy and both workflows scaffolded locally. See the [Action reference](https://metbcy.github.io/bomdrift/github-action.html) for every input — including `upload-to-code-scanning`, `verify-signatures`, `comment-size-limit`, and the `before-sbom`/`after-sbom` escape hatch.
+Pin to `@v1` for the latest v0.x; pin to `@v0.9.8` for reproducible builds. Run `bomdrift init` if you want a checked-in `.bomdrift.toml` policy and both workflows scaffolded locally. See the [Action reference](https://metbcy.github.io/bomdrift/github-action.html) for every input — including `upload-to-code-scanning`, `verify-signatures`, `comment-size-limit`, and the `before-sbom`/`after-sbom` escape hatch.
 
 **Other forges:** GitLab CI, Bitbucket Pipelines, and Azure DevOps Pipelines all have ready-to-copy templates under [`examples/`](./examples/) and dedicated docs chapters: [GitLab CI](https://metbcy.github.io/bomdrift/gitlab-ci.html), [Bitbucket](https://metbcy.github.io/bomdrift/bitbucket.html), [Azure DevOps](https://metbcy.github.io/bomdrift/azure-devops.html). Comment-driven `/bomdrift suppress` works on all four SCMs via the Cloudflare Worker bridges added in v0.9.5.
 
@@ -127,7 +127,7 @@ Comment `/bomdrift suppress GHSA-xxxx` on any PR; the sub-action appends to `.bo
 Pre-built binaries cover Linux x86_64 + aarch64, macOS aarch64, and Windows x86_64. Each archive is cosign-signed via Sigstore + GitHub OIDC.
 
 ```bash
-VERSION=v0.9.7
+VERSION=v0.9.8
 TARGET=x86_64-unknown-linux-gnu
 curl -sSL -o bomdrift.tar.gz \
   "https://github.com/Metbcy/bomdrift/releases/download/${VERSION}/bomdrift-${VERSION}-${TARGET}.tar.gz"
@@ -143,7 +143,7 @@ Verify the archive's signature before you trust the binary — see [Release sign
 ### From source
 
 ```bash
-cargo install --locked --git https://github.com/Metbcy/bomdrift --tag v0.9.7 bomdrift
+cargo install --locked --git https://github.com/Metbcy/bomdrift --tag v0.9.8 bomdrift
 ```
 
 Requires Rust 1.85+ (the project uses edition 2024).
@@ -279,7 +279,7 @@ Every release archive is signed with cosign keyless via Sigstore (GitHub OIDC).
 
 ```bash
 # Replace VERSION + TARGET with your downloaded archive's pair
-VERSION=v0.9.7
+VERSION=v0.9.8
 TARGET=x86_64-unknown-linux-gnu
 ARCHIVE=bomdrift-${VERSION}-${TARGET}.tar.gz
 
