@@ -191,6 +191,32 @@ pub fn render_with_color(cs: &ChangeSet, enrichment: &Enrichment, color: ColorCh
         out.push('\n');
     }
 
+    if !enrichment.plugin_findings.is_empty() {
+        let _ = writeln!(
+            out,
+            "Plugin findings ({}):",
+            enrichment.plugin_findings.len()
+        );
+        for f in &enrichment.plugin_findings {
+            let (token, tone) = match f.severity {
+                crate::plugin::PluginSeverity::Info => ("[PLG]", Tone::Info),
+                crate::plugin::PluginSeverity::Warning => ("[PLG]", Tone::Caution),
+                crate::plugin::PluginSeverity::Error => ("[PLG]", Tone::High),
+            };
+            let _ = writeln!(
+                out,
+                "  {} {} :: {} :: {} - {} ({})",
+                tag(token, tone, color),
+                f.plugin_name,
+                f.component_purl,
+                f.kind,
+                f.message,
+                f.rule_id,
+            );
+        }
+        out.push('\n');
+    }
+
     out
 }
 

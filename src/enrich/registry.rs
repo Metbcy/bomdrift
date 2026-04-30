@@ -21,7 +21,6 @@ use crate::diff::ChangeSet;
 use crate::model::{Component, Ecosystem};
 
 const SUBDIR: &str = "registry";
-const CACHE_TTL_SECS: u64 = 24 * 60 * 60;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Default "recently published" age threshold (days). Components with
@@ -80,18 +79,30 @@ struct CacheEntry {
 }
 
 /// Run the registry enrichers. `recently_published_days` overrides
-/// [`MIN_PUBLISHED_AGE_DAYS`] when `Some`.
-pub fn enrich(cs: &ChangeSet, recently_published_days: Option<i64>) -> RegistryFindings {
-    enrich_with(cs, recently_published_days, DEFAULT_TIMEOUT)
+/// [`MIN_PUBLISHED_AGE_DAYS`] when `Some`. `cache_ttl_hours` overrides
+/// the default 24h on-disk cache TTL when `Some`.
+pub fn enrich(
+    cs: &ChangeSet,
+    recently_published_days: Option<i64>,
+    cache_ttl_hours: Option<u64>,
+) -> RegistryFindings {
+    enrich_with(
+        cs,
+        recently_published_days,
+        cache_ttl_hours,
+        DEFAULT_TIMEOUT,
+    )
 }
 
 fn enrich_with(
     cs: &ChangeSet,
     recently_published_days: Option<i64>,
+    cache_ttl_hours: Option<u64>,
     timeout: Duration,
 ) -> RegistryFindings {
     let mut out = RegistryFindings::default();
     let threshold = recently_published_days.unwrap_or(MIN_PUBLISHED_AGE_DAYS);
+    let ttl_secs = crate::enrich::cache::effective_ttl_secs(cache_ttl_hours);
     let agent = ureq::AgentBuilder::new().timeout(timeout).build();
     let cache_root = cache_root();
 
@@ -99,7 +110,7 @@ fn enrich_with(
         let Some(eco) = supported_ecosystem(c) else {
             continue;
         };
-        let Some(entry) = lookup(&agent, cache_root.as_ref(), eco, &c.name) else {
+        let Some(entry) = lookup(&agent, cache_root.as_ref(), eco, &c.name, ttl_secs) else {
             continue;
         };
         // Recently-published check: prefer per-version date if known,
@@ -132,7 +143,13 @@ fn enrich_with(
         let Some(RegEco::Npm) = supported_ecosystem(after) else {
             continue;
         };
-        let Some(entry) = lookup(&agent, cache_root.as_ref(), RegEco::Npm, &after.name) else {
+        let Some(entry) = lookup(
+            &agent,
+            cache_root.as_ref(),
+            RegEco::Npm,
+            &after.name,
+            ttl_secs,
+        ) else {
             continue;
         };
         let bef = entry
@@ -201,9 +218,10 @@ fn lookup(
     cache_root: Option<&PathBuf>,
     eco: RegEco,
     name: &str,
+    ttl_secs: u64,
 ) -> Option<CacheEntry> {
     if let Some(root) = cache_root
-        && let Some(cached) = read_cache(root, eco, name)
+        && let Some(cached) = read_cache(root, eco, name, ttl_secs)
     {
         return Some(cached);
     }
@@ -371,11 +389,16 @@ fn cache_path(root: &std::path::Path, eco: RegEco, name: &str) -> PathBuf {
         .join(format!("{}.json", sanitize(name)))
 }
 
-fn read_cache(root: &std::path::Path, eco: RegEco, name: &str) -> Option<CacheEntry> {
+fn read_cache(
+    root: &std::path::Path,
+    eco: RegEco,
+    name: &str,
+    ttl_secs: u64,
+) -> Option<CacheEntry> {
     let p = cache_path(root, eco, name);
     let body = std::fs::read(&p).ok()?;
     let entry: CacheEntry = serde_json::from_slice(&body).ok()?;
-    if now_secs().saturating_sub(entry.fetched_at) > CACHE_TTL_SECS {
+    if now_secs().saturating_sub(entry.fetched_at) > ttl_secs {
         return None;
     }
     Some(entry)

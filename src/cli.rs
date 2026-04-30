@@ -210,9 +210,14 @@ impl From<Platform> for markdown::Platform {
 #[derive(Args, Debug)]
 pub struct DiffArgs {
     /// Path to the "before" SBOM (CycloneDX, SPDX, or Syft JSON).
-    pub before: PathBuf,
+    /// Optional when `--before-attestation` is used to fetch the SBOM
+    /// from an OCI registry instead.
+    #[arg(required_unless_present = "before_attestation")]
+    pub before: Option<PathBuf>,
     /// Path to the "after" SBOM (CycloneDX, SPDX, or Syft JSON).
-    pub after: PathBuf,
+    /// Optional when `--after-attestation` is used.
+    #[arg(required_unless_present = "after_attestation")]
+    pub after: Option<PathBuf>,
     /// Path to a repo policy config file. When omitted, `.bomdrift.toml` is
     /// loaded if it exists in the current working directory.
     #[arg(long)]
@@ -388,6 +393,58 @@ pub struct DiffArgs {
     /// the OpenVEX spec.
     #[arg(long)]
     pub vex_default_justification: Option<String>,
+    /// Override the typosquat similarity threshold (default 0.92).
+    /// Range 0.0 - 1.0 inclusive. Lower values surface more findings
+    /// (and more false positives); higher values cut down to only
+    /// near-perfect matches. v0.9.6+.
+    #[arg(long, value_parser = parse_similarity_threshold)]
+    pub typosquat_similarity_threshold: Option<f64>,
+    /// Override the maintainer-age young-maintainer-days threshold
+    /// (default 90 days). Components whose top contributor's first
+    /// commit is younger than this trip a `YoungMaintainer` finding.
+    /// Must be >= 1. v0.9.6+.
+    #[arg(long, value_parser = clap::value_parser!(i64).range(1..))]
+    pub young_maintainer_days: Option<i64>,
+    /// Override the on-disk cache TTL in hours (default 24). Applies
+    /// uniformly to OSV / EPSS / KEV / Registry caches. Must be >= 1.
+    /// v0.9.6+.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    pub cache_ttl_hours: Option<u64>,
+    /// Fetch the "before" SBOM as a cosign-verified attestation
+    /// attached to an OCI artifact instead of reading a local file.
+    /// Mutually exclusive with the positional `before` argument.
+    /// Requires `--cosign-identity` and `--cosign-issuer`. v0.9.6+.
+    #[arg(long, conflicts_with = "before")]
+    pub before_attestation: Option<String>,
+    /// Fetch the "after" SBOM as a cosign-verified attestation
+    /// attached to an OCI artifact. v0.9.6+.
+    #[arg(long, conflicts_with = "after")]
+    pub after_attestation: Option<String>,
+    /// Regex passed to `cosign verify-attestation
+    /// --certificate-identity-regexp`. Required when either
+    /// `--before-attestation` or `--after-attestation` is set.
+    /// Example: `https://github.com/owner/.+`. v0.9.6+.
+    #[arg(long)]
+    pub cosign_identity: Option<String>,
+    /// URL passed to `cosign verify-attestation
+    /// --certificate-oidc-issuer`. Required alongside
+    /// `--cosign-identity`. Example:
+    /// `https://token.actions.githubusercontent.com`. v0.9.6+.
+    #[arg(long)]
+    pub cosign_issuer: Option<String>,
+    /// Refuse to fall back to local-file SBOMs: both sides MUST come
+    /// from a verified OCI attestation. Implies that
+    /// `--before-attestation` and `--after-attestation` are both set.
+    /// v0.9.6+.
+    #[arg(long)]
+    pub require_attestation: bool,
+    /// Path to a plugin manifest TOML. Repeatable. Each plugin is an
+    /// external executable invoked once per added / version-changed
+    /// component with JSON over stdin/stdout. Plugin failures (timeout,
+    /// non-zero exit, malformed JSON) drop their findings without
+    /// failing the diff. v0.9.6+.
+    #[arg(long, action = clap::ArgAction::Append)]
+    pub plugin: Vec<PathBuf>,
     #[arg(long)]
     pub debug_calibration: bool,
     /// Format for `--debug-calibration` rows. `pipe` (default, back-compat
@@ -485,4 +542,17 @@ impl InputFormat {
             InputFormat::Syft => Some(SbomFormat::Syft),
         }
     }
+}
+
+/// Clap value parser for `--typosquat-similarity-threshold`. Rejects
+/// values outside the inclusive 0.0..=1.0 range with a clear message
+/// (clap's built-in numeric range parser doesn't support `f64`).
+fn parse_similarity_threshold(s: &str) -> Result<f64, String> {
+    let v: f64 = s
+        .parse()
+        .map_err(|_| format!("expected a float in 0.0..=1.0, got {s:?}"))?;
+    if !v.is_finite() || !(0.0..=1.0).contains(&v) {
+        return Err(format!("expected a float in 0.0..=1.0, got {v}"));
+    }
+    Ok(v)
 }

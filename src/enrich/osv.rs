@@ -42,11 +42,21 @@ pub fn enrich(cs: &ChangeSet) -> Result<Enrichment> {
 /// Like [`enrich`] but lets the caller opt out of the on-disk severity cache
 /// (`bomdrift diff --no-osv-cache`).
 pub fn enrich_cached(cs: &ChangeSet, no_cache: bool) -> Result<Enrichment> {
+    enrich_cached_with_ttl(cs, no_cache, None)
+}
+
+/// Like [`enrich_cached`] but lets the caller override the cache TTL
+/// (driven by `--cache-ttl-hours`). `None` means use the default.
+pub fn enrich_cached_with_ttl(
+    cs: &ChangeSet,
+    no_cache: bool,
+    cache_ttl_hours: Option<u64>,
+) -> Result<Enrichment> {
     let purls = candidate_purls(cs);
     if purls.is_empty() {
         return Ok(Enrichment::default());
     }
-    let cache = crate::enrich::cache::open_unless_disabled(no_cache);
+    let cache = crate::enrich::cache::open_unless_disabled_with_ttl(no_cache, cache_ttl_hours);
     enrich_with(
         &purls,
         OSV_BATCH_URL,
@@ -169,6 +179,7 @@ fn enrich_with(
         maintainer_set_changed: Vec::new(),
         vex_annotations: std::collections::HashMap::new(),
         vex_suppressed_count: 0,
+        plugin_findings: Vec::new(),
     })
 }
 

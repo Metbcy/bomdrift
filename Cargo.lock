@@ -126,6 +126,7 @@ name = "bomdrift"
 version = "0.9.5"
 dependencies = [
  "anyhow",
+ "base64",
  "clap",
  "criterion",
  "directories",
