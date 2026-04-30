@@ -29,6 +29,12 @@ bomdrift diff before.json after.json --fail-on-epss 0.5
 Exits 2 when any advisory has score ≥ 0.5. 0.5 is roughly the top decile
 of actively-exploited CVEs; tune for your team's risk appetite.
 
+## Calibration
+
+- `--cache-ttl-hours <N>` (v0.9.6+) — overrides the default 24h disk
+  cache TTL for the EPSS scores cache.
+- `--fail-on-epss <FLOAT>` — threshold gate; see [Threshold gating](#threshold-gating).
+
 ## Disabling
 
 ```bash

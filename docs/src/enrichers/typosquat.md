@@ -172,6 +172,37 @@ of truth; refreshing those means editing `data/<eco>-top*.txt` and
 rebuilding bomdrift. PRs adding names to the curated lists are
 welcome.
 
+## Calibration
+
+### `--typosquat-similarity-threshold <FLOAT>` (v0.9.6+)
+
+Default `0.92`, range `[0.0, 1.0]`. Configurable via CLI flag or
+`[diff] typosquat_similarity_threshold = <float>` in `.bomdrift.toml`.
+
+The threshold applies to the JW + suffix-boost path (npm, PyPI, Cargo,
+RubyGems, NuGet, Go, Composer). The Maven Levenshtein-≤-2 path is
+hardcoded — Levenshtein distance and JW similarity aren't directly
+comparable, so a single threshold flag would either over- or
+under-suppress on Maven.
+
+Recommended ranges:
+
+- `0.95` — very strict; only catches near-perfect matches. Good for
+  tightening down false positives in monorepos with many internally
+  forked dependencies.
+- `0.92` (default) — calibrated against the top-1000-of-each-ecosystem
+  test corpus to produce zero false positives there.
+- `0.85` — lenient; catches softer near-misses at the cost of more
+  false positives. Useful for paranoid security review of brand-new
+  PyPI / npm packages.
+
+The threshold also appears in `--debug-calibration` rows so collected
+samples can guide tuning:
+
+```
+typosquat|<purl>|<similarity_score>|0.92
+```
+
 ## False-positive management
 
 The structural rules + thresholds aim for "no false positives on the
@@ -183,8 +214,17 @@ wild:
 2. Open a PR. Tightening the rule (rather than special-casing the
    package name) is preferred — drives a cleaner heuristic.
 
-If you discover a false negative (a real typosquat that *should* fire
-but doesn't):
+## Disabling
 
-1. Same — add a regression test that fires, then tweak the algorithm
-   until it does.
+Pure compute, no network. There is no `--no-typosquat` flag — disabling
+the typosquat enricher would defeat its primary purpose. To suppress
+*specific* false-positive findings, hand-curate a per-component baseline
+entry; see [Baseline & suppression — Worked example](../baseline.md#worked-example-triaging-a-false-positive).
+
+To gate exit code on typosquat findings, use `--fail-on typosquat`.
+
+## See also
+
+- [CLI reference — `--typosquat-similarity-threshold`](../cli-reference.md#--typosquat-similarity-threshold-float)
+- [`bomdrift refresh-typosquat`](../cli-reference.md#bomdrift-refresh-typosquat)
+- [Baseline — false-positive triage](../baseline.md#worked-example-triaging-a-false-positive)

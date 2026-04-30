@@ -34,13 +34,27 @@ A registry timeout, parse error, or unsupported ecosystem returns
 `Ok` with no findings. Diff rendering NEVER blocks on registry
 responses.
 
-## Flags
+## Calibration
 
-- `--no-registry` — skip all three checks (alias to disabling the
-  `[diff] no_registry = true` config key).
 - `--recently-published-days <N>` — override the default 14-day
   threshold. Set `--recently-published-days 0` to disable that check
   while keeping deprecation / maintainer-set-changed.
+- `--cache-ttl-hours <N>` (v0.9.6+) — overrides the default 24h disk
+  cache TTL for the per-ecosystem registry caches.
+
+## Disabling
+
+```bash
+bomdrift diff before.json after.json --no-registry
+```
+
+Disables all three checks at once. Equivalent to `[diff] no_registry =
+true` in `.bomdrift.toml`.
+
+## Flags
+
+- `--no-registry` — skip all three checks.
+- `--recently-published-days <N>` — see [Calibration](#calibration).
 - `--fail-on recently-published`, `--fail-on deprecated` — exit-2
   thresholds.
 

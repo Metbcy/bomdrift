@@ -18,15 +18,16 @@ their first PR less than 90 days ago" at the moment a new dep is added.
 
 ## Threshold
 
-**90 days.** Intentionally aggressive: most legitimate new packages will
-trip this on initial introduction. That's fine — a human reviewer can
-dismiss "the package is brand-new and the author is its only maintainer"
-trivially.
+**90 days** by default. Intentionally aggressive: most legitimate new
+packages will trip this on initial introduction. That's fine — a human
+reviewer can dismiss "the package is brand-new and the author is its
+only maintainer" trivially.
 
 The expensive miss is the **silent takeover** of an existing package by
 a recently-arrived contributor, which is what the 90-day window
-captures. Tune later if the false-positive rate is unworkable in
-practice.
+captures. Tune for your environment via `--young-maintainer-days <N>`
+or `[diff] young_maintainer_days = <N>` (v0.9.6+); see
+[Calibration](#calibration) below.
 
 ## How it works
 
@@ -43,9 +44,10 @@ For each `cs.added` component with a GitHub `source_url`:
    "first commit by author" pagination trick is slow on prolific
    contributors (last page can be page 50+) but is correct without
    needing the GraphQL API.
-5. **Compare against the SBOM-after timestamp** (or `Utc::now()` when
-   the SBOM lacks a metadata timestamp). Flag when the first commit
-   is younger than `YOUNG_MAINTAINER_DAYS = 90`.
+5. **Compare against the SBOM-after timestamp** (or `clock::now()` when
+   the SBOM lacks a metadata timestamp). Flag when the first commit is
+   younger than `YOUNG_MAINTAINER_DAYS` (default 90; tunable via
+   `--young-maintainer-days <N>` in v0.9.6+).
 
 ## Skipped cases
 
@@ -73,9 +75,31 @@ requests.
   transitive crates. Hand-rolled `ureq` GETs + a 25-line ISO-8601
   parser keep the bomdrift binary under our 5 MB target.
 
-## `--no-maintainer-age`
+## Calibration
 
-Skip the entire enricher (no GitHub API calls). Required for:
+`--young-maintainer-days <N>` (CLI; v0.9.6+) or `[diff]
+young_maintainer_days = <N>` in `.bomdrift.toml` overrides the 90-day
+default. Must be `>= 1`.
+
+Recommended ranges:
+
+- `30`–`60` for paranoid security-sensitive monorepos.
+- `90` (default) for general-purpose use; the calibration target for
+  the xz pattern.
+- `180` for ecosystems with high contributor churn where the default
+  surfaces too many legitimate first-time-author packages.
+
+The threshold also appears in `--debug-calibration` rows so collected
+samples can guide tuning:
+
+```
+maintainer-age|<purl>|<days_since_first_commit>|90
+```
+
+## Disabling
+
+`--no-maintainer-age` skips the entire enricher (no GitHub API calls).
+Required for:
 
 - Offline runs and tests.
 - CI environments where `GITHUB_TOKEN` is unset and the
@@ -92,21 +116,24 @@ bomdrift diff before.json after.json --no-maintainer-age
 Always informational. The maintainer-age signal **never** trips
 `--fail-on critical-cve`; it surfaces only under `--fail-on any`. The
 intent is for human review, not gating: many legitimate packages have
-brand-new authors, and the 90-day threshold is calibrated to surface
-the xz-style pattern, not to fail the build automatically.
+brand-new authors, and the threshold is calibrated to surface the
+xz-style pattern, not to fail the build automatically.
 
-## Calibration roadmap
+## Calibration roadmap (v0.9.6+ status)
 
-The 90-day threshold is the v0.3 default. Future calibration possibilities:
+Past calibration backlog and how each item resolved:
 
-- **Tunable threshold flag** — `--maintainer-age-days <N>`. Trivial to
-  add; gated on someone wanting it (issue welcome).
-- **Multi-signal fusion** — combine maintainer-age with "package has
-  zero downloads" or "package was published yesterday" to narrow the
-  false-positive rate.
-- **GraphQL pagination** — replace the REST `last-page` trick with a
-  GraphQL query that returns the first commit's date directly. Cuts
-  one round-trip per component but adds a token requirement (the
-  GraphQL endpoint always wants auth).
+- **Tunable threshold flag** — *shipped in v0.9.6* as
+  `--young-maintainer-days <N>`. See [Calibration](#calibration) above.
+- **Multi-signal fusion** — combine maintainer-age with the registry
+  enricher's "recently-published" or "maintainer-set-changed" findings
+  to narrow the false-positive rate. The signals all surface in the
+  same diff today; explicit fusion in a single composite finding is a
+  v1.0 follow-up.
+- **GraphQL pagination** — *decided not to pursue.* Adds a token
+  requirement (the GraphQL endpoint always wants auth) for one
+  saved round-trip per component. The `last-page` REST trick is
+  documented as the canonical approach; see the module doc-comment in
+  `src/enrich/maintainer.rs` for the rationale.
 
 See [Roadmap](../roadmap.md) for the current backlog.
