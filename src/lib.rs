@@ -227,7 +227,7 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
                     .as_deref()
                     .map(|p| format!(" ({p})"))
                     .unwrap_or_default(),
-                expires = ent.expires,
+                expires = ent.expires.as_deref().unwrap_or(""),
                 reason = ent
                     .reason
                     .as_deref()
