@@ -353,6 +353,7 @@ fn invoke_blocking(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::model::{Ecosystem, Relationship};
 
     fn write_manifest(dir: &Path, body: &str) -> PathBuf {
@@ -374,6 +375,7 @@ mod tests {
         p
     }
 
+    #[cfg(unix)]
     fn comp(name: &str) -> Component {
         Component {
             name: name.to_string(),
@@ -424,17 +426,27 @@ exec = "./run.sh"
 
     #[test]
     fn manifest_parses_full_toml() {
+        // Use a platform-appropriate absolute path so this test runs
+        // identically on Unix and Windows. The semantic under test is
+        // "absolute path in TOML is preserved as-is, not joined to
+        // manifest dir."
+        #[cfg(unix)]
+        let abs_exec = "/abs/path/to/check";
+        #[cfg(windows)]
+        let abs_exec = "C:\\\\abs\\\\path\\\\to\\\\check";
         let dir = unique_dir("full-manifest");
         let path = write_manifest(
             &dir,
-            r#"
+            &format!(
+                r#"
 [plugin]
 name = "banned-packages"
 description = "Flag dependencies on org-banned packages"
-exec = "/abs/path/to/check"
+exec = "{abs_exec}"
 timeout_ms = 10000
 invoke_on = ["added"]
-"#,
+"#
+            ),
         );
         let m = load_manifest(&path).expect("parses");
         assert_eq!(m.name, "banned-packages");
@@ -444,7 +456,10 @@ invoke_on = ["added"]
         );
         assert_eq!(m.timeout_ms, 10000);
         assert_eq!(m.invoke_on, vec![InvokeEvent::Added]);
+        #[cfg(unix)]
         assert_eq!(m.exec, PathBuf::from("/abs/path/to/check"));
+        #[cfg(windows)]
+        assert_eq!(m.exec, PathBuf::from("C:\\abs\\path\\to\\check"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
