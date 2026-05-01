@@ -7,8 +7,65 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-04-30
+
+The "distribution release." Phase 1 of the bomdrift adoption plan: every
+plausible install path now works in one command. The release pipeline
+gains four new outputs — crates.io, ghcr.io, SLSA build provenance, and
+an automated `v1` major-tag retag — alongside the existing GitHub
+Release + cosign-signed archives. No source-code feature work; the
+v0.9.9 binary is functionally identical to the v0.9.8 binary.
+
+### Added
+
+- **`cargo install bomdrift` works.** The crate is now published to
+  crates.io. Cargo.toml gains `documentation = "https://docs.rs/bomdrift"`
+  and a `[package.metadata.docs.rs]` block so the auto-built docs.rs
+  page renders cleanly. The published-crate footprint is 54 files /
+  220 KiB compressed, achieved via an `exclude` list trimming `tests/`
+  (2.7 MB of fixtures), `docs/` (mdbook source), `examples/`,
+  `benches/`, `fuzz/`, `comment-suppress/`, `scripts/`, `.github/`, the
+  GitHub Action manifests, and the CONTRIBUTING / CODE_OF_CONDUCT /
+  STATUS files. `data/` (typosquat reference lists, `include_str!`'d
+  at compile time) stays in.
+- **`docker run ghcr.io/metbcy/bomdrift:latest` works.** A new
+  multi-arch (linux/amd64, linux/arm64) image is published to
+  GitHub Container Registry on every release. Single-stage Dockerfile;
+  the image consumes the cosign-signed binaries already produced by the
+  release matrix — no `cargo build` runs in the image. Distroless cc
+  base, runs as the distroless `nonroot` user, ~28 MB. Tag matrix:
+  `:vX.Y.Z`, `:vX.Y`, `:vX`, `:latest`. The image carries an inline
+  SLSA build provenance attestation (verify with
+  `gh attestation verify --owner Metbcy oci://ghcr.io/metbcy/bomdrift:vX.Y.Z`).
+- **SLSA build provenance attestations.** Every release archive AND
+  the multi-arch ghcr.io image are now covered by
+  `actions/attest-build-provenance@v2`. SLSA proves *"this artifact
+  was produced by the public release.yml workflow on tag X in this
+  repo"*; the existing cosign signatures continue to prove *"the
+  bomdrift maintainer's GitHub OIDC identity signed this artifact."*
+  Both verifications must pass for the release to be trustworthy. See
+  [docs/src/release-signing.md](docs/src/release-signing.md) for the
+  full threat-model framing and the
+  `gh attestation verify` / `slsa-verifier` recipes.
+- **`publish-dry-run` PR-time CI guard.** New `ci.yml` job runs
+  `cargo publish --dry-run --locked` on every PR. Catches
+  crate-metadata regressions (oversized package, missing required
+  fields, an `exclude` list change that drops a build-time
+  `include_str!` source) before they reach a release tag.
+
 ### Changed
 
+- **README install section ships three new install paths.** `cargo
+  install --locked bomdrift`, `docker run ghcr.io/metbcy/bomdrift`,
+  and the existing release-archive curl path are now equally
+  prominent. The from-source `cargo install --git` path stays as a
+  fourth option for adopters who want to track main.
+- **README badges expanded.** crates.io, docs.rs, and GitHub
+  Marketplace badges added at the top of the README. The CI / Release
+  / Docs / License badges are kept.
+- **GitHub Marketplace listing description rewritten.** Lead with the
+  axios narrative and the maintainer-age heuristic, drop generic
+  copy. (Marketplace dashboard edit, not a repo-file change.)
 - **Workflows opt into the Node.js 24 runner ahead of GitHub's
   2026-06-02 forced-default.** Every workflow now sets
   `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'` at the top-level
@@ -18,6 +75,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ci.yml`, `docs.yml`, `fuzz.yml`, `release.yml`, and
   `sbom-diff.yml`. Remove the env var once Node.js 24 is the default
   runtime (after 2026-09-16 per GitHub's deprecation timeline).
+- **`v1` major-version tag is now automated.** A new `retag-major`
+  job in `release.yml` force-pushes `v1` to point at the latest
+  release on every tag. Until v1.0.0 ships, the floating tag stays
+  `v1` (Marketplace already references it); from v1.0.0 onward, the
+  job switches to `v${major}`.
 
 ### Fixed
 
@@ -33,6 +95,52 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on-disk filename is still the standard one, so lcov-consuming tools
   work unchanged), and the comment links directly to the workflow
   run's artifacts tab so users have a real destination to follow.
+
+### Documentation
+
+- **`docs/src/release-signing.md` gains a SLSA provenance section.**
+  Frames cosign + SLSA as complementary, with the threat model where
+  each catches what the other misses. Includes
+  `gh attestation verify` (recommended) and `slsa-verifier`
+  (air-gapped) recipes, and the ghcr.io image attestation verification
+  path.
+- **Rustdoc cleanup.** Eight broken intra-doc links in module-level
+  docstrings (`MAX_QUERIES_PER_BATCH`, `SUFFIX_BOOST_SCORE`,
+  `run_with`, `eval_leaf`, `LeafOutcome`, `VulnRef`, `Cache::with_root`,
+  `crate::run_diff`) were either demoted to backtick-quoted code spans
+  (private items not visible to public docs) or fixed to use the
+  correct path after the v0.9.8 lib.rs split. Plus one redundant
+  explicit link target. `RUSTDOCFLAGS=-D warnings cargo doc --no-deps
+  --all-features` now passes; docs.rs auto-build is clean. No public
+  API change.
+- **README and STATUS.md drift fixed.** Removed STATUS.md's stale
+  Marketplace-publication-pending line (the listing has been live
+  since v0.9.8). README from-source bumped from v0.9.8 to v0.9.9.
+
+### Tests
+
+- 444 → 444 (no net change). Distribution-release plumbing only.
+
+### Scope notes — what's in v0.9.9 vs deferred
+
+In v0.9.9: crates.io, ghcr.io, SLSA, docs.rs, Marketplace polish,
+README badges + new install paths.
+
+Deferred (separate plans, not version-coupled):
+
+- Homebrew tap (`Metbcy/homebrew-tap` + `bomdrift.rb` formula).
+- nix flake, AUR PKGBUILD, winget + Scoop manifests.
+- README diet (the wall-of-text comparison table moves to
+  `docs/src/compare.md`).
+- Asciinema demo recorded against `examples/axios-incident/`.
+
+Deferred from v0.9.8 (held for the next code-hygiene release):
+
+- File splits for `vex.rs`, `render/markdown.rs`, `render/sarif.rs`,
+  `baseline.rs`, `enrich/typosquat.rs`, `enrich/license.rs`.
+- Mutation-testing audit via `cargo-mutants`.
+- Coverage `--fail-under-lines` ratchet (planned for "after 2-3
+  releases of visibility" — v0.9.9 is the second).
 
 ## [0.9.8] - 2026-04-30
 

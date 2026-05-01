@@ -1,15 +1,50 @@
 [package]
 name = "bomdrift"
-version = "0.9.8"
+version = "0.9.9"
 edition = "2024"
 rust-version = "1.88"
 description = "SBOM diff with supply-chain risk signals (CVEs, typosquats, maintainer-age)."
 license = "Apache-2.0"
 repository = "https://github.com/Metbcy/bomdrift"
 homepage = "https://metbcy.github.io/bomdrift/"
+documentation = "https://docs.rs/bomdrift"
 readme = "README.md"
 keywords = ["sbom", "security", "supply-chain", "cyclonedx", "spdx"]
 categories = ["command-line-utilities", "development-tools"]
+# Trim the published crate to source + runtime data + project meta.
+# - tests/ (2.7 MB of fixtures): fixtures pulled from upstream projects;
+#   downstream `cargo install` users don't run `cargo test`.
+# - docs/ (2.6 MB mdbook source): published separately at
+#   https://metbcy.github.io/bomdrift/.
+# - examples/, benches/, fuzz/: not needed for `cargo install`.
+# - comment-suppress/, action.yml, entrypoint.sh: GitHub Action
+#   surface, distributed via the Marketplace and cosign-signed
+#   release archives, not the crate.
+# - .github/, scripts/: repo-only meta.
+# - data/ stays IN — `src/enrich/typosquat.rs` `include_str!`s its
+#   contents at build time.
+exclude = [
+  "tests/",
+  "docs/",
+  "examples/",
+  "benches/",
+  "fuzz/",
+  "comment-suppress/",
+  "scripts/",
+  ".github/",
+  "action.yml",
+  "entrypoint.sh",
+  "STATUS.md",
+  "CODE_OF_CONDUCT.md",
+  "CONTRIBUTING.md",
+]
+
+[package.metadata.docs.rs]
+# Make every conditionally compiled item visible in the rendered docs
+# (no-op today since bomdrift has no `[features]` block, but
+# future-proofs the feature-flag story).
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [lib]
 name = "bomdrift"

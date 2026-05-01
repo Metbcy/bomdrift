@@ -3,6 +3,9 @@
 > **SBOM diff with supply-chain risk signals.** Flags new CVEs (with EPSS + CISA KEV signal), typosquats across 8 ecosystems, multi-major version jumps, young-maintainer takeovers, recently-published / deprecated / maintainer-set-changed registry signals, and license-policy violations on every changed dependency — posted as a comment on GitHub, GitLab, Bitbucket, or Azure DevOps PRs.
 
 [![CI](https://github.com/Metbcy/bomdrift/actions/workflows/ci.yml/badge.svg)](https://github.com/Metbcy/bomdrift/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/bomdrift.svg)](https://crates.io/crates/bomdrift)
+[![docs.rs](https://img.shields.io/docsrs/bomdrift)](https://docs.rs/bomdrift)
+[![GitHub Marketplace](https://img.shields.io/badge/marketplace-bomdrift-blue?logo=github)](https://github.com/marketplace/actions/bomdrift)
 [![Release](https://img.shields.io/github/v/release/Metbcy/bomdrift?sort=semver&display_name=tag)](https://github.com/Metbcy/bomdrift/releases/latest)
 [![Docs](https://img.shields.io/badge/docs-mdbook-blue)](https://metbcy.github.io/bomdrift/)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
@@ -124,10 +127,29 @@ Comment `/bomdrift suppress GHSA-xxxx` on any PR; the sub-action appends to `.bo
 
 ### As a binary (local / CI)
 
-Pre-built binaries cover Linux x86_64 + aarch64, macOS aarch64, and Windows x86_64. Each archive is cosign-signed via Sigstore + GitHub OIDC.
+Pre-built binaries cover Linux x86_64 + aarch64, macOS aarch64, and Windows x86_64. Each archive is cosign-signed via Sigstore + GitHub OIDC, and (v0.9.9+) carries a SLSA build provenance attestation.
+
+**Install via `cargo` (v0.9.9+):**
 
 ```bash
-VERSION=v0.9.8
+cargo install --locked bomdrift
+bomdrift --version
+```
+
+**Install via Docker / OCI (v0.9.9+):**
+
+```bash
+docker run --rm ghcr.io/metbcy/bomdrift:latest --version
+# Pin to a specific version for reproducible CI:
+docker run --rm ghcr.io/metbcy/bomdrift:v0.9.9 --version
+```
+
+The image is multi-arch (`linux/amd64`, `linux/arm64`), distroless, runs as a non-root user, and ships with an inline SLSA attestation (verify with `gh attestation verify --owner Metbcy oci://ghcr.io/metbcy/bomdrift:v0.9.9`).
+
+**Install from a release archive:**
+
+```bash
+VERSION=v0.9.9
 TARGET=x86_64-unknown-linux-gnu
 curl -sSL -o bomdrift.tar.gz \
   "https://github.com/Metbcy/bomdrift/releases/download/${VERSION}/bomdrift-${VERSION}-${TARGET}.tar.gz"
@@ -143,7 +165,7 @@ Verify the archive's signature before you trust the binary — see [Release sign
 ### From source
 
 ```bash
-cargo install --locked --git https://github.com/Metbcy/bomdrift --tag v0.9.8 bomdrift
+cargo install --locked --git https://github.com/Metbcy/bomdrift --tag v0.9.9 bomdrift
 ```
 
 Requires Rust 1.85+ (the project uses edition 2024).

@@ -35,7 +35,7 @@
 //! 3. **Suffix containment with a substantial added prefix → boost**. When
 //!    the candidate ends with a legit name (≥ 5 chars) AND the added prefix
 //!    is longer than 3 characters, the score is boosted to at least
-//!    [`SUFFIX_BOOST_SCORE`]. The textbook typosquat pattern:
+//!    `SUFFIX_BOOST_SCORE`. The textbook typosquat pattern:
 //!    `plain-crypto-js`, `safe-axios`, `secure-lodash`. The base
 //!    Jaro-Winkler similarity for these is low (the prefix kills it) but the
 //!    deceptive intent is unmistakable.

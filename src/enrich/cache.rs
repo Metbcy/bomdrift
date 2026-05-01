@@ -80,7 +80,7 @@ struct CacheEntry {
 }
 
 /// Filesystem-backed severity cache. Construct via [`Cache::open`] (production)
-/// or [`Cache::with_root`] (tests, when an explicit root is needed).
+/// or via the test-only `with_root` constructor (when an explicit root is needed).
 pub struct Cache {
     root: PathBuf,
     now_secs: fn() -> u64,
