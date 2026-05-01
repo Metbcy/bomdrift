@@ -4,7 +4,7 @@
 //!
 //! 1. **`/v1/querybatch`** — POST every purl of every component in
 //!    `ChangeSet.added` and the after-side of `ChangeSet.version_changed`,
-//!    chunked by [`MAX_QUERIES_PER_BATCH`]. Returns advisory IDs only.
+//!    chunked by `MAX_QUERIES_PER_BATCH`. Returns advisory IDs only.
 //! 2. **`/v1/vulns/{id}`** — GET each unique advisory ID returned in step 1
 //!    and parse `database_specific.severity` (GHSA's text label) to populate
 //!    [`crate::enrich::Severity`].
@@ -18,7 +18,7 @@
 //! Both stages are best-effort: callers should surface errors as warnings
 //! and continue rendering the diff. OSV being unreachable is not a reason to
 //! block a PR review. A failed /vulns/{id} lookup yields
-//! [`Severity::None`](crate::enrich::Severity::None) for that advisory and
+//! [`Severity::None`] for that advisory and
 //! a single stderr warning per run.
 
 use std::collections::{BTreeSet, HashMap};

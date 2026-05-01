@@ -7,7 +7,7 @@
 //! `CLICOLOR_FORCE` environment variables.
 //!
 //! The actual TTY check (so that piped output stays plain) lives in
-//! [`crate::run_diff`]; this module assumes the caller has already decided
+//! [`mod@crate::run`]; this module assumes the caller has already decided
 //! that ANSI is appropriate. Color emission is still further gated by
 //! `if_supports_color(Stdout, ...)` so even if invoked directly, output
 //! degrades gracefully when stdout cannot render escapes.

@@ -39,7 +39,7 @@
 //! ## Testability
 //!
 //! Network and filesystem are split off the public [`run`] entry point via
-//! [`run_with`], which accepts an injected fetcher closure and an explicit
+//! `run_with`, which accepts an injected fetcher closure and an explicit
 //! cache root. Tests use a fake fetcher returning canned anvaka markdown plus
 //! a tempdir cache root, so the test suite stays fully offline.
 

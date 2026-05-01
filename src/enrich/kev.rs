@@ -3,7 +3,7 @@
 //! Single bulk feed at
 //! <https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json>,
 //! refreshed daily. We download the catalog once per 24h, parse the
-//! `vulnerabilities[].cveID` field, and flip [`VulnRef::kev`] to true on
+//! `vulnerabilities[].cveID` field, and flip [`crate::enrich::VulnRef::kev`] to true on
 //! every reference whose primary id or aliases include a KEV CVE.
 //!
 //! Best-effort: network failure logs at `BOMDRIFT_DEBUG=1` and returns Ok
@@ -37,7 +37,7 @@ struct KevEntry {
     cve_id: String,
 }
 
-/// Apply KEV flags to every [`VulnRef`] in `e.vulns`. `--no-kev` callers
+/// Apply KEV flags to every [`crate::enrich::VulnRef`] in `e.vulns`. `--no-kev` callers
 /// should skip calling this entirely.
 pub fn enrich(e: &mut Enrichment) -> Result<()> {
     enrich_with_ttl(e, None)

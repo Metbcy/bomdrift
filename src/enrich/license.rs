@@ -26,8 +26,8 @@
 //!
 //! ## WITH-chain inheritance through compound expressions (v0.9.7+)
 //!
-//! Each leaf of an SPDX expression is evaluated by [`eval_leaf`] which
-//! produces a [`LeafOutcome`] reflecting BOTH the base license check
+//! Each leaf of an SPDX expression is evaluated by `eval_leaf` which
+//! produces a `LeafOutcome` reflecting BOTH the base license check
 //! AND the exception check. Those per-leaf outcomes are then combined
 //! by the standard SPDX expression semantics:
 //!

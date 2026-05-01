@@ -2,7 +2,7 @@
 //!
 //! EPSS publishes a per-CVE probability of exploitation in the next 30 days,
 //! refreshed daily. We query <https://api.first.org/data/v1/epss?cve=...>
-//! in batches and surface the score on every [`VulnRef`] whose primary id
+//! in batches and surface the score on every [`crate::enrich::VulnRef`] whose primary id
 //! or aliases include a CVE-prefixed identifier.
 //!
 //! Best-effort: a network failure or parse error logs to stderr at
@@ -35,7 +35,7 @@ struct CacheEntry {
     score: Option<f32>,
 }
 
-/// Apply EPSS scores to every [`VulnRef`] in `e.vulns`. Updates in place;
+/// Apply EPSS scores to every [`crate::enrich::VulnRef`] in `e.vulns`. Updates in place;
 /// `--no-epss` callers should skip calling this entirely. Best-effort.
 pub fn enrich(e: &mut Enrichment) -> Result<()> {
     enrich_with_ttl(e, None)
