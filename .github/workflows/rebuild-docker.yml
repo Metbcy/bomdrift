@@ -1,0 +1,125 @@
+name: rebuild-docker
+
+# Manual recovery workflow for the docker job in release.yml.
+#
+# Use this when:
+#   - The docker job in a release.yml run failed (after the GitHub
+#     Release was already created), and you want to publish the image
+#     for an existing tag without re-cutting a new release.
+#   - You need to rebuild an older image with a fresh attestation
+#     (e.g., key rotation, base-image security update — though that
+#     last case usually needs a new tag).
+#
+# Reuses the published GitHub Release archives as the binary source —
+# does NOT depend on any state from the original workflow run. The
+# cosign signatures + SLSA attestations on the source archives still
+# apply; this workflow produces a fresh image-level attestation.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to rebuild docker image for (e.g., v0.9.9)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  docker:
+    name: docker (ghcr.io)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Compute version tag components
+        id: ver
+        shell: bash
+        run: |
+          tag="${{ inputs.tag }}"
+          version="${tag#v}"
+          major="${version%%.*}"
+          rest="${version#*.}"
+          minor="${rest%%.*}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "major=v${major}" >> "$GITHUB_OUTPUT"
+          echo "minor=v${major}.${minor}" >> "$GITHUB_OUTPUT"
+
+      - name: Download release archives from the GitHub Release
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          tag="${{ inputs.tag }}"
+          base="https://github.com/Metbcy/bomdrift/releases/download/${tag}"
+          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+            archive="bomdrift-${tag}-${target}.tar.gz"
+            curl -fsSL -o "artifacts/${archive}" "${base}/${archive}"
+            curl -fsSL -o "artifacts/${archive}.sha256" "${base}/${archive}.sha256"
+          done
+          # Verify checksums before trusting the bytes for image baking.
+          (cd artifacts && sha256sum -c bomdrift-${tag}-x86_64-unknown-linux-gnu.tar.gz.sha256 \
+                                     bomdrift-${tag}-aarch64-unknown-linux-gnu.tar.gz.sha256)
+
+      - name: Stage Linux binaries by docker arch
+        shell: bash
+        run: |
+          tag="${{ inputs.tag }}"
+          mkdir -p dist/linux-amd64 dist/linux-arm64
+          tar -xzf "artifacts/bomdrift-${tag}-x86_64-unknown-linux-gnu.tar.gz" \
+            -C dist/linux-amd64 --strip-components=1 \
+            --wildcards '*/bomdrift'
+          tar -xzf "artifacts/bomdrift-${tag}-aarch64-unknown-linux-gnu.tar.gz" \
+            -C dist/linux-arm64 --strip-components=1 \
+            --wildcards '*/bomdrift'
+          ls -la dist/linux-amd64 dist/linux-arm64
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-arch image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: true
+          sbom: true
+          tags: |
+            ghcr.io/metbcy/bomdrift:${{ inputs.tag }}
+            ghcr.io/metbcy/bomdrift:${{ steps.ver.outputs.minor }}
+            ghcr.io/metbcy/bomdrift:${{ steps.ver.outputs.major }}
+            ghcr.io/metbcy/bomdrift:latest
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image with cosign (keyless)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign sign --yes \
+            "ghcr.io/metbcy/bomdrift@${{ steps.build.outputs.digest }}"
+
+      - name: Attest build provenance (image)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/metbcy/bomdrift
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

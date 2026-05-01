@@ -1,10 +1,15 @@
-# Keep the docker build context lean. Only the pre-staged release
-# binaries are needed; everything else (source tree, target/, docs/,
-# tests/, .git/, etc.) is excluded so:
+# Keep the docker build context lean. Allowlist: nothing from the
+# repo is in the docker build context except the pre-staged release
+# binaries and the Dockerfile itself.
 #
-# 1. Image rebuilds are fast (small context = small upload to buildx).
-# 2. There's no risk of accidentally baking a stale `target/` artifact
-#    or test fixture into the image.
+# `**` excludes everything; `!dist` re-includes the directory entry
+# so docker's walker descends into it; `!dist/**` re-includes the
+# files. Both negations are required — `!dist` alone produces an
+# empty directory in the build context, which is exactly the bug
+# v0.9.9's first release attempt hit (build context transferred 2B,
+# COPY failed with "not found" on every target arch).
 **
-!dist/
+!dist
+!dist/**
 !Dockerfile
+
