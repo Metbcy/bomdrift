@@ -37,9 +37,13 @@ jobs:
     name: docker (ghcr.io)
     runs-on: ubuntu-latest
     steps:
+      # Important: NOT checked out at the input tag. The Dockerfile
+      # and .dockerignore are read from the default branch (main).
+      # The tag's binaries are pulled from the GitHub Release below.
+      # This decouples "the image's recipe" from "the binaries baked
+      # into the image" — so a Dockerfile fix on main can rebuild
+      # any past tag's image without rewriting that tag.
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag }}
 
       - name: Compute version tag components
         id: ver
