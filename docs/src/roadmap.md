@@ -3,6 +3,53 @@
 What's planned, what's deliberately out of scope, and what the
 acceptance criteria for new contributions look like.
 
+## Shipped (v0.9.9 — distribution)
+
+The "distribution release." No source-code feature work; every install
+path now works in one command.
+
+- **`cargo install bomdrift`** — published to crates.io. Cargo
+  metadata + `[package.metadata.docs.rs]` + an `exclude` list trimming
+  the published crate to 220 KiB compressed. New `publish-dry-run`
+  PR-time CI guard.
+- **`docker run ghcr.io/metbcy/bomdrift:v0.9.9`** — multi-arch
+  (linux/amd64, linux/arm64) distroless image on every release. Tag
+  matrix `:vX.Y.Z`, `:vX.Y`, `:vX`, `:latest`.
+- **SLSA build provenance** on every release archive AND the ghcr.io
+  image, via `actions/attest-build-provenance@v2`. Verify with
+  `gh attestation verify` or `slsa-verifier`. Complementary to the
+  existing cosign keyless signatures — see
+  [Release signing](./release-signing.md).
+- **Automated `v1` major-tag retag** — `release.yml` force-pushes the
+  major-version tag (`v1` today; `v${major}` once v1.0.0 ships) to
+  point at the latest release on every tag.
+- **Manual recovery workflow** — new `rebuild-docker.yml` lets a
+  maintainer rebuild + push the docker image for any past tag without
+  re-cutting the release. Reads `Dockerfile` from `main` so future
+  fixes apply backwards.
+- **README + Marketplace polish** — crates.io / docs.rs / Marketplace
+  badges; rewritten Marketplace listing description leading with the
+  axios narrative.
+
+## Shipped (v0.9.8 — code-review-driven hardening)
+
+- **Continuous parser fuzzing** via `cargo-fuzz` against CycloneDX,
+  SPDX, and Syft JSON parsers. PR-time short pass + weekly long
+  scheduled run. See
+  [Continuous fuzzing](./development/fuzzing.md).
+- **CI coverage report** via `cargo-llvm-cov` with a sticky PR comment.
+  Informational; `--fail-under-lines` will be added once coverage is
+  visible across 2–3 releases.
+- **Production code audited for `unwrap`/`expect`/`panic`/`todo`/
+  `unimplemented`.** Crate-root `clippy::*` warns enforce going
+  forward. Zero production `.unwrap()` remain; remaining `.expect()`
+  sites carry rationale comments.
+- **All `unsafe` blocks documented with `// SAFETY:` comments**, with
+  `clippy::undocumented_unsafe_blocks` enforcing the contract.
+- **`src/lib.rs` 47 KB → 31 lines** — `run_diff` orchestration
+  extracted to `src/run.rs`. Public API surface preserved
+  byte-for-byte.
+
 ## Shipped (v0.9.7 — milestone follow-ups)
 
 - **SPDX `WITH`-chain exception inheritance** — `(X WITH ex) AND (Y)` /
@@ -132,9 +179,21 @@ See [CLI reference](./cli-reference.md) for flag forms.
 
 ## Future candidates (not committed)
 
-_Empty as of v0.9.6._ The previously listed candidates have all been
-shipped, marked non-goal, decided against, or moved to "Blocked on
-upstream" above. New post-v0.9.6 ideas land here as they emerge.
+Candidates that could land in a future release if maintainer time and
+adoption signal warrant:
+
+- **Homebrew tap** (`Metbcy/homebrew-tap`) — `brew install
+  Metbcy/tap/bomdrift`. macOS adopters reach for `brew install` first;
+  this closes the macOS install gap.
+- **`nix` flake, AUR `PKGBUILD`, `winget` + Scoop manifests** — the
+  Linux power-user and Windows-package-manager install paths.
+- **README diet** — move the comparison table to a dedicated
+  `compare.md` page, shorten the README to a one-screen pitch.
+- **`asciinema` demo** recorded against `examples/axios-incident/`,
+  embedded in the README and the docs landing page.
+- **Comparison docs (deep)** — `compare/socket.md`, `compare/snyk.md`,
+  `compare/trivy-grype-osv.md` — neutral-tone pages that explain
+  when to pick bomdrift vs. each competitor.
 
 ## Non-goals
 
@@ -216,3 +275,4 @@ A new enricher / output format / parser PR should:
    [Architecture](./architecture.md#why-no-async--tokio).
 
 See [Contributing](./contributing.md) for the development loop.
+

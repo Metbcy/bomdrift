@@ -25,7 +25,7 @@ jobs:
 ```
 
 The `@v1` mutable tag tracks the latest v0.x release. Pin to a specific
-version (`@v0.9.8`) if you prefer reproducible builds. See
+version (`@v0.9.9`) if you prefer reproducible builds. See
 [GitHub Action](./github-action.md) for every input.
 
 If you prefer a checked-in policy file, install the binary and run
@@ -35,11 +35,36 @@ instead of workflow YAML.
 
 ## Locally with the binary
 
-Pre-built binaries cover Linux x86_64 + aarch64, macOS aarch64, and
-Windows x86_64. Each archive is cosign-signed via Sigstore + GitHub OIDC.
+Three install paths are supported.
+
+### Via cargo (v0.9.9+)
 
 ```bash
-VERSION=v0.9.8
+cargo install --locked bomdrift
+bomdrift --version
+```
+
+### Via Docker / OCI (v0.9.9+)
+
+```bash
+docker run --rm ghcr.io/metbcy/bomdrift:latest --version
+# Pin to a specific version for reproducible CI:
+docker run --rm ghcr.io/metbcy/bomdrift:v0.9.9 --version
+```
+
+The image is multi-arch (`linux/amd64`, `linux/arm64`), distroless
+(`gcr.io/distroless/cc-debian13:nonroot`), and runs as a non-root user.
+Verify the inline SLSA attestation with
+`gh attestation verify --owner Metbcy oci://ghcr.io/metbcy/bomdrift:v0.9.9`.
+
+### Via release archive (cosign-signed)
+
+Pre-built binaries cover Linux x86_64 + aarch64, macOS aarch64, and
+Windows x86_64. Each archive is cosign-signed via Sigstore + GitHub OIDC
+and ships a SLSA build provenance attestation (v0.9.9+).
+
+```bash
+VERSION=v0.9.9
 TARGET=x86_64-unknown-linux-gnu
 curl -sSL -o bomdrift.tar.gz \
   "https://github.com/Metbcy/bomdrift/releases/download/${VERSION}/bomdrift-${VERSION}-${TARGET}.tar.gz"
@@ -57,13 +82,15 @@ tar -xzf bomdrift.tar.gz
 To verify the archive's signature before you trust the binary, see
 [Release signing](./release-signing.md).
 
-## From source
+### From source
 
 ```bash
-cargo install --locked --git https://github.com/Metbcy/bomdrift --tag v0.9.8 bomdrift
+cargo install --locked --git https://github.com/Metbcy/bomdrift --tag v0.9.9 bomdrift
 ```
 
-Requires Rust 1.85+ (the project uses edition 2024).
+Requires Rust 1.85+ (the project uses edition 2024). Prefer
+`cargo install bomdrift` (above) unless you specifically want to
+track an unreleased commit.
 
 ## First diff
 

@@ -39,10 +39,11 @@ documents that path; both flows continue to be supported in v1.
 
 ## Inputs
 
-The action exposes the full bomdrift CLI surface as inputs (v0.9.7+). For
-the canonical flag semantics see [CLI reference](./cli-reference.md); the
-tables below document only the action-side wrapper. Empty defaults mean
-"don't pass the flag" — bomdrift then uses its own CLI/config defaults.
+The action exposes the full bomdrift CLI surface as inputs (v0.9.7+
+input parity, current as of v0.9.9). For the canonical flag semantics
+see [CLI reference](./cli-reference.md); the tables below document only
+the action-side wrapper. Empty defaults mean "don't pass the flag" —
+bomdrift then uses its own CLI/config defaults.
 
 ### What's new in v0.9.7
 

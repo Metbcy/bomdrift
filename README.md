@@ -46,9 +46,7 @@ Recent incidents bomdrift would have surfaced:
 
 ## How it compares
 
-The dimensions adopters actually filter on. Sourced from
-[`files/competitor-research-v0.7-v0.9.md`](./files/competitor-research-v0.7-v0.9.md);
-correct as of v0.9.8.
+The dimensions adopters actually filter on. Correct as of v0.9.9.
 
 |                                          | bomdrift | Socket | Snyk | Trivy | OSV-Scanner | Grype |
 |------------------------------------------|:---:|:---:|:---:|:---:|:---:|:---:|
@@ -97,7 +95,7 @@ jobs:
         #   verify-signatures: true   (set false on trusted mirrors)
 ```
 
-Pin to `@v1` for the latest v0.x; pin to `@v0.9.8` for reproducible builds. Run `bomdrift init` if you want a checked-in `.bomdrift.toml` policy and both workflows scaffolded locally. See the [Action reference](https://metbcy.github.io/bomdrift/github-action.html) for every input — including `upload-to-code-scanning`, `verify-signatures`, `comment-size-limit`, and the `before-sbom`/`after-sbom` escape hatch.
+Pin to `@v1` for the latest v0.x; pin to `@v0.9.9` for reproducible builds. Run `bomdrift init` if you want a checked-in `.bomdrift.toml` policy and both workflows scaffolded locally. See the [Action reference](https://metbcy.github.io/bomdrift/github-action.html) for every input — including `upload-to-code-scanning`, `verify-signatures`, `comment-size-limit`, and the `before-sbom`/`after-sbom` escape hatch.
 
 **Other forges:** GitLab CI, Bitbucket Pipelines, and Azure DevOps Pipelines all have ready-to-copy templates under [`examples/`](./examples/) and dedicated docs chapters: [GitLab CI](https://metbcy.github.io/bomdrift/gitlab-ci.html), [Bitbucket](https://metbcy.github.io/bomdrift/bitbucket.html), [Azure DevOps](https://metbcy.github.io/bomdrift/azure-devops.html). Comment-driven `/bomdrift suppress` works on all four SCMs via the Cloudflare Worker bridges added in v0.9.5.
 
@@ -301,7 +299,7 @@ Every release archive is signed with cosign keyless via Sigstore (GitHub OIDC).
 
 ```bash
 # Replace VERSION + TARGET with your downloaded archive's pair
-VERSION=v0.9.8
+VERSION=v0.9.9
 TARGET=x86_64-unknown-linux-gnu
 ARCHIVE=bomdrift-${VERSION}-${TARGET}.tar.gz
 

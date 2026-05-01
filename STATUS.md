@@ -1,64 +1,87 @@
 # Project status
 
-bomdrift is usable today as a local CLI and as a composite GitHub Action,
-with first-class templates + comment-driven suppression bridges for GitLab
-CI, Bitbucket Pipelines, and Azure DevOps Pipelines. The v0.9.x line ships
-the last items off the public roadmap (calibration knobs, OCI attestation,
-a plugin system) while keeping the project OSS-first: no hosted dashboard,
-no account, no telemetry. v0.9.7 closes the v0.9.6 follow-up backlog
-(SPDX `WITH`-chain inheritance, last hardcoded threshold lifted, Windows
-plugin timeout, action.yml parity, air-gapped Sigstore).
+bomdrift is a single Rust binary + multi-SCM action that diffs two SBOMs
+and surfaces supply-chain risk signals at PR time. The v0.9.x line shipped
+the last items off the public feature roadmap (calibration knobs, OCI
+attestation, plugins) and v0.9.9 closes out the **distribution** push:
+`cargo install bomdrift`, `docker run ghcr.io/metbcy/bomdrift`, SLSA
+build provenance, docs.rs auto-build, and a polished GitHub Marketplace
+listing all work as of v0.9.9.
 
-## What's new in v0.9.7
+The project remains OSS-first: no hosted dashboard, no account, no
+telemetry.
 
-Five polish items closing the v0.9.6 follow-up backlog:
+## What's new in v0.9.9
 
-1. **SPDX `WITH`-chain exception inheritance.** `(X WITH ex) AND (Y)`
-   and `(X WITH ex_a) OR (X WITH ex_b)` now evaluate per-leaf with
-   proper AND/OR semantics: AND inherits a denied exception, OR
-   doesn't poison if another branch is permitted.
-2. **`--multi-major-delta <N>`.** Last hardcoded calibration threshold
-   lifted (default 2). Tunable via flag or `[diff] multi_major_delta`.
-3. **First-class Windows plugin timeout.** Replaced the manual
-   `Child::try_wait()` polling loop with the `wait-timeout` crate.
-4. **`action.yml` input parity** with the v0.7-v0.9.7 CLI surface.
-   Twenty-five new inputs cover VEX, license policy, enrichment
-   toggles, calibration, attestation, plugins.
-5. **Air-gapped / self-hosted Sigstore docs** — env-var passthrough
-   model documented (bomdrift inherits `SIGSTORE_REKOR_URL` etc.
-   without any flag-side changes).
+The "distribution release." No source-code feature work — the binary is
+functionally identical to v0.9.8 — but every install path now works in
+one command, and every release artifact carries both a cosign signature
+and a SLSA build provenance attestation.
 
-## What's new in v0.9.6
+1. **`cargo install bomdrift` works.** Published to crates.io. Cargo
+   metadata gains `documentation`, an `exclude` list trimming the
+   crate to 220 KiB compressed, and a `[package.metadata.docs.rs]`
+   block so the auto-built docs page renders cleanly. New
+   `publish-dry-run` PR-time CI guard catches metadata regressions
+   before the next release tag.
+2. **`docker run ghcr.io/metbcy/bomdrift:v0.9.9` works.** Multi-arch
+   (linux/amd64, linux/arm64) distroless image published to GitHub
+   Container Registry on every release. Single-stage Dockerfile;
+   consumes the cosign-signed binaries from the release matrix —
+   no `cargo build` runs in the image. Tag matrix `:vX.Y.Z`, `:vX.Y`,
+   `:vX`, `:latest`. Inline SLSA attestation on the image manifest.
+3. **SLSA build provenance.** Every release archive AND the multi-arch
+   ghcr.io image carry `actions/attest-build-provenance@v2`
+   attestations. Verify with `gh attestation verify --owner Metbcy
+   <archive>` or `slsa-verifier`. cosign keyless signatures continue
+   in parallel — see [release-signing.md](docs/src/release-signing.md)
+   for the cosign + SLSA threat-model framing.
+4. **Marketplace polish + README badges.** crates.io, docs.rs, and
+   GitHub Marketplace badges added at the top of the README. The
+   Marketplace listing description was rewritten to lead with the
+   axios narrative.
+5. **Automated `v1` major-tag retag.** `release.yml` now force-pushes
+   the major-version tag (currently `v1`; `v${major}` once v1.0.0
+   ships) to point at the latest release. Marketplace + sloppy
+   adopters consume the floating tag and now get the latest release
+   automatically.
 
-Four feature themes for skim-readers; full notes live in
-[CHANGELOG.md](./CHANGELOG.md):
+Manual recovery capability shipped alongside: a new `rebuild-docker.yml`
+workflow (`workflow_dispatch` with a `tag` input) lets a maintainer
+rebuild + push the docker image for any tag without re-cutting the
+whole release. It reads the current `Dockerfile` from `main`, so any
+future Dockerfile fix can rebuild any past tag's image.
 
-1. **Cache-TTL unification.** The four duplicated `CACHE_TTL_SECS`
-   constants (OSV, EPSS, KEV, registry) collapse into one shared
-   `enrich::cache::CACHE_TTL_SECS`. No behavior change at the default,
-   but a single source of truth for the calibration knob below.
-2. **Calibration knobs.** Three previously hardcoded thresholds become
-   user-tunable: `--typosquat-similarity-threshold` (default 0.92),
-   `--young-maintainer-days` (default 90), `--cache-ttl-hours`
-   (default 24). Matching `[diff]` config keys, all CLI-overridable.
-3. **OCI attestation verification.** New `--before-attestation` /
-   `--after-attestation` flags fetch the SBOM from an OCI registry as
-   a `cosign verify-attestation`-verified artifact. Required pair:
-   `--cosign-identity` (regex) + `--cosign-issuer` (URL).
-   `--require-attestation` refuses to fall back to local files. See
-   [docs/src/attestation.md](docs/src/attestation.md).
-4. **External-process plugin system.** New `--plugin <manifest.toml>`
-   (repeatable) lets organizations layer custom rules on top of
-   bomdrift's bundled enrichers. JSON over stdin/stdout; fail-soft.
-   Worked example at [`examples/plugins/banned-packages/`](examples/plugins/banned-packages/);
-   protocol reference at [docs/src/plugins.md](docs/src/plugins.md).
+## What's new in v0.9.8
+
+The "code-review-driven hardening" milestone:
+
+- **Continuous parser fuzzing** via `cargo-fuzz` against CycloneDX,
+  SPDX, and Syft JSON parsers. PR-time short pass + weekly long
+  scheduled run. See [development/fuzzing.md](docs/src/development/fuzzing.md).
+- **CI coverage report** via `cargo-llvm-cov` with a sticky PR comment.
+  Informational; `--fail-under-lines` will be added once coverage is
+  visible across 2–3 releases.
+- **`unwrap`/`expect`/`panic`/`todo`/`unimplemented` lints warn at
+  crate root.** Production code audited; remaining `.expect()` sites
+  carry rationale comments. Zero production `.unwrap()` remain.
+- **`unsafe` blocks all carry `// SAFETY:` comments** and the
+  `clippy::undocumented_unsafe_blocks` lint enforces it going
+  forward.
+- **`src/lib.rs` 47 KB → 31 lines.** Extracted the `run_diff`
+  orchestration into `src/run.rs`. Public API surface preserved
+  byte-for-byte.
+
+Full notes for both releases live in [CHANGELOG.md](./CHANGELOG.md).
 
 ## Current support
 
 | Area | Status |
 |---|---|
+| `cargo install bomdrift` | Supported (v0.9.9+) — see [crates.io](https://crates.io/crates/bomdrift) |
+| `docker run ghcr.io/metbcy/bomdrift` | Supported (v0.9.9+) — multi-arch (amd64, arm64), distroless |
 | GitHub.com pull requests | Supported through `Metbcy/bomdrift@v1` — see [github-action.md](docs/src/github-action.md) |
-| Local CLI | Supported on Linux x86_64 + aarch64, macOS aarch64, Windows x86_64 — see [quickstart.md](docs/src/quickstart.md) |
+| Local CLI binary | Supported on Linux x86_64 + aarch64, macOS aarch64, Windows x86_64 — see [quickstart.md](docs/src/quickstart.md) |
 | SBOM formats | CycloneDX 1.5 / 1.6 JSON, SPDX 2.3 JSON, Syft JSON |
 | In-comment suppression (GitHub) | Supported through `Metbcy/bomdrift/comment-suppress@v1` — see [baseline.md](docs/src/baseline.md#in-comment-suppression-v05) |
 | GitHub Code Scanning (SARIF upload) | Supported (v0.8+) — set `upload-to-code-scanning: 'true'`; see [sarif.md](docs/src/sarif.md) |
@@ -74,6 +97,9 @@ Four feature themes for skim-readers; full notes live in
 | Calibration knobs (similarity / young-maintainer / cache TTL) | Supported (v0.9.6+) — see [cli-reference.md](docs/src/cli-reference.md#calibration) |
 | OCI attestation verification | Supported (v0.9.6+) — via `cosign verify-attestation` shell-out; see [attestation.md](docs/src/attestation.md) |
 | Custom rules / plugin system | Supported (v0.9.6+) — external-process plugins via `--plugin <manifest>`; see [plugins.md](docs/src/plugins.md) |
+| Continuous parser fuzzing | Supported (v0.9.8+) — `cargo-fuzz` libfuzzer targets, weekly cron + PR triggers |
+| Coverage report (informational) | Supported (v0.9.8+) — sticky PR comment with line %, no fail-under gate yet |
+| SLSA build provenance | Supported (v0.9.9+) — `actions/attest-build-provenance@v2` on archives + ghcr.io image; see [release-signing.md](docs/src/release-signing.md) |
 | GitHub Enterprise / self-hosted runners | Expected to work, not broadly tested yet |
 | Hosted dashboard / SaaS | Not planned |
 
@@ -111,6 +137,11 @@ for the rationale.
 - The comment-suppress companion action currently suppresses an advisory ID
   across all components. Use a hand-curated baseline entry when you need
   per-component suppression.
+- The ghcr.io image uses the `gcr.io/distroless/cc-debian13:nonroot`
+  base (GLIBC 2.41) to match the GLIBC version the GitHub Actions
+  `ubuntu-latest` runner produces binaries against. Don't downgrade
+  the base without first moving the release matrix to an older
+  runner.
 
 ## Feedback wanted
 
