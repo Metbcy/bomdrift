@@ -1,0 +1,10 @@
+# Keep the docker build context lean. Only the pre-staged release
+# binaries are needed; everything else (source tree, target/, docs/,
+# tests/, .git/, etc.) is excluded so:
+#
+# 1. Image rebuilds are fast (small context = small upload to buildx).
+# 2. There's no risk of accidentally baking a stale `target/` artifact
+#    or test fixture into the image.
+**
+!dist/
+!Dockerfile
