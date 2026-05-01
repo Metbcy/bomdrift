@@ -112,3 +112,73 @@ Checksums alone don't authenticate the archive (an attacker who can
 modify the `.tar.gz` can also modify the `.sha256`); cosign is the
 authoritative verification path. The checksums exist for older toolchains
 and for quick local-rerun checks.
+
+## SLSA build provenance (v0.9.9+)
+
+In addition to the cosign-keyless signature on each archive, the
+release pipeline produces a **SLSA build provenance attestation**
+covering both the per-target archives and the multi-arch ghcr.io
+image. The two are complementary, not redundant:
+
+- **cosign** proves *"the bomdrift maintainer's GitHub OIDC identity
+  signed this artifact."* It binds the artifact to the human (or
+  workflow run) holding the signing identity at sign time.
+- **SLSA provenance** proves *"this artifact was produced by the
+  public `release.yml` workflow on tag `v0.9.9` in this repo, against
+  this commit SHA."* It binds the artifact to the build itself —
+  including the source ref, the workflow file, and the ephemeral
+  runner identity.
+
+Both verifications must pass for the release to be trustworthy. An
+attacker who compromised the maintainer's signing identity (cosign
+verifies) but couldn't push to `Metbcy/bomdrift` (SLSA fails) would
+trip SLSA. Conversely, an attacker who pushed a malicious workflow
+to a fork (SLSA verifies for the fork) wouldn't have the
+maintainer's OIDC identity (cosign fails).
+
+### Verifying SLSA provenance — `gh` (recommended)
+
+The simplest path uses `gh`, which calls into the SLSA verifier with
+the right defaults for GitHub-hosted attestations:
+
+```bash
+VERSION=v0.9.9
+TARGET=x86_64-unknown-linux-gnu
+ARCHIVE=bomdrift-${VERSION}-${TARGET}.tar.gz
+BASE="https://github.com/Metbcy/bomdrift/releases/download/${VERSION}"
+
+curl -fsSL -O "${BASE}/${ARCHIVE}"
+gh attestation verify --owner Metbcy "${ARCHIVE}"
+```
+
+A successful verification prints
+`Loaded ... attestation(s) ... verified`. Pin the source ref by
+adding `--source-ref refs/tags/${VERSION}` if you want to reject
+attestations from other tags.
+
+### Verifying SLSA provenance — `slsa-verifier`
+
+For air-gapped or non-GitHub environments where `gh` isn't
+available:
+
+```bash
+slsa-verifier verify-artifact \
+  --provenance-path "${ARCHIVE}.intoto.jsonl" \
+  --source-uri github.com/Metbcy/bomdrift \
+  --source-tag ${VERSION} \
+  "${ARCHIVE}"
+```
+
+The `.intoto.jsonl` file is downloaded automatically by `gh
+attestation download`, or you can fetch it directly from the
+release's attestation manifest at
+`https://github.com/Metbcy/bomdrift/attestations`.
+
+### Verifying the ghcr.io image attestation
+
+The multi-arch image carries an inline attestation (pushed by the
+build job's `push-to-registry: true`):
+
+```bash
+gh attestation verify --owner Metbcy oci://ghcr.io/metbcy/bomdrift:${VERSION}
+```

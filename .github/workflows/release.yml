@@ -21,7 +21,9 @@ on:
 
 permissions:
   contents: write       # create release, upload assets
-  id-token: write       # cosign keyless OIDC
+  id-token: write       # cosign keyless OIDC + SLSA attestation
+  attestations: write   # actions/attest-build-provenance
+  packages: write       # ghcr.io image push (gated if:false today)
 
 # A second push of the same tag (rare; e.g. a force-push after a fixup) will
 # cancel the in-flight run rather than racing it. Different tags can release
@@ -201,6 +203,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # SLSA build provenance for the per-target archive. Complementary
+      # to the cosign-keyless signature uploaded just above: cosign
+      # proves "the bomdrift maintainer's GitHub OIDC identity signed
+      # this blob"; SLSA proves "this blob was produced by the public
+      # release.yml workflow on tag ${{ github.ref_name }} in this
+      # repo". Verify with `gh attestation verify --owner Metbcy
+      # <archive>` or `slsa-verifier verify-artifact --source-uri
+      # github.com/Metbcy/bomdrift --source-tag <tag> <archive>`.
+      #
+      # GATED `if: false` until the v0.9.9 "flip the gates" PR.
+      - name: Attest build provenance
+        if: false
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/${{ steps.stage.outputs.stem }}.${{ matrix.archive }}
+
   publish:
     name: publish release
     needs: [preflight, build]
@@ -351,3 +369,14 @@ jobs:
         run: |
           cosign sign --yes \
             "ghcr.io/metbcy/bomdrift@${{ steps.build.outputs.digest }}"
+
+      # SLSA build provenance for the multi-arch image. See the
+      # equivalent step on the per-target archives for the cosign-vs-SLSA
+      # rationale. GATED `if: false` until the v0.9.9 "flip the gates" PR.
+      - name: Attest build provenance (image)
+        if: false
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/metbcy/bomdrift
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
