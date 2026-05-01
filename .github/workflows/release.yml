@@ -211,10 +211,7 @@ jobs:
       # repo". Verify with `gh attestation verify --owner Metbcy
       # <archive>` or `slsa-verifier verify-artifact --source-uri
       # github.com/Metbcy/bomdrift --source-tag <tag> <archive>`.
-      #
-      # GATED `if: false` until the v0.9.9 "flip the gates" PR.
       - name: Attest build provenance
-        if: false
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: dist/${{ steps.stage.outputs.stem }}.${{ matrix.archive }}
@@ -288,14 +285,8 @@ jobs:
   # per-arch binaries already cosign-signed by the build matrix; no
   # cargo build runs here. Tag matrix follows the standard convention:
   # the full version, the major.minor, the major, and `latest`.
-  #
-  # GATED `if: false` — flipped on in the v0.9.9 "release-pipeline gates"
-  # PR after the supporting infrastructure (crates.io reservation,
-  # CARGO_REGISTRY_TOKEN secret) is in place. Until then this job is
-  # parsed for syntax but never runs.
   docker:
     name: docker (ghcr.io)
-    if: false
     needs: [preflight, build, publish]
     runs-on: ubuntu-latest
     permissions:
@@ -372,11 +363,63 @@ jobs:
 
       # SLSA build provenance for the multi-arch image. See the
       # equivalent step on the per-target archives for the cosign-vs-SLSA
-      # rationale. GATED `if: false` until the v0.9.9 "flip the gates" PR.
+      # rationale.
       - name: Attest build provenance (image)
-        if: false
         uses: actions/attest-build-provenance@v2
         with:
           subject-name: ghcr.io/metbcy/bomdrift
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+
+  # Publish to crates.io. Independent of `docker` and `publish` so a
+  # crates.io transient (network, rate-limit, already-published-this-tag)
+  # doesn't fail the rest of the release. The CARGO_REGISTRY_TOKEN secret
+  # must be set on the repo before the first v0.9.9 tag push.
+  cargo-publish:
+    name: cargo publish (crates.io)
+    needs: [preflight, build, publish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked
+
+  # Force-update the major-version tag to point at this release.
+  # GitHub Marketplace + sloppy adopters consume `Metbcy/bomdrift@v1` and
+  # expect it to track the latest stable release. During the v0.x line we
+  # track v1 (because that's what Marketplace currently references); once
+  # v1.0.0 ships, the logic switches to v${major} (so v2 will track v2.x.y).
+  retag-major:
+    name: retag major version
+    needs: [preflight, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Force-update major-version tag to current release
+        shell: bash
+        run: |
+          version="${{ needs.preflight.outputs.version }}"
+          tag="${{ needs.preflight.outputs.tag }}"
+          major="${version%%.*}"
+
+          # During v0.x, track v1 (Marketplace already pins it).
+          # From v1.0.0 onward, track v${major}.
+          if [ "$major" -ge 1 ]; then
+            major_tag="v${major}"
+          else
+            major_tag="v1"
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -f "$major_tag" "$tag"
+          git push --force origin "$major_tag"
+          echo "Pointed $major_tag at $tag"
