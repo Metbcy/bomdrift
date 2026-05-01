@@ -122,6 +122,21 @@ jobs:
         with:
           command: check
 
+  # Catch crate-metadata regressions (missing fields, oversized package,
+  # `exclude` slipping such that build-time `include_str!`'d files are
+  # dropped from the crate) BEFORE they reach a release tag. Mirrors what
+  # `cargo publish` will do at release time, but never actually uploads.
+  # Path-filtered to keep PR runs cheap.
+  publish-dry-run:
+    name: cargo publish --dry-run
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo publish --dry-run --locked
+
   shell-bridges:
     name: shell-bridges (parser tests + regex sync)
     runs-on: ubuntu-latest
