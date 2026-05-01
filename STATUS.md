@@ -111,8 +111,6 @@ for the rationale.
 - The comment-suppress companion action currently suppresses an advisory ID
   across all components. Use a hand-curated baseline entry when you need
   per-component suppression.
-- GitHub Marketplace publication is a repository setting. The action metadata
-  is ready, but a maintainer must enable the listing in GitHub settings.
 
 ## Feedback wanted
 
