@@ -172,7 +172,7 @@ jobs:
           cat "${archive}.sha256"
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v4.1.1
 
       - name: Sign archive with cosign (keyless)
         shell: bash
@@ -347,7 +347,7 @@ jobs:
             ghcr.io/metbcy/bomdrift:latest
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v4.1.1
 
       - name: Sign image with cosign (keyless)
         env:

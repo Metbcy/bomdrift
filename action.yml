@@ -322,7 +322,7 @@ runs:
 
     - name: Install cosign (for release signature verification)
       if: inputs.verify-signatures == 'true'
-      uses: sigstore/cosign-installer@v4
+      uses: sigstore/cosign-installer@v4.1.1
 
     - name: Run bomdrift
       shell: bash
