@@ -36,11 +36,6 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: 1
-  # Opt every JavaScript-based action in this workflow into the Node.js 24
-  # runner ahead of GitHub's 2026-06-02 forced-default. See ci.yml for the
-  # full rationale.
-  # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   preflight:
