@@ -46,7 +46,7 @@ jobs:
         # something to point at. Consumers copying this workflow as
         # `uses: Metbcy/bomdrift@v1` don't need the checkout step (the
         # v0.5 zero-config flow handles before/after checkouts internally).
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Run bomdrift (zero-config)
         uses: ./

@@ -51,7 +51,7 @@ jobs:
       tag: ${{ steps.tag.outputs.tag }}
       version: ${{ steps.tag.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Resolve tag
         id: tag
@@ -105,7 +105,7 @@ jobs:
             archive: zip
             use_cross: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.88
@@ -177,7 +177,7 @@ jobs:
           cat "${archive}.sha256"
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4
 
       - name: Sign archive with cosign (keyless)
         shell: bash
@@ -192,7 +192,7 @@ jobs:
             "$archive"
 
       - name: Upload artifact (per-target)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.stage.outputs.stem }}
           path: |
@@ -212,7 +212,7 @@ jobs:
       # <archive>` or `slsa-verifier verify-artifact --source-uri
       # github.com/Metbcy/bomdrift --source-tag <tag> <archive>`.
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/${{ steps.stage.outputs.stem }}.${{ matrix.archive }}
 
@@ -221,10 +221,10 @@ jobs:
     needs: [preflight, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -266,7 +266,7 @@ jobs:
           cat release-notes.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.preflight.outputs.tag }}
           name: ${{ needs.preflight.outputs.tag }}
@@ -294,7 +294,7 @@ jobs:
       packages: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Compute version tag components
         id: ver
@@ -308,7 +308,7 @@ jobs:
           echo "minor=v${major}.${minor}" >> "$GITHUB_OUTPUT"
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
@@ -352,7 +352,7 @@ jobs:
             ghcr.io/metbcy/bomdrift:latest
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4
 
       - name: Sign image with cosign (keyless)
         env:
@@ -365,7 +365,7 @@ jobs:
       # equivalent step on the per-target archives for the cosign-vs-SLSA
       # rationale.
       - name: Attest build provenance (image)
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ghcr.io/metbcy/bomdrift
           subject-digest: ${{ steps.build.outputs.digest }}
@@ -380,7 +380,7 @@ jobs:
     needs: [preflight, build, publish]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
       - name: cargo publish
@@ -400,7 +400,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Force-update major-version tag to current release
