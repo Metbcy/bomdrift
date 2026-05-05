@@ -29,9 +29,6 @@ permissions:
   id-token: write
   attestations: write
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 jobs:
   docker:
     name: docker (ghcr.io)
@@ -43,7 +40,7 @@ jobs:
       # This decouples "the image's recipe" from "the binaries baked
       # into the image" — so a Dockerfile fix on main can rebuild
       # any past tag's image without rewriting that tag.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Compute version tag components
         id: ver
@@ -112,7 +109,7 @@ jobs:
             ghcr.io/metbcy/bomdrift:latest
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4.1.1
 
       - name: Sign image with cosign (keyless)
         env:
@@ -122,7 +119,7 @@ jobs:
             "ghcr.io/metbcy/bomdrift@${{ steps.build.outputs.digest }}"
 
       - name: Attest build provenance (image)
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ghcr.io/metbcy/bomdrift
           subject-digest: ${{ steps.build.outputs.digest }}

@@ -13,19 +13,12 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
-  # Opt every JavaScript-based action in this workflow into the Node.js 24
-  # runner ahead of GitHub's 2026-06-02 forced-default. Silences the
-  # "Node.js 20 actions are deprecated" warning the runner emits on every
-  # checkout / upload-artifact / sticky-pull-request-comment step. Remove
-  # once Node.js 24 is the default runtime.
-  # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@1.88
         with:
           components: rustfmt
@@ -34,7 +27,7 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@1.88
         with:
           components: clippy
@@ -48,7 +41,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-features
@@ -64,7 +57,7 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@1.88
         with:
           components: llvm-tools-preview
@@ -74,7 +67,7 @@ jobs:
       - name: Run coverage
         run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
       - name: Upload lcov artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-lcov
           path: lcov.info
@@ -94,7 +87,7 @@ jobs:
           echo "total=$total" >> "$GITHUB_OUTPUT"
       - name: Post coverage summary as PR comment
         if: github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: bomdrift-coverage
           message: |
@@ -109,15 +102,19 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2
+      - uses: actions/checkout@v6
+      # Pinned to the post-v2.0.0 Node 24 commit (2026-03-20) until
+      # rustsec re-tags. The v2 / v2.0.0 tags still point at the
+      # September 2024 commit which targets Node 20 and would emit a
+      # deprecation warning.
+      - uses: rustsec/audit-check@858dc40f52ca2b8570b7a997c1c4e35c6fc9a432  # v2 Node 24
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   deny:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
@@ -132,7 +129,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
       - run: cargo publish --dry-run --locked
@@ -141,7 +138,7 @@ jobs:
     name: shell-bridges (parser tests + regex sync)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: comment-suppress parser unit tests
         run: bash comment-suppress/test.sh
       - name: suppress-regex sync (shell ↔ bridge JS)

@@ -17,13 +17,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # Opt every JavaScript-based action in this workflow into the Node.js 24
-  # runner ahead of GitHub's 2026-06-02 forced-default. See ci.yml for the
-  # full rationale.
-  # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 jobs:
   fuzz:
     runs-on: ubuntu-latest
@@ -32,7 +25,7 @@ jobs:
       matrix:
         target: [parse_cyclonedx, parse_spdx, parse_syft]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
         with:
@@ -49,7 +42,7 @@ jobs:
           cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=$BUDGET
       - name: Upload artifacts on crash
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-${{ matrix.target }}-artifacts
           path: fuzz/artifacts/

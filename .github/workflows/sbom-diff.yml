@@ -25,13 +25,6 @@ permissions:
   contents: read
   pull-requests: write       # to upsert the diff comment
 
-env:
-  # Opt every JavaScript-based action in this workflow into the Node.js 24
-  # runner ahead of GitHub's 2026-06-02 forced-default. See ci.yml for the
-  # full rationale.
-  # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 concurrency:
   group: sbom-diff-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -46,7 +39,7 @@ jobs:
         # something to point at. Consumers copying this workflow as
         # `uses: Metbcy/bomdrift@v1` don't need the checkout step (the
         # v0.5 zero-config flow handles before/after checkouts internally).
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Run bomdrift (zero-config)
         uses: ./
