@@ -296,7 +296,7 @@ runs:
 
     - name: Checkout after-ref (PR head, default)
       if: inputs.after-sbom == ''
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         ref: ${{ inputs.after-ref }}
         path: __bomdrift_after
@@ -305,7 +305,7 @@ runs:
 
     - name: Checkout before-ref (PR base, default)
       if: inputs.before-sbom == ''
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         ref: ${{ inputs.before-ref }}
         path: __bomdrift_before
@@ -322,7 +322,7 @@ runs:
 
     - name: Install cosign (for release signature verification)
       if: inputs.verify-signatures == 'true'
-      uses: sigstore/cosign-installer@v3
+      uses: sigstore/cosign-installer@v4
 
     - name: Run bomdrift
       shell: bash
