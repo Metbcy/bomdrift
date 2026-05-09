@@ -524,6 +524,7 @@ pub enum OutputFormat {
     Markdown,
     Json,
     Sarif,
+    Html,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
