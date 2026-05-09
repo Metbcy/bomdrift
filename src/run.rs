@@ -401,6 +401,7 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
         }
         OutputFormat::Json => render::json::render(&cs, &enrichment),
         OutputFormat::Sarif => render::sarif::render(&cs, &enrichment),
+        OutputFormat::Html => render::html::render(&cs, &enrichment),
     };
 
     if let Some(path) = &args.output_file {
