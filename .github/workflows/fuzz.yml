@@ -31,7 +31,7 @@ jobs:
         with:
           workspaces: fuzz
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        run: cargo install cargo-fuzz
       - name: Run fuzz target
         run: |
           BUDGET=60
