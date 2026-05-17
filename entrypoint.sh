@@ -220,6 +220,25 @@ generate_sbom() {
     if [ -z "$actual" ]; then
       actual="    (checkout root is empty)"
     fi
+    # Event-specific hint: on non-pull_request events (push, workflow_dispatch,
+    # schedule) the merge-base isn't auto-resolved, so 'before-ref' often points
+    # at a commit that predates the directory you're scanning. Surface that
+    # explicitly rather than making the user infer it from "before-ref".
+    local event_hint=""
+    case "${GITHUB_EVENT_NAME:-}" in
+      pull_request|pull_request_target) ;;
+      "")
+        event_hint="
+    - running outside GitHub Actions: ensure the working tree at '${checkout_dir}'
+      actually contains '${clean}' (this is usually a local-test misconfiguration)"
+        ;;
+      *)
+        event_hint="
+    - non-PR event (${GITHUB_EVENT_NAME}): 'before-ref' defaults to the parent
+      commit, which may predate '${clean}'. Pin 'before-ref' to a known-good
+      commit (e.g. 'before-ref: main') or supply 'before-sbom' directly"
+        ;;
+    esac
     fail "scan path not found: ${source_dir}
   Resolved from input path='${subpath}' against checkout '${checkout_dir}'.
   The checkout root contains:
@@ -228,9 +247,23 @@ ${actual}
   Common causes:
     - typo in the 'path:' input (case-sensitive; 'Services/api' != 'services/api')
     - the directory exists in after-ref but not before-ref (or vice versa)
-    - a monorepo split renamed the directory in the default branch since the PR was opened
-  See https://metbcy.github.io/bomdrift/github-action.html#monorepo-setup
-  for the matrix-per-service recipe."
+    - a monorepo split renamed the directory in the default branch since the PR was opened${event_hint}
+
+  For monorepos, use a matrix per service so each leg has its own 'path:':
+
+    strategy:
+      matrix:
+        service: [api, web, worker]
+    steps:
+      - uses: metbcy/bomdrift@v1
+        with:
+          path: services/\${{ matrix.service }}
+
+  Full recipe: https://metbcy.github.io/bomdrift/github-action.html#monorepo-setup
+
+  This failure is intentional: bomdrift does NOT silently fall back to the
+  repository root because that would scan unrelated code and produce a
+  misleading diff. Fix the 'path:' input or the ref pinning above."
   fi
 
   if ! command -v syft >/dev/null 2>&1; then
