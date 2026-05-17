@@ -43,7 +43,8 @@ pub fn render(cs: &ChangeSet, e: &Enrichment) -> String {
         clippy::expect_used,
         reason = "invariant: serde_json::to_string_pretty cannot fail on a Value built from owned data with string keys"
     )]
-    serde_json::to_string_pretty(&combined).expect("serialize JSON")
+    serde_json::to_string_pretty(&combined)
+        .expect("invariant: serde_json::to_string_pretty cannot fail on a Value built from owned data with string keys")
 }
 
 #[cfg(test)]
