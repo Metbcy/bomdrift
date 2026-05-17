@@ -264,3 +264,18 @@ beyond what `ureq` already brings.
 - **Current** (v0.9.6): ~3.4 MB.
 - **Audit**: `cargo bloat --release --crates -n 20` periodically to
   confirm no unexpected dep-tree growth.
+
+## Module size budget
+
+- **Soft cap**: ≤ 1000 LOC per file in `src/` (incl. `#[cfg(test)] mod tests`).
+  At ~1000 LOC the file usually contains more than one cohesive concern
+  and review attention starts skipping the middle.
+- **Hard cap**: ≤ 1500 LOC. Past this, split before adding new behavior;
+  PR #44 (markdown.rs → markdown/{mod,components,vulns,...}.rs) is the
+  reference shape for how the split should look.
+- **Audit**: `find src -name '*.rs' -exec wc -l {} \; | sort -rn | head`
+  during release prep. Any file past the soft cap goes into the next
+  refactor cycle's candidate list; any file past the hard cap blocks
+  the release until split or explicitly waived in the changelog.
+- Tests-only files (`tests/**`) are exempt — large integration tests
+  are easier to read as one file than as a maze of helpers.
