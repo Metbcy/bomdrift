@@ -279,3 +279,29 @@ beyond what `ureq` already brings.
   the release until split or explicitly waived in the changelog.
 - Tests-only files (`tests/**`) are exempt — large integration tests
   are easier to read as one file than as a maze of helpers.
+
+## Perf reference: diff core benchmark
+
+The diff core (`src/diff/`) runs on every bomdrift invocation, so it
+has its own criterion bench under [`benches/diff.rs`][diff-bench].
+That bench is the perf reference for any change that touches diff
+internals (`group_by_key`, `diff_one_key`, the multi-version
+pair-by-version logic).
+
+Three workloads per size (500, 5_000, opt-in 20_000 with
+`--features bench-stress`):
+
+- **end_to_end** — realistic mix (80% unchanged, 10% version_changed,
+  5% license_changed, 5% added/removed). Production hot path.
+- **self_diff** — identical inputs. Lower bound on diff cost; isolates
+  `group_by_key` BTreeMap construction + per-key iteration with no
+  change-pair work.
+- **all_license_changed** — every intersecting pair has a different
+  license set. Isolates the license-comparison branch.
+
+Run with `cargo bench --bench diff` (under 30s on a laptop). Record
+medians in the PR description for any change that touches
+`src/diff/`; a >5% regression on the production `end_to_end / 5000`
+workload warrants either a fix or an explicit explanation.
+
+[diff-bench]: https://github.com/Metbcy/bomdrift/blob/main/benches/diff.rs

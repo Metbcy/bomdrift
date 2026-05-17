@@ -80,6 +80,13 @@ wait-timeout = "0.2"
 criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
 proptest = "1"
 
+[features]
+# Opt-in stress bench group for `cargo bench --bench diff`. Adds a 20_000-
+# component-per-side diff workload that pushes total bench wall time past the
+# default <30s budget. CI and weekend perf checks should leave this off; use
+# it locally when investigating algorithmic changes (#29).
+bench-stress = []
+
 [[bench]]
 name = "parse"
 harness = false
