@@ -526,6 +526,37 @@ mod tests {
         assert!(!populated.is_empty());
     }
 
+    /// Round-trip every OpenVEX status string through `from_openvex` and
+    /// back via `as_str`. Kills `delete match arm "affected"` /
+    /// `delete match arm "fixed"` mutants at mod.rs:74-75 (the previous
+    /// suite only exercised "not_affected" and "under_investigation"
+    /// indirectly, leaving the affected/fixed arms unverified).
+    #[test]
+    fn vex_status_from_openvex_round_trips_all_arms() {
+        let cases = [
+            ("not_affected", VexStatus::NotAffected),
+            ("affected", VexStatus::Affected),
+            ("fixed", VexStatus::Fixed),
+            ("under_investigation", VexStatus::UnderInvestigation),
+        ];
+        for (s, expected) in cases {
+            let parsed =
+                VexStatus::from_openvex(s).unwrap_or_else(|| panic!("expected Some for {s:?}"));
+            assert_eq!(parsed, expected, "from_openvex({s:?})");
+            assert_eq!(parsed.as_str(), s, "as_str round-trip for {expected:?}");
+        }
+    }
+
+    /// Unknown / capitalized / empty OpenVEX status strings must return
+    /// None — not silently fall through to a wrong arm.
+    #[test]
+    fn vex_status_from_openvex_rejects_unknown_strings() {
+        assert_eq!(VexStatus::from_openvex(""), None);
+        assert_eq!(VexStatus::from_openvex("Affected"), None);
+        assert_eq!(VexStatus::from_openvex("not affected"), None);
+        assert_eq!(VexStatus::from_openvex("exploitable"), None);
+    }
+
     /// `detect_format` second arm requires BOTH `bomFormat == "CycloneDX"`
     /// AND a `vulnerabilities` array. Kills the `&& -> ||` mutant at line
     /// 162: with `||`, a doc that has only `bomFormat` (a regular CycloneDX
