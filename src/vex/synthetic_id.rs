@@ -403,6 +403,18 @@ mod tests {
             parse_synthetic_id("bomdrift.version-jump:pkg:npm/x@1.0.0:1to4"),
             None
         );
+        // version-jump with empty `before` (kills `|| -> &&` on the
+        // is_empty check at line 125 — `&&` would erroneously accept it).
+        assert_eq!(
+            parse_synthetic_id("bomdrift.version-jump:pkg:npm/x@1.0.0:->4"),
+            None
+        );
+        // version-jump with empty `after` (kills the same mutant from the
+        // other side).
+        assert_eq!(
+            parse_synthetic_id("bomdrift.version-jump:pkg:npm/x@1.0.0:1->"),
+            None
+        );
         // typosquat missing the closest segment.
         assert_eq!(
             parse_synthetic_id("bomdrift.typosquat:pkg:npm/x@1.0.0"),
