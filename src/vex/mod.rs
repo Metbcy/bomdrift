@@ -478,4 +478,87 @@ mod tests {
         assert!(!effect.is_suppress());
         assert_eq!(effect.status(), VexStatus::UnderInvestigation);
     }
+
+    /// Cover `VexEffect::justification()` for both Suppress and Annotate
+    /// variants (kills the 3 mutants on the getter: `replace with None`,
+    /// arm-swap, etc.).
+    #[test]
+    fn vex_effect_justification_returns_inner_for_both_variants() {
+        let suppress = VexEffect::Suppress {
+            status: VexStatus::NotAffected,
+            justification: Some("vulnerable_code_not_present".into()),
+        };
+        assert_eq!(
+            suppress.justification(),
+            Some("vulnerable_code_not_present")
+        );
+
+        let annotate = VexEffect::Annotate {
+            status: VexStatus::Affected,
+            justification: Some("see ticket BD-42".into()),
+        };
+        assert_eq!(annotate.justification(), Some("see ticket BD-42"));
+
+        // None passes through (not coerced to Some("")).
+        let suppress_none = VexEffect::Suppress {
+            status: VexStatus::Fixed,
+            justification: None,
+        };
+        assert_eq!(suppress_none.justification(), None);
+    }
+
+    /// `VexIndex::is_empty` reflects the underlying `by_vuln` map state.
+    /// Kills the 2 mutants on `is_empty` (replace-with-true / replace-with-
+    /// false).
+    #[test]
+    fn vex_index_is_empty_tracks_statement_presence() {
+        let empty = VexIndex::build(Vec::new());
+        assert!(empty.is_empty());
+
+        let stmt = VexStatement {
+            vuln_id: "CVE-1".into(),
+            products: vec!["pkg:npm/foo@1.0.0".into()],
+            status: VexStatus::NotAffected,
+            justification: None,
+            status_notes: None,
+        };
+        let populated = VexIndex::build(vec![stmt]);
+        assert!(!populated.is_empty());
+    }
+
+    /// `detect_format` second arm requires BOTH `bomFormat == "CycloneDX"`
+    /// AND a `vulnerabilities` array. Kills the `&& -> ||` mutant at line
+    /// 162: with `||`, a doc that has only `bomFormat` (a regular CycloneDX
+    /// SBOM with no vulnerabilities) would be misclassified as VEX and
+    /// fail the parse loudly later.
+    #[test]
+    fn detect_format_cyclonedx_requires_vulnerabilities_array() {
+        // CycloneDX SBOM with no `vulnerabilities` array — must NOT be
+        // detected as CycloneDxVex. load() should error with the unknown-
+        // format diagnostic, not try to parse it as VEX.
+        let body = r#"{
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.6",
+            "components": [{"name": "foo", "version": "1.0.0"}]
+        }"#;
+        let p = write_tmp("sbom_not_vex.json", body);
+        let err = load(std::slice::from_ref(&p)).unwrap_err().to_string();
+        assert!(
+            err.to_lowercase().contains("vex format") || err.contains("OpenVEX"),
+            "expected unknown-format error, got: {err}"
+        );
+
+        // `bomFormat` present, `vulnerabilities` present-but-wrong-type
+        // (object, not array) — also must NOT match.
+        let body2 = r#"{
+            "bomFormat": "CycloneDX",
+            "vulnerabilities": {"id": "CVE-X"}
+        }"#;
+        let p2 = write_tmp("sbom_vuln_obj.json", body2);
+        let err2 = load(std::slice::from_ref(&p2)).unwrap_err().to_string();
+        assert!(
+            err2.to_lowercase().contains("vex format") || err2.contains("OpenVEX"),
+            "expected unknown-format error, got: {err2}"
+        );
+    }
 }
