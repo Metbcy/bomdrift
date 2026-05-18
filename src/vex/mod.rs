@@ -29,7 +29,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -296,6 +296,7 @@ impl VexAnnotation {
 mod emit;
 pub use emit::{EmitOptions, emit};
 
+#[cfg(test)]
 mod tests {
     #![allow(
         clippy::unwrap_used,

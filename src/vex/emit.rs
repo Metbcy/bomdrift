@@ -208,7 +208,6 @@ pub fn emit(
 }
 
 #[cfg(test)]
-#[cfg(test)]
 mod tests {
     #![allow(
         clippy::unwrap_used,
@@ -219,24 +218,6 @@ mod tests {
     )]
     use super::super::load;
     use super::*;
-    use std::io::Write as _;
-    use std::path::PathBuf;
-
-    fn write_tmp(name: &str, body: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "bomdrift-vex-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join(name);
-        let mut f = std::fs::File::create(&path).unwrap();
-        f.write_all(body.as_bytes()).unwrap();
-        path
-    }
 
     // ---------- Phase H: emission ----------
 
