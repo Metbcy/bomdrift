@@ -203,7 +203,7 @@ fn run_diff(mut args: DiffArgs) -> Result<()> {
     // `--no-maintainer-age` for offline runs. Best-effort: failures warn and
     // continue, mirroring the OSV enricher's contract.
     if !args.no_maintainer_age {
-        match enrich::maintainer::enrich_with(
+        match enrich::maintainer::enrich_with_hosts(
             &cs,
             "https://api.github.com",
             std::time::Duration::from_secs(15),
