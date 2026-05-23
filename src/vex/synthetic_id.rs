@@ -270,6 +270,7 @@ mod tests {
             top_contributor: "alice".into(),
             days_old: 5,
             first_commit_at: "2026-04-26".into(),
+            host: crate::enrich::maintainer::Host::Github,
         };
         let id = synthetic_id::maintainer_age(&f);
         assert_eq!(

@@ -127,10 +127,10 @@ fn rules() -> Value {
             "bomdrift.young-maintainer",
             "young-maintainer",
             "Top contributor's first commit is recent",
-            "The newly added component is hosted on GitHub and its top \
-             contributor's first commit is younger than 90 days. The xz / \
-             Jia Tan supply-chain-takeover pattern. Always informational \
-             severity (`warning`).",
+            "The newly added component is hosted on GitHub, GitLab, or \
+             Codeberg and its top contributor's first commit is younger than \
+             90 days. The xz / Jia Tan supply-chain-takeover pattern. \
+             Always informational severity (`warning`).",
             "https://metbcy.github.io/bomdrift/enrichers/maintainer-age.html",
         ),
         rule(

@@ -255,7 +255,7 @@ With network access, an additional Vulnerabilities section lists each advisory I
 - **EPSS** (FIRST.org Exploit Prediction Scoring System) per CVE, with `--fail-on-epss <0.0–1.0>` threshold gating (v0.8).
 - **CISA KEV** known-exploited flag per advisory, with `--fail-on kev` gating (v0.8).
 - **Typosquat detection** across **npm**, **PyPI**, **Cargo**, **Maven**, **Go**, **RubyGems**, **NuGet**, and **Composer**. Jaro-Winkler + suffix-containment boost (Levenshtein for Maven artifactIds, last-path-segment match for Go, package-portion match for Composer). Threshold tunable via `--typosquat-similarity-threshold` (v0.9.6). Refreshable via `bomdrift refresh-typosquat`.
-- **Maintainer-age signal** — top GitHub contributor's first commit younger than `--young-maintainer-days` (default 90; tunable v0.9.6). The xz / Jia Tan pattern. Honors `GITHUB_TOKEN`, skipped on repos with > 50 contributors.
+- **Maintainer-age signal** — top contributor's first commit younger than `--young-maintainer-days` (default 90; tunable v0.9.6). The xz / Jia Tan pattern. Covers GitHub (`GITHUB_TOKEN`), GitLab (`GITLAB_TOKEN`), and Codeberg (`CODEBERG_TOKEN`). Skipped on repos with > 50 contributors.
 - **Multi-major version jumps** (≥ 2 majors) — pure compute, correlates with takeover swaps and namespace reuse.
 - **Registry-metadata enrichers (npm / PyPI / crates.io)** — recently-published, deprecated, maintainer-set-changed (npm-only) (v0.9). Threshold via `--recently-published-days`, opt-out via `--no-registry`.
 - **License policy** — `--allow-licenses` / `--deny-licenses` with SPDX expression evaluation (v0.9), plus per-exception `--allow-exception` / `--deny-exception` for `WITH`-clause granularity (v0.9.5).

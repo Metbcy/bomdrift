@@ -338,6 +338,7 @@ mod tests {
             top_contributor: "alice".into(),
             first_commit_at: "2026-04-26T00:00:00Z".into(),
             days_old: 3,
+            host: crate::enrich::maintainer::Host::Github,
         }];
         let id = crate::vex::synthetic_id::maintainer_age(&e.maintainer_age[0]);
         let idx = VexIndex::build(vec![stmt(&id, purl, VexStatus::NotAffected)]);

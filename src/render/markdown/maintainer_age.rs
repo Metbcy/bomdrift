@@ -71,6 +71,7 @@ mod tests {
             top_contributor: contributor.to_string(),
             first_commit_at: "2026-04-01T00:00:00Z".to_string(),
             days_old: days,
+            host: crate::enrich::maintainer::Host::Github,
         }
     }
 

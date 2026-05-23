@@ -1,7 +1,7 @@
 # Maintainer age signal
 
-Flag newly added GitHub-hosted dependencies whose top contributor's first
-commit is suspiciously recent. **The xz/Jia Tan pattern.**
+Flag newly added dependencies (GitHub, GitLab, Codeberg) whose top
+contributor's first commit is suspiciously recent. **The xz/Jia Tan pattern.**
 
 ## Why it matters
 
@@ -31,34 +31,42 @@ or `[diff] young_maintainer_days = <N>` (v0.9.6+); see
 
 ## How it works
 
-For each `cs.added` component with a GitHub `source_url`:
+For each `cs.added` component with a `source_url` on a supported host:
+
+### GitHub
 
 1. **GET `/repos/{owner}/{repo}/contributors?per_page=1`** — top
    contributor login.
-2. **GET `/repos/{owner}/{repo}/contributors`** to count contributors.
-   **Skip if > 50** — "top contributor joined recently" loses meaning
-   when 200 people have committed (Linux, Kubernetes, React, etc.).
-3. **GET `/repos/{owner}/{repo}/commits?author=<login>&per_page=1`** to
-   find the most recent commit by that author.
-4. **Paginate to the last page** to find their *first* commit. The
-   "first commit by author" pagination trick is slow on prolific
-   contributors (last page can be page 50+) but is correct without
-   needing the GraphQL API.
-5. **Compare against the SBOM-after timestamp** (or `clock::now()` when
-   the SBOM lacks a metadata timestamp). Flag when the first commit is
-   younger than `YOUNG_MAINTAINER_DAYS` (default 90; tunable via
-   `--young-maintainer-days <N>` in v0.9.6+).
+2. **GET `/repos/{owner}/{repo}/contributors?per_page=1&anon=true`** —
+   contributor count from Link `rel="last"` page number. **Skip if > 50.**
+3. **GET `/repos/{owner}/{repo}/commits?author=<login>&per_page=1`** —
+   paginate to last page for the author's oldest commit (`commit.author.date`).
+
+### GitLab
+
+1. **GET `/api/v4/projects/{url-encoded}/repository/contributors?order_by=commits&sort=desc&per_page=1`** —
+   top contributor name (GitLab identifies contributors by author name, not
+   login) and total count via `X-Total` header. **Skip if > 50.**
+2. **GET `.../commits?author=<name>&per_page=1`** — paginate to last page
+   via Link header for the author's oldest commit (`authored_date`).
+
+### Codeberg
+
+URL parsing and dispatch are implemented. The per-author first-commit
+lookup is stubbed pending verification of the Forgejo v1.20+ API shape;
+Codeberg components produce no finding in this release.
 
 ## Skipped cases
 
 - Components without a `source_url` (CycloneDX `externalReferences`
-  with no `vcs` entry, etc.) — silently skipped.
-- Non-`github.com` source URLs — silently skipped (GitLab / Codeberg
-  / etc. would need per-host clients; out of scope for v0).
-- Repositories with **> 50 contributors** — skipped because the "top
+  with no `vcs` entry, etc.) -- silently skipped.
+- Source URLs not from `github.com`, `gitlab.com`, or `codeberg.org` --
+  silently skipped.
+- Repositories with **> 50 contributors** -- skipped because the "top
   contributor's first commit" loses meaning on monorepos and
   multi-vendor projects.
-- Repositories returning 404 or 403 — skipped, warned once.
+- Repositories returning 404, 401, or 403 -- skipped silently (private
+  repo or missing token).
 
 Per-repo results are cached within a single bomdrift run so repeated
 `cs.added` entries from the same project don't re-issue the same three
@@ -67,13 +75,14 @@ requests.
 ## Network behavior
 
 - **Per-request timeout**: 15 seconds.
-- **`GITHUB_TOKEN` honored**: bumps the unauthenticated 60/hr cap to
-  the authenticated 5000/hr cap. Without a token, large diffs (~30+
-  added GitHub deps) will hit rate-limiting; surface as a warning,
-  partial results render, exit code stays 0.
+- **Token env vars**: `GITHUB_TOKEN` (Bearer), `GITLAB_TOKEN`
+  (PRIVATE-TOKEN), `CODEBERG_TOKEN` (Authorization: token). All optional;
+  missing token means unauthenticated requests (fine for low volume).
+  `GITHUB_TOKEN` bumps the unauthenticated 60/hr cap to 5000/hr.
 - **No `octocrab`**: the `octocrab` crate would pull in tokio + ~70
   transitive crates. Hand-rolled `ureq` GETs + a 25-line ISO-8601
-  parser keep the bomdrift binary under our 5 MB target.
+  parser keep the bomdrift binary under our 5 MB target. Same
+  constraint applies to the GitLab and Codeberg paths.
 
 ## Calibration
 
@@ -98,13 +107,12 @@ maintainer-age|<purl>|<days_since_first_commit>|90
 
 ## Disabling
 
-`--no-maintainer-age` skips the entire enricher (no GitHub API calls).
-Required for:
+`--no-maintainer-age` skips the entire enricher (no GitHub, GitLab, or
+Codeberg API calls). Required for:
 
 - Offline runs and tests.
-- CI environments where `GITHUB_TOKEN` is unset and the
-  unauthenticated rate limit (60/hr) is too low for the diff being
-  analyzed.
+- CI environments where tokens are unset and unauthenticated rate
+  limits are too low for the diff being analyzed.
 - Smoke tests of the deterministic offline signals.
 
 ```bash
