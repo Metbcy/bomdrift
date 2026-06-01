@@ -261,9 +261,10 @@ stable in v0.9.6**:
 - The TOML manifest schema may grow new optional fields; existing
   fields stay.
 
-If the protocol needs a breaking change for v1.0, a deprecation
-window with a `protocol_version` envelope field will land at least
-one minor release before the break.
+If the protocol needs a breaking change for v1.0, every plugin
+invocation already carries `protocol_version: 1` on the stdin
+envelope, so a future bomdrift release can detect old plugins and
+keep them working through a deprecation window.
 
 ## CI integration
 
