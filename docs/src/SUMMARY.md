@@ -49,5 +49,6 @@
 # Project
 
 - [What bomdrift catches that others miss](./comparison.md)
+- [Mutation testing audit](./internals/mutation-testing.md)
 - [Roadmap](./roadmap.md)
 

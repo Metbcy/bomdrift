@@ -17,6 +17,84 @@ parameters:
   - name: BOMDRIFT_NOTE_BODY
     type: string
     default: ""
+  # VEX
+  - name: vex
+    type: string
+    default: ""
+  - name: emit_vex
+    type: string
+    default: ""
+  - name: vex_author
+    type: string
+    default: ""
+  - name: vex_default_justification
+    type: string
+    default: ""
+  # License policy
+  - name: allow_licenses
+    type: string
+    default: ""
+  - name: deny_licenses
+    type: string
+    default: ""
+  - name: allow_exception
+    type: string
+    default: ""
+  - name: deny_exception
+    type: string
+    default: ""
+  - name: allow_ambiguous_licenses
+    type: boolean
+    default: false
+  # Enrichment toggles
+  - name: no_epss
+    type: boolean
+    default: false
+  - name: no_kev
+    type: boolean
+    default: false
+  - name: no_registry
+    type: boolean
+    default: false
+  - name: fail_on_epss
+    type: string
+    default: ""
+  # Calibration
+  - name: recently_published_days
+    type: string
+    default: ""
+  - name: typosquat_similarity_threshold
+    type: string
+    default: ""
+  - name: young_maintainer_days
+    type: string
+    default: ""
+  - name: cache_ttl_hours
+    type: string
+    default: ""
+  - name: multi_major_delta
+    type: string
+    default: ""
+  # Attestation
+  - name: before_attestation
+    type: string
+    default: ""
+  - name: after_attestation
+    type: string
+    default: ""
+  - name: cosign_identity
+    type: string
+    default: ""
+  - name: cosign_issuer
+    type: string
+    default: ""
+  - name: require_attestation
+    type: boolean
+    default: false
+  # Plugins
+  - name: plugin
+    type: string
+    default: ""
 
 pool:
   vmImage: ubuntu-latest
@@ -46,10 +124,84 @@ stages:
               git worktree add ../before "origin/$(System.PullRequest.TargetBranch)"
               syft dir:../before -o cyclonedx-json=before.cdx.json
               syft dir:. -o cyclonedx-json=after.cdx.json
+              # Build optional --flag args from the pipeline parameters
+              # exposed via the env: block below. Empty / false values
+              # contribute zero args, so users who set none of these get
+              # the byte-identical v0.9 invocation.
+              args=()
+              add_value() {
+                if [ -n "$2" ]; then args+=("$1" "$2"); fi
+              }
+              add_bool() {
+                if [ "$2" = "true" ]; then args+=("$1"); fi
+              }
+              add_list() {
+                if [ -z "$2" ]; then return 0; fi
+                while IFS= read -r _line; do
+                  if [ -n "$_line" ]; then args+=("$1" "$_line"); fi
+                done <<EOF
+              $2
+              EOF
+              }
+              # VEX
+              add_list  --vex "${BOMDRIFT_VEX:-}"
+              add_value --emit-vex "${BOMDRIFT_EMIT_VEX:-}"
+              add_value --vex-author "${BOMDRIFT_VEX_AUTHOR:-}"
+              add_value --vex-default-justification "${BOMDRIFT_VEX_DEFAULT_JUSTIFICATION:-}"
+              # License policy
+              add_value --allow-licenses "${BOMDRIFT_ALLOW_LICENSES:-}"
+              add_value --deny-licenses "${BOMDRIFT_DENY_LICENSES:-}"
+              add_value --allow-exception "${BOMDRIFT_ALLOW_EXCEPTION:-}"
+              add_value --deny-exception "${BOMDRIFT_DENY_EXCEPTION:-}"
+              add_bool  --allow-ambiguous-licenses "${BOMDRIFT_ALLOW_AMBIGUOUS_LICENSES:-}"
+              # Enrichment toggles
+              add_bool  --no-epss "${BOMDRIFT_NO_EPSS:-}"
+              add_bool  --no-kev "${BOMDRIFT_NO_KEV:-}"
+              add_bool  --no-registry "${BOMDRIFT_NO_REGISTRY:-}"
+              add_value --fail-on-epss "${BOMDRIFT_FAIL_ON_EPSS:-}"
+              # Calibration
+              add_value --recently-published-days "${BOMDRIFT_RECENTLY_PUBLISHED_DAYS:-}"
+              add_value --typosquat-similarity-threshold "${BOMDRIFT_TYPOSQUAT_SIMILARITY_THRESHOLD:-}"
+              add_value --young-maintainer-days "${BOMDRIFT_YOUNG_MAINTAINER_DAYS:-}"
+              add_value --cache-ttl-hours "${BOMDRIFT_CACHE_TTL_HOURS:-}"
+              add_value --multi-major-delta "${BOMDRIFT_MULTI_MAJOR_DELTA:-}"
+              # Attestation
+              add_value --before-attestation "${BOMDRIFT_BEFORE_ATTESTATION:-}"
+              add_value --after-attestation "${BOMDRIFT_AFTER_ATTESTATION:-}"
+              add_value --cosign-identity "${BOMDRIFT_COSIGN_IDENTITY:-}"
+              add_value --cosign-issuer "${BOMDRIFT_COSIGN_ISSUER:-}"
+              add_bool  --require-attestation "${BOMDRIFT_REQUIRE_ATTESTATION:-}"
+              # Plugins
+              add_list --plugin "${BOMDRIFT_PLUGIN:-}"
               bomdrift diff before.cdx.json after.cdx.json \
-                --output markdown --platform azure-devops > comment.md
+                --output markdown --platform azure-devops "${args[@]}" > comment.md
               printf '\n<!-- bomdrift:diff -->\n' >> comment.md
             displayName: bomdrift diff
+            env:
+              BOMDRIFT_VEX: ${{ parameters.vex }}
+              BOMDRIFT_EMIT_VEX: ${{ parameters.emit_vex }}
+              BOMDRIFT_VEX_AUTHOR: ${{ parameters.vex_author }}
+              BOMDRIFT_VEX_DEFAULT_JUSTIFICATION: ${{ parameters.vex_default_justification }}
+              BOMDRIFT_ALLOW_LICENSES: ${{ parameters.allow_licenses }}
+              BOMDRIFT_DENY_LICENSES: ${{ parameters.deny_licenses }}
+              BOMDRIFT_ALLOW_EXCEPTION: ${{ parameters.allow_exception }}
+              BOMDRIFT_DENY_EXCEPTION: ${{ parameters.deny_exception }}
+              BOMDRIFT_ALLOW_AMBIGUOUS_LICENSES: ${{ parameters.allow_ambiguous_licenses }}
+              BOMDRIFT_NO_EPSS: ${{ parameters.no_epss }}
+              BOMDRIFT_NO_KEV: ${{ parameters.no_kev }}
+              BOMDRIFT_NO_REGISTRY: ${{ parameters.no_registry }}
+              BOMDRIFT_FAIL_ON_EPSS: ${{ parameters.fail_on_epss }}
+              BOMDRIFT_RECENTLY_PUBLISHED_DAYS: ${{ parameters.recently_published_days }}
+              BOMDRIFT_TYPOSQUAT_SIMILARITY_THRESHOLD: ${{ parameters.typosquat_similarity_threshold }}
+              BOMDRIFT_YOUNG_MAINTAINER_DAYS: ${{ parameters.young_maintainer_days }}
+              BOMDRIFT_CACHE_TTL_HOURS: ${{ parameters.cache_ttl_hours }}
+              BOMDRIFT_MULTI_MAJOR_DELTA: ${{ parameters.multi_major_delta }}
+              BOMDRIFT_BEFORE_ATTESTATION: ${{ parameters.before_attestation }}
+              BOMDRIFT_AFTER_ATTESTATION: ${{ parameters.after_attestation }}
+              BOMDRIFT_COSIGN_IDENTITY: ${{ parameters.cosign_identity }}
+              BOMDRIFT_COSIGN_ISSUER: ${{ parameters.cosign_issuer }}
+              BOMDRIFT_REQUIRE_ATTESTATION: ${{ parameters.require_attestation }}
+              BOMDRIFT_PLUGIN: ${{ parameters.plugin }}
 
           - script: |
               set -euo pipefail
