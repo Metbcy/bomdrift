@@ -48,5 +48,6 @@
 
 # Project
 
+- [Mutation testing audit](./internals/mutation-testing.md)
 - [Roadmap](./roadmap.md)
 
