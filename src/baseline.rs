@@ -1069,4 +1069,206 @@ mod tests {
             .to_string();
         assert!(err.contains("malformed"));
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Mutation-test gap closures (issue #35).
+    //
+    // These tests were added to catch surviving mutants reported by
+    // `cargo mutants --file src/baseline.rs`. Each test's docstring names
+    // the line:col of the original mutant; the test fails (panics or
+    // assertion) under the mutated source, so the mutant is "caught".
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// Catches mutants:
+    ///   src/baseline.rs:151:37 — replace `&&` with `||` in `from_value_inner` (typosquats arm)
+    /// An entry with non-empty purl but empty closest must NOT be inserted
+    /// as a typosquat key. Under `||` the entry would be inserted with
+    /// closest="", and our subsequent apply() would match a real finding
+    /// against the wrong key (or silently drop nothing).
+    #[test]
+    fn typosquat_key_requires_both_purl_and_closest_nonempty() {
+        let baseline = Baseline::from_value(&json!({
+            "enrichment": {
+                "typosquats": [
+                    { "component": { "purl": "pkg:npm/express@5.0.0" }, "closest": "" },
+                    { "component": { "purl": "" }, "closest": "express" },
+                    { "component": { "purl": "pkg:npm/expres@5.0.0" }, "closest": "express" }
+                ]
+            }
+        }));
+        // Only the third entry has both fields non-empty; the other two
+        // must be dropped. Under `||` we'd see 3 keys, not 1.
+        assert_eq!(baseline.typosquat_keys.len(), 1);
+        assert!(
+            baseline
+                .typosquat_keys
+                .contains(&("pkg:npm/expres@5.0.0".to_string(), "express".to_string()))
+        );
+    }
+
+    /// Catches mutants:
+    ///   src/baseline.rs:176:37 — replace `&&` with `||` in maintainer_age arm
+    ///   src/baseline.rs:176:20 — delete `!` on `purl.is_empty()`
+    ///   src/baseline.rs:176:40 — delete `!` on `contrib.is_empty()`
+    /// Same shape as the typosquat test above but for maintainer_age:
+    /// both purl AND top_contributor must be non-empty for the key to be
+    /// registered. Under any of the three mutants this assertion breaks.
+    #[test]
+    fn maintainer_age_key_requires_both_purl_and_contributor_nonempty() {
+        let baseline = Baseline::from_value(&json!({
+            "enrichment": {
+                "maintainer_age": [
+                    { "component": { "purl": "pkg:npm/foo@1.0.0" }, "top_contributor": "" },
+                    { "component": { "purl": "" }, "top_contributor": "alice" },
+                    { "component": { "purl": "pkg:npm/bar@2.0.0" }, "top_contributor": "bob" }
+                ]
+            }
+        }));
+        assert_eq!(baseline.young_maintainer_keys.len(), 1);
+        assert!(
+            baseline
+                .young_maintainer_keys
+                .contains(&("pkg:npm/bar@2.0.0".to_string(), "bob".to_string()))
+        );
+    }
+
+    /// Catches mutant:
+    ///   src/baseline.rs:320:9 — delete `!` in `apply` (maintainer_age retain)
+    /// A maintainer_age finding whose (purl, top_contributor) IS in the
+    /// baseline must be dropped; one that is NOT in the baseline must be
+    /// kept. Under the deleted `!`, the retain predicate flips and the
+    /// baseline-matched finding survives while the unmatched one is
+    /// dropped — both assertions fail.
+    #[test]
+    fn apply_drops_matched_maintainer_age_and_keeps_unmatched() {
+        use crate::enrich::maintainer::{Host, MaintainerAgeFinding};
+
+        let baseline = Baseline::from_value(&json!({
+            "enrichment": {
+                "maintainer_age": [
+                    { "component": { "purl": "pkg:npm/foo@1.0.0" }, "top_contributor": "alice" }
+                ]
+            }
+        }));
+        let mut cs = ChangeSet::default();
+        let mut e = Enrichment::default();
+        e.maintainer_age.push(MaintainerAgeFinding {
+            component: comp("pkg:npm/foo@1.0.0"),
+            top_contributor: "alice".into(),
+            first_commit_at: "2026-01-01T00:00:00Z".into(),
+            days_old: 30,
+            host: Host::Github,
+        });
+        e.maintainer_age.push(MaintainerAgeFinding {
+            component: comp("pkg:npm/bar@2.0.0"),
+            top_contributor: "bob".into(),
+            first_commit_at: "2026-01-01T00:00:00Z".into(),
+            days_old: 30,
+            host: Host::Github,
+        });
+        apply(&mut cs, &mut e, &baseline);
+        assert_eq!(e.maintainer_age.len(), 1, "matched finding must be dropped");
+        assert_eq!(
+            e.maintainer_age[0].component.purl.as_deref(),
+            Some("pkg:npm/bar@2.0.0"),
+            "unmatched finding must be kept"
+        );
+    }
+
+    /// Catches mutants:
+    ///   src/baseline.rs:414:26 — replace `||` with `&&` in `add_suppression_full`
+    ///   src/baseline.rs:429:12 — delete `!` on `parent.as_os_str().is_empty()`
+    /// 414: object-form entry must be written when EITHER expires OR
+    /// reason is provided. Under `&&` only expires-AND-reason produces an
+    /// object; expires-only would silently downgrade to string form, so
+    /// the recorded expires date would be lost.
+    /// 429: when the path has a non-empty parent, create_dir_all must be
+    /// called. With the `!` deleted, parent creation never happens and
+    /// the subsequent fs::write fails for nested paths.
+    #[test]
+    fn add_suppression_full_writes_object_form_with_expires_only() {
+        let dir = tempdir_unique("expires_only");
+        // Nested path (exercises the parent-dir branch at line 428-429
+        // simultaneously — if `!` is deleted, create_dir_all is skipped
+        // and the write fails before we get to assert the object form).
+        let path = dir.join("nested").join("subdir").join("baseline.json");
+        let outcome = add_suppression_full(&path, "GHSA-x", Some("2099-01-01"), None).unwrap();
+        assert!(matches!(outcome, AddOutcome::Added));
+
+        let body = std::fs::read_to_string(&path).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let arr = v["suppressed_advisories"].as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        // Under `&&` instead of `||`, this would be Value::String("GHSA-x")
+        // because expires-only wouldn't trip the object-form branch.
+        assert!(
+            arr[0].is_object(),
+            "expires-only entry must serialize as an object, got {:?}",
+            arr[0]
+        );
+        assert_eq!(arr[0]["id"].as_str(), Some("GHSA-x"));
+        assert_eq!(arr[0]["expires"].as_str(), Some("2099-01-01"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Symmetric companion to the above for reason-only — separately
+    /// asserts the `||` branch (not `&&`) by exercising the OTHER side.
+    /// Under `&&` reason-only would also downgrade to string form.
+    #[test]
+    fn add_suppression_full_writes_object_form_with_reason_only() {
+        let dir = tempdir_unique("reason_only");
+        let path = dir.join("baseline.json");
+        let outcome =
+            add_suppression_full(&path, "GHSA-y", None, Some("vendor will patch q4")).unwrap();
+        assert!(matches!(outcome, AddOutcome::Added));
+
+        let body = std::fs::read_to_string(&path).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let arr = v["suppressed_advisories"].as_array().unwrap();
+        assert!(arr[0].is_object());
+        assert_eq!(arr[0]["reason"].as_str(), Some("vendor will patch q4"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Catches mutants:
+    ///   src/baseline.rs:523:5 — replace `doc_kind -> &'static str` with `""`
+    ///   src/baseline.rs:523:5 — replace `doc_kind -> &'static str` with `"xyzzy"`
+    /// `doc_kind` feeds an error message when the baseline root isn't a
+    /// JSON object. Mutants make it return a fixed string regardless of
+    /// the actual JSON shape, so the error message becomes useless ("root
+    /// must be an object, found: xyzzy"). Pin the exact returned tag for
+    /// each Value variant. Tested via the public error path that calls it.
+    #[test]
+    fn add_suppression_full_error_names_actual_root_type() {
+        let dir = tempdir_unique("doc_kind_tag");
+        let path = dir.join("baseline.json");
+        // Write a baseline file whose root is a JSON array, not an object.
+        std::fs::write(&path, "[1, 2, 3]").unwrap();
+        let err = add_suppression_full(&path, "GHSA-z", None, None)
+            .unwrap_err()
+            .to_string();
+        // Must name the actual type. Under the empty-string mutant the
+        // message ends with "found: " (with nothing after); under the
+        // "xyzzy" mutant it ends with "found: xyzzy".
+        assert!(
+            err.contains("found: array"),
+            "doc_kind must return the literal variant tag; got error: {err}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Direct unit on `doc_kind` to nail down the full mapping, so the
+    /// per-Value-variant string is locked in code rather than only
+    /// exercised through one error path.
+    #[test]
+    fn doc_kind_maps_each_json_variant_to_its_label() {
+        assert_eq!(doc_kind(&json!(null)), "null");
+        assert_eq!(doc_kind(&json!(true)), "bool");
+        assert_eq!(doc_kind(&json!(1)), "number");
+        assert_eq!(doc_kind(&json!("s")), "string");
+        assert_eq!(doc_kind(&json!([1])), "array");
+        assert_eq!(doc_kind(&json!({"k": "v"})), "object");
+    }
 }
