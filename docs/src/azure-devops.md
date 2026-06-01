@@ -79,6 +79,88 @@ The full threat model and deployment guide live in
 The same logic ports to Vercel / Netlify / AWS Lambda — see
 [`vercel-equivalent.md`](https://github.com/Metbcy/bomdrift/blob/main/examples/azure-devops/comment-bridge/vercel-equivalent.md).
 
+## Input reference
+
+The example pipeline exposes optional template parameters that are
+forwarded to `bomdrift diff` as CLI flags. Override them at queue
+time (Run pipeline, Variables / Parameters dialog) or pin defaults
+by editing the `parameters:` block in the YAML; you can also wire a
+pipeline variable through a parameter for org-wide defaults. Unset
+parameters contribute zero CLI arguments, so the default invocation
+matches the bare v0.9 template exactly.
+
+This mirrors the [GitHub Action input
+surface](https://github.com/Metbcy/bomdrift/blob/main/action.yml);
+descriptions are abridged from `action.yml`.
+
+### VEX
+
+- `vex` (newline-separated paths to OpenVEX documents), each
+  forwarded as a repeated `--vex <path>`.
+- `emit_vex` (path), write a fresh OpenVEX document derived from
+  the diff (`--emit-vex <path>`).
+- `vex_author`, author identity recorded on emitted VEX
+  (`--vex-author <author>`).
+- `vex_default_justification`, default OpenVEX `not_affected`
+  justification (`--vex-default-justification <id>`).
+
+### License policy
+
+- `allow_licenses`, comma-separated SPDX expressions to allow
+  (`--allow-licenses`).
+- `deny_licenses`, comma-separated SPDX expressions to deny
+  (`--deny-licenses`).
+- `allow_exception`, SPDX exception identifiers to allow inside
+  `WITH` clauses (`--allow-exception`).
+- `deny_exception`, SPDX exception identifiers to deny
+  (`--deny-exception`).
+- `allow_ambiguous_licenses` (boolean), set to `true` to treat
+  unresolvable expressions as allowed
+  (`--allow-ambiguous-licenses`).
+
+### Enrichment toggles
+
+- `no_epss` (boolean), set to `true` to disable EPSS enrichment
+  (`--no-epss`).
+- `no_kev` (boolean), set to `true` to disable CISA KEV enrichment
+  (`--no-kev`).
+- `no_registry` (boolean), set to `true` to disable registry and
+  maintainer enrichment (`--no-registry`).
+- `fail_on_epss`, exit 2 when any new advisory has an EPSS score
+  at or above this threshold (0.0 to 1.0,
+  `--fail-on-epss <FLOAT>`).
+
+### Calibration
+
+- `recently_published_days`, window (days) for the
+  recently-published maintainer-age signal.
+- `typosquat_similarity_threshold`, Damerau-Levenshtein similarity
+  threshold (0.0 to 1.0).
+- `young_maintainer_days`, age threshold (days) below which a
+  maintainer is flagged as young.
+- `cache_ttl_hours`, TTL (hours) for the on-disk enrichment cache.
+- `multi_major_delta`, major-version delta at or above which a
+  version jump is flagged as multi-major (default 2, minimum 1).
+
+### Attestation
+
+- `before_attestation`, OCI reference for the cosign attestation
+  covering the before SBOM (`--before-attestation <oci-ref>`).
+- `after_attestation`, OCI reference for the after SBOM
+  (`--after-attestation <oci-ref>`).
+- `cosign_identity`, regex matched against the cosign certificate
+  identity (`--cosign-identity <regex>`).
+- `cosign_issuer`, OIDC issuer URL used for keyless cosign
+  verification (`--cosign-issuer <url>`).
+- `require_attestation` (boolean), set to `true` to fail the diff
+  when either side is missing a verified attestation
+  (`--require-attestation`).
+
+### Plugins
+
+- `plugin` (newline-separated paths to plugin manifests, i.e.
+  `plugin.toml`), each forwarded as a repeated `--plugin <path>`.
+
 ## Troubleshooting
 
 See [`examples/azure-devops/README.md`](https://github.com/Metbcy/bomdrift/blob/main/examples/azure-devops/README.md).

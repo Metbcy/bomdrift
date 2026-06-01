@@ -2,6 +2,46 @@
 #
 # Required variables:
 #   - BOMDRIFT_API_TOKEN: App Password with `pullrequest:write` scope.
+#
+# Optional repository / workspace variables (all default to empty / off,
+# in which case the diff invocation stays byte-identical to the v0.9
+# baseline). Each maps to a `bomdrift diff` CLI flag of the same name.
+#
+#   VEX:
+#     BOMDRIFT_VEX                          (newline-separated paths, repeated --vex)
+#     BOMDRIFT_EMIT_VEX                     (path)
+#     BOMDRIFT_VEX_AUTHOR                   (string)
+#     BOMDRIFT_VEX_DEFAULT_JUSTIFICATION    (string)
+#
+#   License policy:
+#     BOMDRIFT_ALLOW_LICENSES               (SPDX list)
+#     BOMDRIFT_DENY_LICENSES                (SPDX list)
+#     BOMDRIFT_ALLOW_EXCEPTION              (SPDX exception list)
+#     BOMDRIFT_DENY_EXCEPTION               (SPDX exception list)
+#     BOMDRIFT_ALLOW_AMBIGUOUS_LICENSES     ('true' to enable flag)
+#
+#   Enrichment toggles:
+#     BOMDRIFT_NO_EPSS                      ('true' to disable EPSS)
+#     BOMDRIFT_NO_KEV                       ('true' to disable KEV)
+#     BOMDRIFT_NO_REGISTRY                  ('true' to disable registry)
+#     BOMDRIFT_FAIL_ON_EPSS                 (float 0.0 to 1.0)
+#
+#   Calibration:
+#     BOMDRIFT_RECENTLY_PUBLISHED_DAYS      (integer)
+#     BOMDRIFT_TYPOSQUAT_SIMILARITY_THRESHOLD (float)
+#     BOMDRIFT_YOUNG_MAINTAINER_DAYS        (integer)
+#     BOMDRIFT_CACHE_TTL_HOURS              (integer)
+#     BOMDRIFT_MULTI_MAJOR_DELTA            (integer)
+#
+#   Attestation:
+#     BOMDRIFT_BEFORE_ATTESTATION           (OCI ref)
+#     BOMDRIFT_AFTER_ATTESTATION            (OCI ref)
+#     BOMDRIFT_COSIGN_IDENTITY              (regex)
+#     BOMDRIFT_COSIGN_ISSUER                (URL)
+#     BOMDRIFT_REQUIRE_ATTESTATION          ('true' to require)
+#
+#   Plugins:
+#     BOMDRIFT_PLUGIN                       (newline-separated paths, repeated --plugin)
 
 image: rust:1.88
 
@@ -20,7 +60,60 @@ definitions:
           - git worktree add ../before "origin/$BITBUCKET_PR_DESTINATION_BRANCH"
           - syft dir:../before -o cyclonedx-json=before.cdx.json
           - syft dir:. -o cyclonedx-json=after.cdx.json
-          - bomdrift diff before.cdx.json after.cdx.json --output markdown --platform bitbucket > comment.md
+          - |
+            # Build optional --flag args from BOMDRIFT_* repository variables.
+            # Empty / unset vars contribute zero args, so the default invocation
+            # stays byte-identical for users who set none of these.
+            args=()
+            add_value() {
+              # add_value <flag> <value>; emits nothing if value is empty.
+              if [ -n "$2" ]; then args+=("$1" "$2"); fi
+            }
+            add_bool() {
+              # add_bool <flag> <value>; emits flag only when value == 'true'.
+              if [ "$2" = "true" ]; then args+=("$1"); fi
+            }
+            add_list() {
+              # add_list <flag> <newline-separated-values>; emits a repeated
+              # <flag> <value> pair for each non-empty line.
+              if [ -z "$2" ]; then return 0; fi
+              while IFS= read -r _line; do
+                if [ -n "$_line" ]; then args+=("$1" "$_line"); fi
+              done <<EOF
+            $2
+            EOF
+            }
+            # VEX
+            add_list --vex "${BOMDRIFT_VEX:-}"
+            add_value --emit-vex "${BOMDRIFT_EMIT_VEX:-}"
+            add_value --vex-author "${BOMDRIFT_VEX_AUTHOR:-}"
+            add_value --vex-default-justification "${BOMDRIFT_VEX_DEFAULT_JUSTIFICATION:-}"
+            # License policy
+            add_value --allow-licenses "${BOMDRIFT_ALLOW_LICENSES:-}"
+            add_value --deny-licenses "${BOMDRIFT_DENY_LICENSES:-}"
+            add_value --allow-exception "${BOMDRIFT_ALLOW_EXCEPTION:-}"
+            add_value --deny-exception "${BOMDRIFT_DENY_EXCEPTION:-}"
+            add_bool  --allow-ambiguous-licenses "${BOMDRIFT_ALLOW_AMBIGUOUS_LICENSES:-}"
+            # Enrichment toggles
+            add_bool  --no-epss "${BOMDRIFT_NO_EPSS:-}"
+            add_bool  --no-kev "${BOMDRIFT_NO_KEV:-}"
+            add_bool  --no-registry "${BOMDRIFT_NO_REGISTRY:-}"
+            add_value --fail-on-epss "${BOMDRIFT_FAIL_ON_EPSS:-}"
+            # Calibration
+            add_value --recently-published-days "${BOMDRIFT_RECENTLY_PUBLISHED_DAYS:-}"
+            add_value --typosquat-similarity-threshold "${BOMDRIFT_TYPOSQUAT_SIMILARITY_THRESHOLD:-}"
+            add_value --young-maintainer-days "${BOMDRIFT_YOUNG_MAINTAINER_DAYS:-}"
+            add_value --cache-ttl-hours "${BOMDRIFT_CACHE_TTL_HOURS:-}"
+            add_value --multi-major-delta "${BOMDRIFT_MULTI_MAJOR_DELTA:-}"
+            # Attestation
+            add_value --before-attestation "${BOMDRIFT_BEFORE_ATTESTATION:-}"
+            add_value --after-attestation "${BOMDRIFT_AFTER_ATTESTATION:-}"
+            add_value --cosign-identity "${BOMDRIFT_COSIGN_IDENTITY:-}"
+            add_value --cosign-issuer "${BOMDRIFT_COSIGN_ISSUER:-}"
+            add_bool  --require-attestation "${BOMDRIFT_REQUIRE_ATTESTATION:-}"
+            # Plugins
+            add_list --plugin "${BOMDRIFT_PLUGIN:-}"
+            bomdrift diff before.cdx.json after.cdx.json --output markdown --platform bitbucket "${args[@]}" > comment.md
           - echo "" >> comment.md
           - echo "<!-- bomdrift:diff -->" >> comment.md
           - REPO="$BITBUCKET_REPO_FULL_NAME"
