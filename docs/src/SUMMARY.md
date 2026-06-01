@@ -48,5 +48,6 @@
 
 # Project
 
+- [What bomdrift catches that others miss](./comparison.md)
 - [Roadmap](./roadmap.md)
 
