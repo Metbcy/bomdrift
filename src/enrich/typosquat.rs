@@ -1185,7 +1185,9 @@ mod tests {
                 p.display()
             );
             assert_eq!(
-                p.parent().and_then(|d| d.file_name()).and_then(|s| s.to_str()),
+                p.parent()
+                    .and_then(|d| d.file_name())
+                    .and_then(|s| s.to_str()),
                 Some("typosquat"),
                 "path {} must sit under a 'typosquat' subdir",
                 p.display()
