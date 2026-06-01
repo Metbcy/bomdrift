@@ -508,6 +508,58 @@ invoke_on = ["removed"]
 
     #[cfg(unix)]
     #[test]
+    fn plugin_stdin_envelope_includes_protocol_version_1() {
+        // Regression guard: docs/src/plugins.md and the module preamble
+        // both promise plugins see `protocol_version: 1` on the wire so
+        // future bomdrift releases can detect old plugins. We have the
+        // constant (`PROTOCOL_VERSION`) and we serialize it into
+        // `PluginInput`, but nothing previously asserted it actually
+        // reaches the plugin's stdin. This test captures real stdin to a
+        // sibling file and greps it.
+        let dir = unique_dir("envelope");
+        std::fs::create_dir_all(&dir).unwrap();
+        let stdin_capture = dir.join("stdin.json");
+        let script_body = format!(
+            "#!/bin/sh\ncat > {capture}\necho '{{\"findings\":[]}}'\n",
+            capture = stdin_capture.display(),
+        );
+        let exec = write_script(&dir, "capture.sh", &script_body);
+        let manifest = PluginManifest {
+            name: "envelope".into(),
+            description: None,
+            exec,
+            timeout_ms: 5000,
+            invoke_on: vec![InvokeEvent::Added],
+            manifest_path: dir.clone(),
+        };
+        let cs = ChangeSet {
+            added: vec![comp("left-pad")],
+            ..Default::default()
+        };
+        let _ = run_plugins(std::slice::from_ref(&manifest), &cs);
+
+        let captured = std::fs::read_to_string(&stdin_capture)
+            .expect("plugin script should have captured stdin to the sibling file");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&captured).expect("plugin stdin must be a JSON object");
+        assert_eq!(
+            parsed.get("protocol_version").and_then(|v| v.as_u64()),
+            Some(1),
+            "plugin stdin must carry `protocol_version: 1`; got envelope:\n{captured}"
+        );
+        // The constant and the wire value must agree — if anyone bumps
+        // PROTOCOL_VERSION they have to update the docs + this test
+        // together.
+        assert_eq!(
+            parsed.get("protocol_version").and_then(|v| v.as_u64()),
+            Some(u64::from(PROTOCOL_VERSION)),
+            "wire `protocol_version` must equal the PROTOCOL_VERSION constant"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn plugin_invocation_returns_findings() {
         let dir = unique_dir("happy");
         let exec = write_script(
