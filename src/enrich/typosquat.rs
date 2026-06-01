@@ -1176,10 +1176,19 @@ mod tests {
             (SupportedEcosystem::Maven, "maven.txt"),
         ] {
             let p = default_cache_path(eco).expect("cache root resolves under test");
-            let s = p.to_string_lossy();
-            assert!(
-                s.ends_with(&format!("typosquat/{fname}")),
-                "path {s} must end with typosquat/{fname}"
+            // Compare via Path components so this test works on both
+            // Unix ("typosquat/npm.txt") and Windows ("typosquat\npm.txt").
+            assert_eq!(
+                p.file_name().and_then(|s| s.to_str()),
+                Some(fname),
+                "path {} must have filename {fname}",
+                p.display()
+            );
+            assert_eq!(
+                p.parent().and_then(|d| d.file_name()).and_then(|s| s.to_str()),
+                Some("typosquat"),
+                "path {} must sit under a 'typosquat' subdir",
+                p.display()
             );
         }
     }
