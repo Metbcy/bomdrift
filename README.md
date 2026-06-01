@@ -72,6 +72,8 @@ The dimensions adopters actually filter on. Correct as of v0.9.9.
 
 bomdrift fills a specific gap: a free, OSS-first, single-binary tool for the *diff-time* question. It's not a replacement for Snyk's scan-everything posture or Socket's SaaS UX — it's the right answer when you want supply-chain risk signals on PRs without paying for a vendor or running a dashboard. For reachability and tarball-behavior analysis, pair bomdrift with the tools called out in the [Pair with…](#pair-with) table.
 
+For a per-incident walk-through of which bomdrift signals would have fired (and which would not) on five published supply-chain incidents — xz-utils, event-stream, ua-parser-js, colors.js, node-ipc — see [**What bomdrift catches that others miss**](https://metbcy.github.io/bomdrift/comparison.html).
+
 ## Detailed install
 
 ### As a GitHub Action (zero-config, v0.5+)
