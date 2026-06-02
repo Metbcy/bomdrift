@@ -31,6 +31,16 @@ No test additions required. The diff engine's existing unit and property tests f
 
 The three unviable mutants were mutations that produced code that does not compile — they're excluded from the surviving denominator because the compiler itself rejects them before the test suite runs.
 
+### `src/vex/**` — v0.9.9 round 2
+
+- **Total mutants:** 97
+- **Caught:** 81
+- **Unviable:** 16
+- **Surviving:** 0
+- **Surviving rate:** 0 / 81 = **0.0%**
+- Date: 2026-06-01
+
+No test additions required. The VEX module's existing unit tests fully cover the mutation surface. Note the high unviable count (16): VEX has a lot of trait-object plumbing and serde glue where mutations produce code that does not compile (correctly excluded from the surviving-rate denominator).
 ### `src/baseline.rs` — v0.9.9 round 2
 
 - **Total mutants:** 54
