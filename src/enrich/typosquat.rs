@@ -1085,4 +1085,113 @@ mod tests {
             "lowering the threshold must not reduce findings"
         );
     }
+
+    // ---- Mutation-test gap closers (issue #35) ---------------------------
+
+    #[test]
+    fn maven_best_match_includes_distance_equal_to_max_levenshtein() {
+        // commons-lang3 (12 chars) vs commons-lng2 (11): Levenshtein = 2
+        // (delete 'a', substitute '3'->'2'). Exactly at MAVEN_MAX_LEVENSHTEIN.
+        // Guards line 371: changing `>` to `>=` would drop this finding.
+        let findings = enrich(&cs_added(vec![comp_eco(
+            "org.apache.commons:commons-lng2",
+            Ecosystem::Maven,
+        )]));
+        assert_eq!(
+            findings.len(),
+            1,
+            "dist == MAVEN_MAX_LEVENSHTEIN must still flag; got {findings:?}"
+        );
+        assert!(findings[0].closest.ends_with(":commons-lang3"));
+    }
+
+    #[test]
+    fn maven_best_match_picks_closest_when_multiple_candidates_within_distance() {
+        // Direct unit test of best_match_maven to pin the "closer wins"
+        // selection logic. Guards line 375 match guard (`true`/`false`
+        // stubs and `>=`->`<` swap all break this ordering).
+        //
+        // candidate "guavb" (5 chars):
+        //   vs "guava"   -> dist 1
+        //   vs "gauva"   -> dist 2
+        // Both are within MAVEN_MAX_LEVENSHTEIN=2 and the algorithm must
+        // pick "guava" (closer). Order legit so the farther match comes
+        // FIRST -- that way the `dist >= d` guard is the only thing that
+        // promotes the closer second entry.
+        let legit = vec![
+            "x.y:gauva".to_string(), // dist 2, seen first
+            "x.y:guava".to_string(), // dist 1, must win
+        ];
+        let got = best_match_maven("x.y:guavb", &legit, 0.0);
+        assert_eq!(
+            got.map(|(name, _)| name),
+            Some("x.y:guava"),
+            "closer match must beat earlier farther match"
+        );
+    }
+
+    #[test]
+    fn maven_best_match_score_formula_matches_one_minus_dist_over_len_plus_one() {
+        // Guards the arithmetic on lines 380-381:
+        //   denom = legit_artifact.len() + 1
+        //   raw   = 1.0 - dist / denom
+        // For artifact "guava" (5) with dist 1: denom = 6, raw = 1 - 1/6.
+        // Threshold pulled low so `.max(threshold)` does not clamp.
+        let legit = vec!["x.y:guava".to_string()];
+        let (name, score) = best_match_maven("x.y:guavb", &legit, 0.1)
+            .expect("guavb must match guava within Lev 2");
+        assert_eq!(name, "x.y:guava");
+        let expected = 1.0_f64 - 1.0 / 6.0;
+        assert!(
+            (score - expected).abs() < 1e-9,
+            "score {score} must equal 1 - 1/(len+1) = {expected}"
+        );
+    }
+
+    #[test]
+    fn suspicious_suffix_containment_requires_strict_delta_over_legit_len() {
+        // Guards line 416: `candidate.len() <= legit.len() + SUFFIX_BOOST_MIN_DELTA`.
+        // Boundary case: candidate length equals legit + delta exactly.
+        // SUFFIX_BOOST_MIN_DELTA = 3, so legit "crypto" (6) + 3 = 9.
+        // candidate "ab-crypto" (9 chars) must NOT be suspicious -- need
+        // strictly MORE than that delta.
+        assert!(
+            !has_suspicious_suffix_containment("ab-crypto", "crypto"),
+            "candidate at exactly len + delta is below the suspicion bar"
+        );
+        // One char over the boundary flips it on.
+        assert!(
+            has_suspicious_suffix_containment("abc-crypto", "crypto"),
+            "candidate at len + delta + 1 must trip the rule"
+        );
+    }
+
+    #[test]
+    fn default_cache_path_targets_typosquat_subdir_with_ecosystem_filename() {
+        // Guards line 471 return-value mutants (None / Some(Default::default())).
+        // The path must end with `typosquat/<eco>.txt`.
+        for (eco, fname) in [
+            (SupportedEcosystem::Npm, "npm.txt"),
+            (SupportedEcosystem::PyPI, "pypi.txt"),
+            (SupportedEcosystem::Maven, "maven.txt"),
+        ] {
+            let p = default_cache_path(eco).expect("cache root resolves under test");
+            // Compare via Path components so this test works on both
+            // Unix ("typosquat/npm.txt") and Windows ("typosquat\npm.txt").
+            assert_eq!(
+                p.file_name().and_then(|s| s.to_str()),
+                Some(fname),
+                "path {} must have filename {fname}",
+                p.display()
+            );
+            assert_eq!(
+                p.parent()
+                    .and_then(|d| d.file_name())
+                    .and_then(|s| s.to_str()),
+                Some("typosquat"),
+                "path {} must sit under a 'typosquat' subdir",
+                p.display()
+            );
+        }
+    }
 }
