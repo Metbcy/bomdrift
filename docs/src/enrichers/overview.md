@@ -15,7 +15,7 @@ without that enricher's findings.
 | [EPSS](./epss.md) | FIRST.org `/api/v1/epss` | yes | on | `--no-epss` | `--cache-ttl-hours`; `--fail-on-epss <0.0–1.0>` |
 | [CISA KEV](./kev.md) | CISA known-exploited catalog | yes | on | `--no-kev` | `--cache-ttl-hours`; `--fail-on kev` |
 | [Typosquat](./typosquat.md) | Embedded top-N lists, optional XDG cache | no | on | (none — pure compute) | `--typosquat-similarity-threshold` (v0.9.6) |
-| [Multi-major version jump](./version-jump.md) | The diff itself | no | on | (none — pure compute) | (hard-coded `MIN_MAJOR_DELTA = 2` — see chapter for rationale) |
+| [Multi-major version jump](./version-jump.md) | The diff itself | no | on | (none — pure compute) | `--multi-major-delta <N>` (v0.9.7; default 2) |
 | [Maintainer age](./maintainer-age.md) | GitHub REST `/repos/.../contributors` + `/commits` | yes | on | `--no-maintainer-age` | `--young-maintainer-days` (v0.9.6) |
 | [Registry metadata](./registry.md) | npm / PyPI / crates.io public APIs | yes | on (v0.9+) | `--no-registry` | `--recently-published-days`; `--cache-ttl-hours` |
 | [License policy](../license-policy.md) | SBOM `licenses` field + SPDX expression eval | no | on | (configured by allow/deny lists) | `--allow-licenses`, `--deny-licenses`, `--allow-exception`, `--deny-exception` |
