@@ -5,7 +5,30 @@ for added and version-bumped components, populating the **Vulnerabilities**
 section in the rendered output with advisory IDs (CVE, GHSA, MAL, etc.)
 and per-advisory severity.
 
-## Two-stage lookup
+## Why this signal
+
+Published advisories are the broadest supply-chain signal: a newly added
+or version-bumped dependency may pull in a known-vulnerable release. OSV
+unifies advisories across ecosystems, so a single lookup covers npm, PyPI,
+Cargo, Maven, and more.
+
+### Why OSV.dev specifically?
+
+- **Cross-ecosystem unification.** OSV merges npm advisories from GHSA,
+  PyPI advisories from PyPA, Cargo advisories from RustSec, Maven
+  advisories from GHSA, etc. into a single API, so bomdrift doesn't
+  need ecosystem-specific clients.
+- **Open API, no key required.** Every consumer of the `/v1/querybatch`
+  endpoint gets the same data without registration overhead.
+- **Public schema.** The response shape is documented at
+  [ossf.github.io/osv-schema/](https://ossf.github.io/osv-schema/), so
+  bomdrift can reason about the shape without depending on an API
+  client crate that drags in tokio.
+
+## Algorithm
+
+A two-stage lookup: a batched query for advisory IDs, then a per-id fetch
+for severity.
 
 ### Stage 1: `/v1/querybatch`
 
@@ -27,15 +50,53 @@ follow-up GET to populate severity. Severity is sourced (in order):
    across the OSV corpus.
 2. **Highest CVSS_V3 vector score** from the `severity[]` array, mapped
    to a label by the standard CVSS-v3 severity rating
-   (Critical ≥ 9.0, High ≥ 7.0, Medium ≥ 4.0, Low ≥ 0.1).
+   (Critical >= 9.0, High >= 7.0, Medium >= 4.0, Low >= 0.1).
 3. **`Severity::None`** when neither shape is present. These advisories
    render with a `none` severity label and don't trip
    `--fail-on critical-cve`.
 
-## On-disk severity cache
+## Threshold
 
-Stage-2 lookups are N+1 in the worst case — one query per unique
-advisory ID. bomdrift caches stage-2 responses on disk at
+OSV findings surface regardless of severity; the gate is `--fail-on`:
+
+| Threshold | Trips when... |
+|---|---|
+| `none` | Never. |
+| `cve` | Any vuln finding present (regardless of severity). |
+| `critical-cve` | Any finding with `severity >= High` (covers HIGH and CRITICAL). |
+| `typosquat` | Any typosquat finding; OSV findings do not trip it. |
+| `license-change` | Any same-version license change; OSV findings do not trip it. |
+| `any` | Any finding of any kind, plus license-changed-without-version-bump. |
+
+The `critical-cve` name covers HIGH-or-CRITICAL because CRITICAL alone
+is rare in the GHSA tagging and many actively-exploited advisories ship
+as HIGH. The threshold name stays stable; the threshold value covers
+the actionable bucket.
+
+## Output
+
+The enricher populates the **Vulnerabilities** section with advisory IDs
+(CVE, GHSA, MAL, etc.) and per-advisory severity across the markdown,
+terminal, JSON, and SARIF renderers. The [EPSS](./epss.md) and
+[CISA KEV](./kev.md) enrichers layer probability and exploitation badges
+onto the same advisories.
+
+## Network
+
+- **Source**: OSV.dev `/v1/querybatch` + `/v1/vulns/{id}`.
+- **Per-request timeout**: 15 seconds.
+- **No authentication**: both endpoints are unauthenticated public APIs.
+- **User-Agent**: `bomdrift/<version>` so the OSV team can attribute
+  traffic if needed.
+- **Failures warn and continue**: a network mishap (DNS, timeout, 5xx)
+  emits a single stderr warning and the diff renders without the
+  Vulnerabilities section. The exit code remains 0 unless `--fail-on`
+  was set and a previously-cached vuln tripped it.
+
+### On-disk severity cache
+
+Stage-2 lookups are N+1 in the worst case, one query per unique advisory
+ID. bomdrift caches stage-2 responses on disk at
 `<XDG_CACHE_HOME>/bomdrift/osv/<advisory_id>.json` with a 24h TTL.
 
 ```
@@ -55,7 +116,7 @@ Each cache file looks like:
 }
 ```
 
-### Cache behavior
+Cache behavior:
 
 - **Cache hits log nothing.** A successful 24h-fresh hit is silent.
 - **Cache misses are silent too.** Each miss issues a network fetch
@@ -71,21 +132,18 @@ Each cache file looks like:
   and stale-severity risk (a published severity correction after 24h
   is rare and the renderer's contract is "best effort").
 
-### `--no-osv-cache`
+Pass `--no-osv-cache` to force fresh fetches even within the 24h window
+(it costs N+1 fetches per run; use sparingly).
 
-For paranoid reruns where you want fresh fetches even within the 24h
-window:
+## Disabling
+
+`--no-osv` skips the entire OSV pipeline (both stages, no cache writes):
 
 ```bash
-bomdrift diff before.json after.json --no-osv-cache
+bomdrift diff before.json after.json --no-osv
 ```
 
-The cache itself is purely an optimization — the bypass flag always
-works, it just costs N+1 fetches per run. Use sparingly.
-
-## `--no-osv` (offline mode)
-
-Skip the entire OSV pipeline (both stages, no cache writes). Use for:
+Use for:
 
 - Tests and example scenarios where determinism matters more than
   freshness.
@@ -93,47 +151,15 @@ Skip the entire OSV pipeline (both stages, no cache writes). Use for:
 - Quick smoke tests of the change-shape signals without the network
   latency.
 
-```bash
-bomdrift diff before.json after.json --no-osv
-```
+## Calibration
 
-## Severity → `--fail-on` mapping
+- `--cache-ttl-hours <N>` (v0.9.6+) overrides the default 24h severity
+  cache TTL.
+- `--no-osv-cache` bypasses the on-disk severity cache for a run without
+  disabling the lookup itself.
 
-| Threshold | Trips when... |
-|---|---|
-| `none` | Never. |
-| `cve` | Any vuln finding present (regardless of severity). |
-| `critical-cve` | Any finding with `severity >= High` (covers HIGH and CRITICAL). |
-| `typosquat` | Any typosquat finding; OSV findings do not trip it. |
-| `license-change` | Any same-version license change; OSV findings do not trip it. |
-| `any` | Any finding of any kind, plus license-changed-without-version-bump. |
+## See also
 
-The `critical-cve` name covers HIGH-or-CRITICAL because CRITICAL alone
-is rare in the GHSA tagging and many actively-exploited advisories ship
-as HIGH. The threshold name stays stable; the threshold value covers
-the actionable bucket.
-
-## Network behavior
-
-- **Per-request timeout**: 15 seconds.
-- **No authentication**: OSV.dev's `/v1/querybatch` and `/v1/vulns/{id}`
-  endpoints are both unauthenticated public APIs.
-- **User-Agent**: `bomdrift/<version>` so the OSV team can attribute
-  traffic if needed.
-- **Failures warn and continue**: a network mishap (DNS, timeout, 5xx)
-  emits a single stderr warning and the diff renders without the
-  Vulnerabilities section. The exit code remains 0 unless `--fail-on`
-  was set and a previously-cached vuln tripped it.
-
-## Why OSV.dev specifically?
-
-- **Cross-ecosystem unification.** OSV merges npm advisories from GHSA,
-  PyPI advisories from PyPA, Cargo advisories from RustSec, Maven
-  advisories from GHSA, etc. into a single API, so bomdrift doesn't
-  need ecosystem-specific clients.
-- **Open API, no key required.** Every consumer of the `/v1/querybatch`
-  endpoint gets the same data without registration overhead.
-- **Public schema.** The response shape is documented at
-  [ossf.github.io/osv-schema/](https://ossf.github.io/osv-schema/), so
-  bomdrift can reason about the shape without depending on an API
-  client crate that drags in tokio.
+- [EPSS](./epss.md)
+- [CISA KEV](./kev.md)
+- [Enrichers overview](./overview.md)
