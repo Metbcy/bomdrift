@@ -243,3 +243,35 @@ prawn
 caxlsx
 roo
 pdf-reader
+
+# --- v0.10 top-up: security / supply-chain (source: rubygems.org top downloads) ---
+bundler-audit
+license_finder
+rbnacl
+ed25519
+net-ssh
+net-sftp
+
+# --- v0.10 top-up: CI / deployment (source: rubygems.org top downloads) ---
+capistrano
+capistrano-rails
+capistrano-bundler
+kamal
+overcommit
+guard
+guard-rspec
+rufus-scheduler
+whenever
+
+# --- v0.10 top-up: static typing / linting (source: rubygems.org top downloads) ---
+sorbet
+sorbet-runtime
+rbs
+standard
+
+# --- v0.10 top-up: observability / error tracking (source: rubygems.org top downloads) ---
+opentelemetry-sdk
+honeybadger
+rollbar
+appsignal
+ddtrace
